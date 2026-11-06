@@ -35,11 +35,7 @@ class PdfrxRenderingService implements PdfRenderingService {
     for (int i = 0; i < doc.pages.length; i++) {
       final p = doc.pages[i];
       descriptors.add(
-        PdfPageDescriptor(
-          pageIndex: i,
-          width: p.width,
-          height: p.height,
-        ),
+        PdfPageDescriptor(pageIndex: i, width: p.width, height: p.height),
       );
     }
     return PdfDocumentDescriptor(
@@ -56,11 +52,7 @@ class PdfrxRenderingService implements PdfRenderingService {
     for (int i = 0; i < doc.pages.length; i++) {
       final p = doc.pages[i];
       descriptors.add(
-        PdfPageDescriptor(
-          pageIndex: i,
-          width: p.width,
-          height: p.height,
-        ),
+        PdfPageDescriptor(pageIndex: i, width: p.width, height: p.height),
       );
     }
     return PdfDocumentDescriptor(
@@ -81,10 +73,7 @@ class PdfrxRenderingService implements PdfRenderingService {
     final targetWidth = (page.width * scale).round();
     final targetHeight = (page.height * scale).round();
 
-    final pageImg = await page.render(
-      width: targetWidth,
-      height: targetHeight,
-    );
+    final pageImg = await page.render(width: targetWidth, height: targetHeight);
     if (pageImg == null) return null;
 
     final uiImg = await pageImg.createImage();
@@ -104,10 +93,7 @@ class PdfrxRenderingService implements PdfRenderingService {
     final targetWidth = (page.width * scale).round();
     final targetHeight = (page.height * scale).round();
 
-    final pageImg = await page.render(
-      width: targetWidth,
-      height: targetHeight,
-    );
+    final pageImg = await page.render(width: targetWidth, height: targetHeight);
     if (pageImg == null) return null;
 
     final uiImg = await pageImg.createImage();

@@ -58,8 +58,8 @@ class PdfRepository {
     final title = (customTitle != null && customTitle.trim().isNotEmpty)
         ? customTitle.trim()
         : (p.basenameWithoutExtension(fileName).isNotEmpty
-            ? p.basenameWithoutExtension(fileName)
-            : 'Imported PDF');
+              ? p.basenameWithoutExtension(fileName)
+              : 'Imported PDF');
 
     await nodesDao.createNode(
       NodesCompanion.insert(
@@ -89,10 +89,12 @@ class PdfRepository {
 
     // 5. Create ink_documents container
     final inkDocId = 'inkdoc_$nodeId';
-    final firstPageWidth =
-        descriptor.pages.isNotEmpty ? descriptor.pages.first.width : 595.28;
-    final firstPageHeight =
-        descriptor.pages.isNotEmpty ? descriptor.pages.first.height : 841.89;
+    final firstPageWidth = descriptor.pages.isNotEmpty
+        ? descriptor.pages.first.width
+        : 595.28;
+    final firstPageHeight = descriptor.pages.isNotEmpty
+        ? descriptor.pages.first.height
+        : 841.89;
 
     await inkDao.createDocument(
       InkDocumentsCompanion.insert(

@@ -52,4 +52,3 @@ class InMemoryBlobStorageService implements BlobStorageService {
     return data.length;
   }
 }
-

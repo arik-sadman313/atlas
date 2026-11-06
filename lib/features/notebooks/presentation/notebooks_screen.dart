@@ -224,8 +224,7 @@ class NotebooksScreen extends ConsumerWidget {
                     child: AtlasEmptyState(
                       icon: Icons.menu_book_outlined,
                       title: 'No notebooks found',
-                      description:
-                          'Organize your sketches, study material, and handwritten notes or import PDFs to annotate.',
+                      description: 'Organize your sketches, study material, and handwritten notes or import PDFs to annotate.',
                       actionLabel: 'Create Notebook',
                       onAction: () => _showCreateNotebookDialog(context, ref),
                     ),

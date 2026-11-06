@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../core/database/app_database.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/storage/cas_storage_service.dart';
 import 'atlas_app.dart';
 import 'providers.dart';
@@ -34,13 +35,23 @@ Future<void> bootstrap() async {
   final database = AppDatabase();
 
   // 4. Ensure default workspace exists
-  await database.workspacesDao.getOrCreateDefaultWorkspace();
+  final defaultWs = await database.workspacesDao.getOrCreateDefaultWorkspace();
 
-  // 5. Build Riverpod container with initialized infrastructure singletons
+  // 5. Initialize Notifications & Reschedule Pending Reminders
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  await notificationService.reschedulePendingReminders(
+    tasksDao: database.tasksDao,
+    calendarDao: database.calendarDao,
+    workspaceId: defaultWs.id,
+  );
+
+  // 6. Build Riverpod container with initialized infrastructure singletons
   final container = ProviderContainer(
     overrides: [
       appDatabaseProvider.overrideWithValue(database),
       blobStorageServiceProvider.overrideWithValue(blobStorage),
+      notificationServiceProvider.overrideWithValue(notificationService),
     ],
   );
 

@@ -101,12 +101,15 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
     int targetPageNumber,
     InkPagesCompanion newPage,
   ) async {
-    final existingPages = await (select(inkPages)
-          ..where((tbl) =>
-              tbl.documentId.equals(documentId) &
-              tbl.pageNumber.isBiggerOrEqualValue(targetPageNumber))
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.pageNumber)]))
-        .get();
+    final existingPages =
+        await (select(inkPages)
+              ..where(
+                (tbl) =>
+                    tbl.documentId.equals(documentId) &
+                    tbl.pageNumber.isBiggerOrEqualValue(targetPageNumber),
+              )
+              ..orderBy([(tbl) => OrderingTerm.desc(tbl.pageNumber)]))
+            .get();
 
     for (final page in existingPages) {
       await (update(inkPages)..where((tbl) => tbl.id.equals(page.id))).write(
@@ -127,12 +130,15 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
 
     await (delete(inkPages)..where((tbl) => tbl.id.equals(pageId))).go();
 
-    final subsequentPages = await (select(inkPages)
-          ..where((tbl) =>
-              tbl.documentId.equals(page.documentId) &
-              tbl.pageNumber.isBiggerThanValue(page.pageNumber))
-          ..orderBy([(tbl) => OrderingTerm.asc(tbl.pageNumber)]))
-        .get();
+    final subsequentPages =
+        await (select(inkPages)
+              ..where(
+                (tbl) =>
+                    tbl.documentId.equals(page.documentId) &
+                    tbl.pageNumber.isBiggerThanValue(page.pageNumber),
+              )
+              ..orderBy([(tbl) => OrderingTerm.asc(tbl.pageNumber)]))
+            .get();
 
     for (final p in subsequentPages) {
       await (update(inkPages)..where((tbl) => tbl.id.equals(p.id))).write(
@@ -199,18 +205,21 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
   }
 
   Future<PdfDocumentEntry?> getPdfDocument(String id) {
-    return (select(pdfDocuments)..where((tbl) => tbl.id.equals(id)))
-        .getSingleOrNull();
+    return (select(
+      pdfDocuments,
+    )..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
   }
 
   Future<PdfDocumentEntry?> getPdfDocumentForNode(String nodeId) {
-    return (select(pdfDocuments)..where((tbl) => tbl.nodeId.equals(nodeId)))
-        .getSingleOrNull();
+    return (select(
+      pdfDocuments,
+    )..where((tbl) => tbl.nodeId.equals(nodeId))).getSingleOrNull();
   }
 
   Future<PdfDocumentEntry?> getPdfDocumentByCasHash(String casHash) {
-    return (select(pdfDocuments)..where((tbl) => tbl.casHash.equals(casHash)))
-        .getSingleOrNull();
+    return (select(
+      pdfDocuments,
+    )..where((tbl) => tbl.casHash.equals(casHash))).getSingleOrNull();
   }
 
   Future<int> deletePdfDocument(String id) {

@@ -25,10 +25,8 @@ class WikiLinkDialog extends ConsumerStatefulWidget {
   }) {
     return showDialog<String>(
       context: context,
-      builder: (ctx) => WikiLinkDialog(
-        workspaceId: workspaceId,
-        initialQuery: initialQuery,
-      ),
+      builder: (ctx) =>
+          WikiLinkDialog(workspaceId: workspaceId, initialQuery: initialQuery),
     );
   }
 
@@ -65,7 +63,9 @@ class _WikiLinkDialogState extends ConsumerState<WikiLinkDialog> {
     if (trimmed.isEmpty) {
       // Default: fetch recent nodes
       final nodesDao = ref.read(nodesDaoProvider);
-      matches = await nodesDao.watchRecentNodes(widget.workspaceId, limit: 15).first;
+      matches = await nodesDao
+          .watchRecentNodes(widget.workspaceId, limit: 15)
+          .first;
     } else {
       matches = await linkRepo.searchTargets(widget.workspaceId, trimmed);
     }
@@ -93,7 +93,9 @@ class _WikiLinkDialogState extends ConsumerState<WikiLinkDialog> {
     final trimmedQuery = _searchController.text.trim();
 
     return AlertDialog(
-      backgroundColor: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
         side: BorderSide(
@@ -101,15 +103,17 @@ class _WikiLinkDialogState extends ConsumerState<WikiLinkDialog> {
           width: 1.0,
         ),
       ),
-      titlePadding: const EdgeInsets.fromLTRB(AtlasSpacing.lg, AtlasSpacing.lg, AtlasSpacing.lg, AtlasSpacing.sm),
+      titlePadding: const EdgeInsets.fromLTRB(
+        AtlasSpacing.lg,
+        AtlasSpacing.lg,
+        AtlasSpacing.lg,
+        AtlasSpacing.sm,
+      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: AtlasSpacing.lg),
       actionsPadding: const EdgeInsets.all(AtlasSpacing.md),
       title: const Row(
         children: [
-          Icon(
-            Icons.link_rounded,
-            color: AtlasColors.accentBlue,
-          ),
+          Icon(Icons.link_rounded, color: AtlasColors.accentBlue),
           SizedBox(width: AtlasSpacing.sm),
           Text(
             'Insert Wiki-Link',
@@ -184,97 +188,100 @@ class _WikiLinkDialogState extends ConsumerState<WikiLinkDialog> {
                       ),
                     )
                   : _results.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(vertical: AtlasSpacing.md),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                trimmedQuery.isEmpty
-                                    ? 'No notes found in workspace'
-                                    : 'No existing note named "$trimmedQuery"',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: isDark
-                                      ? AtlasColors.darkTextSecondary
-                                      : AtlasColors.lightTextSecondary,
-                                ),
-                              ),
-                              if (trimmedQuery.isNotEmpty) ...[
-                                const SizedBox(height: AtlasSpacing.sm),
-                                TextButton.icon(
-                                  onPressed: () => _submitSelection(trimmedQuery),
-                                  icon: const Icon(Icons.add_link, size: 18),
-                                  label: Text('Link to "[[$trimmedQuery]]" anyway'),
-                                ),
-                              ],
-                            ],
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AtlasSpacing.md,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            trimmedQuery.isEmpty
+                                ? 'No notes found in workspace'
+                                : 'No existing note named "$trimmedQuery"',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: isDark
+                                  ? AtlasColors.darkTextSecondary
+                                  : AtlasColors.lightTextSecondary,
+                            ),
                           ),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: _results.length,
-                          separatorBuilder: (context, index) => Divider(
-                            height: 1,
-                            thickness: 0.5,
-                            color: isDark
-                                ? AtlasColors.darkBorder
-                                : AtlasColors.lightBorder,
-                          ),
-                          itemBuilder: (context, index) {
-                            final node = _results[index];
-                            final isNotebook = node.type == 'notebook';
+                          if (trimmedQuery.isNotEmpty) ...[
+                            const SizedBox(height: AtlasSpacing.sm),
+                            TextButton.icon(
+                              onPressed: () => _submitSelection(trimmedQuery),
+                              icon: const Icon(Icons.add_link, size: 18),
+                              label: Text('Link to "[[$trimmedQuery]]" anyway'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _results.length,
+                      separatorBuilder: (context, index) => Divider(
+                        height: 1,
+                        thickness: 0.5,
+                        color: isDark
+                            ? AtlasColors.darkBorder
+                            : AtlasColors.lightBorder,
+                      ),
+                      itemBuilder: (context, index) {
+                        final node = _results[index];
+                        final isNotebook = node.type == 'notebook';
 
-                            return Material(
-                              type: MaterialType.transparency,
-                              child: ListTile(
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: AtlasSpacing.sm,
-                                  vertical: 2,
-                                ),
-                                leading: Icon(
-                                  isNotebook
-                                      ? Icons.draw_outlined
-                                      : Icons.description_outlined,
-                                  size: 18,
-                                  color: isNotebook
-                                      ? Colors.purpleAccent
-                                      : AtlasColors.accentBlue,
-                                ),
-                                title: Text(
-                                  node.title,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                trailing: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: (isNotebook
+                        return Material(
+                          type: MaterialType.transparency,
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: AtlasSpacing.sm,
+                              vertical: 2,
+                            ),
+                            leading: Icon(
+                              isNotebook
+                                  ? Icons.draw_outlined
+                                  : Icons.description_outlined,
+                              size: 18,
+                              color: isNotebook
+                                  ? Colors.purpleAccent
+                                  : AtlasColors.accentBlue,
+                            ),
+                            title: Text(
+                              node.title,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                    (isNotebook
                                             ? Colors.purple
                                             : AtlasColors.accentBlue)
                                         .withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    isNotebook ? 'Notebook' : 'Document',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: isNotebook
-                                          ? Colors.purple
-                                          : AtlasColors.accentBlue,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                onTap: () => _submitSelection(node.title),
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                            );
-                          },
-                        ),
+                              child: Text(
+                                isNotebook ? 'Notebook' : 'Document',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isNotebook
+                                      ? Colors.purple
+                                      : AtlasColors.accentBlue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            onTap: () => _submitSelection(node.title),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

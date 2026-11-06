@@ -38,68 +38,73 @@ void main() {
       }
     });
 
-    test('renderCompositePageImage rasterizes page and stationery to PNG bytes',
-        () async {
-      final now = DateTime.now();
-      final page = InkPageEntry(
-        id: 'test-page-1',
-        documentId: 'test-doc-1',
-        pageNumber: 1,
-        width: 400.0,
-        height: 600.0,
-        templateType: 'ruled',
-        templateSpacing: 28.35,
-        backgroundColor: 0xFFFFFFFF,
-        createdAt: now,
-        updatedAt: now,
-      );
+    test(
+      'renderCompositePageImage rasterizes page and stationery to PNG bytes',
+      () async {
+        final now = DateTime.now();
+        final page = InkPageEntry(
+          id: 'test-page-1',
+          documentId: 'test-doc-1',
+          pageNumber: 1,
+          width: 400.0,
+          height: 600.0,
+          templateType: 'ruled',
+          templateSpacing: 28.35,
+          backgroundColor: 0xFFFFFFFF,
+          createdAt: now,
+          updatedAt: now,
+        );
 
-      final inkDoc = AtlasInkDocument.empty(
-        documentId: 'test-doc-1',
-        pageNumber: 1,
-        width: 400.0,
-        height: 600.0,
-      );
+        final inkDoc = AtlasInkDocument.empty(
+          documentId: 'test-doc-1',
+          pageNumber: 1,
+          width: 400.0,
+          height: 600.0,
+        );
 
-      final pngBytes = await PdfExportService.renderCompositePageImage(
-        page: page,
-        inkDoc: inkDoc,
-        scale: 1.0,
-      );
+        final pngBytes = await PdfExportService.renderCompositePageImage(
+          page: page,
+          inkDoc: inkDoc,
+          scale: 1.0,
+        );
 
-      expect(pngBytes, isNotNull);
-      expect(pngBytes.isNotEmpty, isTrue);
-      // Verify PNG header bytes: 0x89, 'P', 'N', 'G'
-      expect(pngBytes[0], 0x89);
-      expect(pngBytes[1], 0x50);
-      expect(pngBytes[2], 0x4E);
-      expect(pngBytes[3], 0x47);
-    });
+        expect(pngBytes, isNotNull);
+        expect(pngBytes.isNotEmpty, isTrue);
+        // Verify PNG header bytes: 0x89, 'P', 'N', 'G'
+        expect(pngBytes[0], 0x89);
+        expect(pngBytes[1], 0x50);
+        expect(pngBytes[2], 0x4E);
+        expect(pngBytes[3], 0x47);
+      },
+    );
 
-    test('exportNotebookPagesToPdf compiles multi-page document into valid PDF binary',
-        () async {
+    test('exportNotebookPagesToPdf compiles multi-page document into valid PDF binary', () async {
       final now = DateTime.now();
 
       // Create workspace and node
-      await database.into(database.workspaces).insert(
-        WorkspacesCompanion.insert(
-          id: 'ws-exp',
-          name: 'Workspace Export',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-exp',
+              name: 'Workspace Export',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'node-exp',
-          workspaceId: 'ws-exp',
-          type: 'notebook',
-          title: 'Export Notebook',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'node-exp',
+              workspaceId: 'ws-exp',
+              type: 'notebook',
+              title: 'Export Notebook',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
       final docId = 'doc-exp';
       await database.inkDao.createDocument(
@@ -156,29 +161,32 @@ void main() {
       expect(header, '%PDF-');
     });
 
-    test('PdfExportService instance method exports notebook to file',
-        () async {
+    test('PdfExportService instance method exports notebook to file', () async {
       final now = DateTime.now();
 
-      await database.into(database.workspaces).insert(
-        WorkspacesCompanion.insert(
-          id: 'ws-inst',
-          name: 'Workspace Instance',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-inst',
+              name: 'Workspace Instance',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'node-inst',
-          workspaceId: 'ws-inst',
-          type: 'notebook',
-          title: 'Exported Notebook',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'node-inst',
+              workspaceId: 'ws-inst',
+              type: 'notebook',
+              title: 'Exported Notebook',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
       final docId = 'doc-inst';
       await database.inkDao.createDocument(

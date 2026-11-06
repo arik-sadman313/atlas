@@ -87,7 +87,9 @@ class WikiLinkParser {
     final lastDoubleBracket = textBeforeCursor.lastIndexOf('[[');
     if (lastDoubleBracket == -1) return null;
 
-    final afterDoubleBracket = textBeforeCursor.substring(lastDoubleBracket + 2);
+    final afterDoubleBracket = textBeforeCursor.substring(
+      lastDoubleBracket + 2,
+    );
     // If there is a closing bracket or newline between [[ and cursor, it's closed or invalid
     if (afterDoubleBracket.contains(']]') ||
         afterDoubleBracket.contains('\n') ||

@@ -19,6 +19,8 @@
 - [ADR-015: Offscreen Multiply Compositing for Multi-Layer Highlighters](#adr-015-offscreen-multiply-compositing-for-multi-layer-highlighters)
 - [ADR-016: Bidirectional Portable-to-PencilKit Reconstruction & Autosave Navigation Lock](#adr-016-bidirectional-portable-to-pencilkit-reconstruction--autosave-navigation-lock)
 - [ADR-017: Selection of flutter_quill over appflowy_editor for Milestone 3](#adr-017-selection-of-flutter_quill-over-appflowy_editor-for-milestone-3)
+- [ADR-018: Selection of pdfrx, pdf, and file_picker for PDF Rendering, Annotation, and Export](#adr-018-selection-of-pdfrx-pdf-and-file_picker-for-pdf-rendering-annotation-and-export)
+- [ADR-019: Adoption of table_calendar, flutter_local_notifications, and rxdart for Tasks, Calendar & Reminders](#adr-019-adoption-of-table_calendar-flutter_local_notifications-and-rxdart-for-tasks-calendar--reminders)
 
 ---
 
@@ -271,6 +273,30 @@
   - (+) 1:1 point coordinate mapping: PDF point coordinates match the Atlas ink canvas coordinates ($1.0\text{ canvas unit} = 1.0\text{ PDF point}$).
   - (+) Supports both interactive drawing on desktop/iPadOS and read-only viewing on Android companion.
   - (+) Clean multi-page PDF generation without external native command-line dependencies.
+
+---
+
+### ADR-019: Adoption of `table_calendar`, `flutter_local_notifications`, and `rxdart` for Tasks, Calendar & Reminders
+
+- **Date:** 2026-11-06
+- **Status:** Accepted
+- **Context:** Milestone 5 requires a unified productivity system spanning task management, project categorization, subtask hierarchies, bidirectional note linking, a multi-format calendar view, and local reminder notifications across Linux desktop, iPadOS, and Android companion.
+  - Candidate Evaluation for Calendar:
+    - Candidate A (`table_calendar: ^3.3.0`, Apache-2.0): Highly customizable calendar widget supporting month, 2-week, and week formats, custom cell builders, marker loading, and gesture navigation. Zero AGPL dependencies. Selected.
+  - Candidate Evaluation for Notifications:
+    - Candidate A (`flutter_local_notifications: ^23.0.0`, BSD-3-Clause) + `timezone: ^0.11.2`: Robust cross-platform support. Supports Linux desktop via DBus desktop notification daemons (`defaultActionName`), Android with exact alarms and Java 8 desugaring, and iOS/iPadOS with `UNUserNotificationCenter`. Selected.
+  - Candidate Evaluation for Stream Merging:
+    - Candidate A (`rxdart: ^0.28.0`, Apache-2.0): Combines reactive streams (`Rx.combineLatest2`) across calendar events and due tasks into sorted daily agenda items.
+- **Decision:**
+  - Adopt `table_calendar: ^3.3.0` for `CalendarScreen`.
+  - Adopt `flutter_local_notifications: ^23.0.0` wrapped behind `NotificationService` abstraction.
+  - Adopt `rxdart: ^0.28.0` for reactive stream combining in `CalendarRepository`.
+  - Preclude external calendar synchronization (Google/CalDAV/Outlook), cloud push notifications, and Kanban drag-and-drop boards per strict scope boundaries.
+- **Consequences:**
+  - (+) 100% adherence to engineering directive: Mature software reused, zero custom math engines or notification bridges built from scratch.
+  - (+) Fully local-first and privacy-respecting: Operates 100% offline without external server dependencies.
+  - (+) High resilience: `NotificationService` features graceful degradation when notification daemons or permissions are unavailable, and runs reconciliation on startup via `bootstrap.dart`.
+
 
 
 

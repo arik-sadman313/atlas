@@ -63,9 +63,7 @@ void main() {
       required void Function(int, String) onChangeTemplate,
     }) {
       return ProviderScope(
-        overrides: [
-          blobStorageServiceProvider.overrideWithValue(storage),
-        ],
+        overrides: [blobStorageServiceProvider.overrideWithValue(storage)],
         child: MaterialApp(
           home: Scaffold(
             body: NotebookPageDrawer(
@@ -84,8 +82,9 @@ void main() {
       );
     }
 
-    testWidgets('renders drawer header, pages list, and add page action',
-        (tester) async {
+    testWidgets('renders drawer header, pages list, and add page action', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         buildDrawer(
           currentPageIndex: 0,
@@ -109,8 +108,9 @@ void main() {
       expect(find.text('Page 2'), findsOneWidget);
     });
 
-    testWidgets('tapping page item calls onPageSelected callback',
-        (tester) async {
+    testWidgets('tapping page item calls onPageSelected callback', (
+      tester,
+    ) async {
       int? selectedIndex;
 
       await tester.pumpWidget(
@@ -133,8 +133,9 @@ void main() {
       expect(selectedIndex, 1);
     });
 
-    testWidgets('tapping add page button invokes onAddPage callback',
-        (tester) async {
+    testWidgets('tapping add page button invokes onAddPage callback', (
+      tester,
+    ) async {
       bool addPageCalled = false;
 
       await tester.pumpWidget(
@@ -158,8 +159,7 @@ void main() {
       expect(addPageCalled, isTrue);
     });
 
-    testWidgets('opening page options menu shows action items',
-        (tester) async {
+    testWidgets('opening page options menu shows action items', (tester) async {
       int? insertBelowIndex;
 
       await tester.pumpWidget(

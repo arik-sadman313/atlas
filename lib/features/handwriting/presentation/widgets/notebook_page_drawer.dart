@@ -39,8 +39,9 @@ class NotebookPageDrawer extends ConsumerWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Drawer(
-      backgroundColor:
-          isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
       elevation: 4,
       width: 320,
       child: SafeArea(
@@ -178,15 +179,12 @@ class _PageThumbnailCard extends ConsumerWidget {
     return Material(
       color: isCurrent
           ? (isDark
-              ? AtlasColors.accentBlueSubtle.withValues(alpha: 0.15)
-              : AtlasColors.accentBlueSubtle.withValues(alpha: 0.25))
+                ? AtlasColors.accentBlueSubtle.withValues(alpha: 0.15)
+                : AtlasColors.accentBlueSubtle.withValues(alpha: 0.25))
           : (isDark ? AtlasColors.darkBg : AtlasColors.lightBg),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
-        side: BorderSide(
-          color: borderColor,
-          width: isCurrent ? 2.0 : 1.0,
-        ),
+        side: BorderSide(color: borderColor, width: isCurrent ? 2.0 : 1.0),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -210,8 +208,7 @@ class _PageThumbnailCard extends ConsumerWidget {
                 child: ClipRect(
                   child: page.previewPngHash != null
                       ? FutureBuilder<Uint8List>(
-                          future:
-                              blobStorage.readBlob(page.previewPngHash!),
+                          future: blobStorage.readBlob(page.previewPngHash!),
                           builder: (context, snapshot) {
                             if (snapshot.hasData) {
                               return Image.memory(
@@ -235,8 +232,9 @@ class _PageThumbnailCard extends ConsumerWidget {
                     Text(
                       'Page ${index + 1}',
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.w500,
+                        fontWeight: isCurrent
+                            ? FontWeight.bold
+                            : FontWeight.w500,
                         color: isCurrent ? AtlasColors.accentBlue : null,
                       ),
                     ),
@@ -350,8 +348,11 @@ class _PageThumbnailCard extends ConsumerWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline,
-                              size: 16, color: Colors.red),
+                          Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: Colors.red,
+                          ),
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -375,11 +376,7 @@ class _PageThumbnailCard extends ConsumerWidget {
   Widget _buildPatternThumbnail() {
     if (isPdf) {
       return const Center(
-        child: Icon(
-          Icons.picture_as_pdf,
-          size: 24,
-          color: Colors.redAccent,
-        ),
+        child: Icon(Icons.picture_as_pdf, size: 24, color: Colors.redAccent),
       );
     }
     return CustomPaint(

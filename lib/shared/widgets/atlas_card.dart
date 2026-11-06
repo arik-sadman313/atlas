@@ -48,10 +48,7 @@ class AtlasCard extends StatelessWidget {
         hoverColor: isDark
             ? AtlasColors.darkElevated.withValues(alpha: 0.5)
             : AtlasColors.lightElevated,
-        child: Padding(
-          padding: padding,
-          child: child,
-        ),
+        child: Padding(padding: padding, child: child),
       ),
     );
   }

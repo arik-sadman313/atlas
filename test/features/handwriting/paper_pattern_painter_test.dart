@@ -83,41 +83,44 @@ void main() {
       expect(picture, isNotNull);
     });
 
-    test('shouldRepaint detects changes in template, background color, or spacing', () {
-      final painter1 = PaperPatternPainter(
-        template: 'ruled',
-        backgroundColor: const Color(0xFFFFFFFF),
-        spacing: 28.35,
-      );
+    test(
+      'shouldRepaint detects changes in template, background color, or spacing',
+      () {
+        final painter1 = PaperPatternPainter(
+          template: 'ruled',
+          backgroundColor: const Color(0xFFFFFFFF),
+          spacing: 28.35,
+        );
 
-      final painter2 = PaperPatternPainter(
-        template: 'ruled',
-        backgroundColor: const Color(0xFFFFFFFF),
-        spacing: 28.35,
-      );
+        final painter2 = PaperPatternPainter(
+          template: 'ruled',
+          backgroundColor: const Color(0xFFFFFFFF),
+          spacing: 28.35,
+        );
 
-      final painter3 = PaperPatternPainter(
-        template: 'grid',
-        backgroundColor: const Color(0xFFFFFFFF),
-        spacing: 28.35,
-      );
+        final painter3 = PaperPatternPainter(
+          template: 'grid',
+          backgroundColor: const Color(0xFFFFFFFF),
+          spacing: 28.35,
+        );
 
-      final painter4 = PaperPatternPainter(
-        template: 'ruled',
-        backgroundColor: const Color(0xFF000000),
-        spacing: 28.35,
-      );
+        final painter4 = PaperPatternPainter(
+          template: 'ruled',
+          backgroundColor: const Color(0xFF000000),
+          spacing: 28.35,
+        );
 
-      final painter5 = PaperPatternPainter(
-        template: 'ruled',
-        backgroundColor: const Color(0xFFFFFFFF),
-        spacing: 40.0,
-      );
+        final painter5 = PaperPatternPainter(
+          template: 'ruled',
+          backgroundColor: const Color(0xFFFFFFFF),
+          spacing: 40.0,
+        );
 
-      expect(painter1.shouldRepaint(painter2), isFalse);
-      expect(painter1.shouldRepaint(painter3), isTrue);
-      expect(painter1.shouldRepaint(painter4), isTrue);
-      expect(painter1.shouldRepaint(painter5), isTrue);
-    });
+        expect(painter1.shouldRepaint(painter2), isFalse);
+        expect(painter1.shouldRepaint(painter3), isTrue);
+        expect(painter1.shouldRepaint(painter4), isTrue);
+        expect(painter1.shouldRepaint(painter5), isTrue);
+      },
+    );
   });
 }

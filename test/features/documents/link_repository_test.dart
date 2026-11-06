@@ -22,47 +22,55 @@ void main() {
     test('syncLinksFromText creates links for existing target nodes only', () async {
       final now = DateTime.now();
 
-      await database.into(database.workspaces).insert(
-        WorkspacesCompanion.insert(
-          id: 'ws-main',
-          name: 'Main Workspace',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-main',
+              name: 'Main Workspace',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-source',
-          workspaceId: 'ws-main',
-          type: 'document',
-          title: 'Source Document',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-source',
+              workspaceId: 'ws-main',
+              type: 'document',
+              title: 'Source Document',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-target-1',
-          workspaceId: 'ws-main',
-          type: 'document',
-          title: 'Meeting Notes',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-target-1',
+              workspaceId: 'ws-main',
+              type: 'document',
+              title: 'Meeting Notes',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'nb-target-2',
-          workspaceId: 'ws-main',
-          type: 'notebook',
-          title: 'Sketches',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'nb-target-2',
+              workspaceId: 'ws-main',
+              type: 'notebook',
+              title: 'Sketches',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
       // Text references doc-target-1, nb-target-2, and an uncreated note "Future Ideas", plus a self-reference "Source Document"
       const text =
@@ -81,7 +89,9 @@ void main() {
       final targetIds = links.map((l) => l.targetNodeId).toSet();
       expect(targetIds, {'doc-target-1', 'nb-target-2'});
 
-      final sketchesLink = links.firstWhere((l) => l.targetNodeId == 'nb-target-2');
+      final sketchesLink = links.firstWhere(
+        (l) => l.targetNodeId == 'nb-target-2',
+      );
       expect(sketchesLink.linkText, 'Handwritten Wireframes');
 
       // Now verify backlinks query
@@ -95,47 +105,55 @@ void main() {
     test('syncLinks replaces previous links with updated links', () async {
       final now = DateTime.now();
 
-      await database.into(database.workspaces).insert(
-        WorkspacesCompanion.insert(
-          id: 'ws-main',
-          name: 'Main Workspace',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-main',
+              name: 'Main Workspace',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-source',
-          workspaceId: 'ws-main',
-          type: 'document',
-          title: 'Source Document',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-source',
+              workspaceId: 'ws-main',
+              type: 'document',
+              title: 'Source Document',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-target-1',
-          workspaceId: 'ws-main',
-          type: 'document',
-          title: 'Topic A',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-target-1',
+              workspaceId: 'ws-main',
+              type: 'document',
+              title: 'Topic A',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-target-2',
-          workspaceId: 'ws-main',
-          type: 'document',
-          title: 'Topic B',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-target-2',
+              workspaceId: 'ws-main',
+              type: 'document',
+              title: 'Topic B',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
       // First sync references Topic A
       await repository.syncLinksFromText(

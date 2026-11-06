@@ -18,17 +18,31 @@ void main() {
       // Test point coordinate scaling (1.0 pt = 1/72 inch)
       const double testCanvasX = 100.0;
       const double testCanvasY = 200.0;
-      expect(page.width * (testCanvasX / page.width), closeTo(testCanvasX, 0.0001));
-      expect(page.height * (testCanvasY / page.height), closeTo(testCanvasY, 0.0001));
+      expect(
+        page.width * (testCanvasX / page.width),
+        closeTo(testCanvasX, 0.0001),
+      );
+      expect(
+        page.height * (testCanvasY / page.height),
+        closeTo(testCanvasY, 0.0001),
+      );
     });
 
     test('PdfDocumentDescriptor creates descriptor with multiple pages', () {
       final doc = PdfDocumentDescriptor(
         pageCount: 3,
         pages: const [
-          PdfPageDescriptor(pageIndex: 0, width: 612.0, height: 792.0), // US Letter
+          PdfPageDescriptor(
+            pageIndex: 0,
+            width: 612.0,
+            height: 792.0,
+          ), // US Letter
           PdfPageDescriptor(pageIndex: 1, width: 612.0, height: 792.0),
-          PdfPageDescriptor(pageIndex: 2, width: 792.0, height: 612.0), // Landscape
+          PdfPageDescriptor(
+            pageIndex: 2,
+            width: 792.0,
+            height: 612.0,
+          ), // Landscape
         ],
       );
 

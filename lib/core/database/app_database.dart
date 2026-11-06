@@ -3,18 +3,23 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 
 import 'connection/connection.dart' as impl;
+import 'daos/calendar_dao.dart';
 import 'daos/ink_dao.dart';
 import 'daos/links_dao.dart';
 import 'daos/nodes_dao.dart';
+import 'daos/tasks_dao.dart';
 import 'daos/workspaces_dao.dart';
 import 'tables/attachments_table.dart';
+import 'tables/calendar_events_table.dart';
 import 'tables/ink_documents_table.dart';
 import 'tables/ink_pages_table.dart';
 import 'tables/node_blocks_table.dart';
 import 'tables/node_links_table.dart';
 import 'tables/nodes_table.dart';
 import 'tables/pdf_documents_table.dart';
+import 'tables/projects_table.dart';
 import 'tables/tags_table.dart';
+import 'tables/tasks_table.dart';
 import 'tables/workspaces_table.dart';
 
 part 'app_database.g.dart';
@@ -31,8 +36,11 @@ part 'app_database.g.dart';
     NodeLinks,
     Tags,
     NodeTags,
+    Projects,
+    Tasks,
+    CalendarEvents,
   ],
-  daos: [WorkspacesDao, NodesDao, InkDao, LinksDao],
+  daos: [WorkspacesDao, NodesDao, InkDao, LinksDao, TasksDao, CalendarDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? impl.connect());
@@ -44,7 +52,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withFile(File file) : super(impl.connect(overrideFile: file));
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -66,6 +74,11 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(pdfDocuments);
         await m.addColumn(inkPages, inkPages.pdfDocumentId);
         await m.addColumn(inkPages, inkPages.templateSpacing);
+      }
+      if (from < 5) {
+        await m.createTable(projects);
+        await m.createTable(tasks);
+        await m.createTable(calendarEvents);
       }
     },
     beforeOpen: (details) async {

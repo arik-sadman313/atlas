@@ -84,27 +84,33 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
   }
 
   Future<int> deleteLinksForSource(String sourceNodeId) {
-    return (delete(nodeLinks)..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).go();
+    return (delete(
+      nodeLinks,
+    )..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).go();
   }
 
   Future<void> syncLinksForSource(
     String sourceNodeId,
     List<NodeLinksCompanion> newLinks,
   ) async {
-    await (delete(nodeLinks)..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).go();
+    await (delete(
+      nodeLinks,
+    )..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).go();
     if (newLinks.isNotEmpty) {
       await batch((b) => b.insertAll(nodeLinks, newLinks));
     }
   }
 
   Stream<List<BacklinkItem>> watchBacklinksForTarget(String targetNodeId) {
-    final query = select(nodeLinks).join([
-      innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId)),
-    ])..where(nodeLinks.targetNodeId.equals(targetNodeId))
-      ..where(nodes.isDeleted.equals(false))
-      ..orderBy([
-        OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
-      ]);
+    final query =
+        select(
+            nodeLinks,
+          ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId))])
+          ..where(nodeLinks.targetNodeId.equals(targetNodeId))
+          ..where(nodes.isDeleted.equals(false))
+          ..orderBy([
+            OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
+          ]);
 
     return query.watch().map((rows) {
       return rows.map((row) {
@@ -125,13 +131,15 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
   }
 
   Future<List<BacklinkItem>> getBacklinksForTarget(String targetNodeId) {
-    final query = select(nodeLinks).join([
-      innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId)),
-    ])..where(nodeLinks.targetNodeId.equals(targetNodeId))
-      ..where(nodes.isDeleted.equals(false))
-      ..orderBy([
-        OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
-      ]);
+    final query =
+        select(
+            nodeLinks,
+          ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId))])
+          ..where(nodeLinks.targetNodeId.equals(targetNodeId))
+          ..where(nodes.isDeleted.equals(false))
+          ..orderBy([
+            OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
+          ]);
 
     return query.get().then((rows) {
       return rows.map((row) {
@@ -151,11 +159,15 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
     });
   }
 
-  Stream<List<ForwardLinkItem>> watchForwardLinksForSource(String sourceNodeId) {
-    final query = select(nodeLinks).join([
-      innerJoin(nodes, nodes.id.equalsExp(nodeLinks.targetNodeId)),
-    ])..where(nodeLinks.sourceNodeId.equals(sourceNodeId))
-      ..where(nodes.isDeleted.equals(false));
+  Stream<List<ForwardLinkItem>> watchForwardLinksForSource(
+    String sourceNodeId,
+  ) {
+    final query =
+        select(
+            nodeLinks,
+          ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.targetNodeId))])
+          ..where(nodeLinks.sourceNodeId.equals(sourceNodeId))
+          ..where(nodes.isDeleted.equals(false));
 
     return query.watch().map((rows) {
       return rows.map((row) {
@@ -175,27 +187,32 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
   }
 
   Future<List<NodeLinkEntry>> getLinksForSource(String sourceNodeId) {
-    return (select(nodeLinks)..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).get();
+    return (select(
+      nodeLinks,
+    )..where((tbl) => tbl.sourceNodeId.equals(sourceNodeId))).get();
   }
 
   // Tags
   Future<void> addTag(TagsCompanion tag) => into(tags).insert(tag);
 
   Future<TagEntry?> getTagByName(String workspaceId, String name) =>
-      (select(tags)..where((t) => t.workspaceId.equals(workspaceId) & t.name.equals(name)))
+      (select(tags)..where(
+            (t) => t.workspaceId.equals(workspaceId) & t.name.equals(name),
+          ))
           .getSingleOrNull();
 
-  Future<void> tagNode(String nodeId, String tagId) =>
-      into(nodeTags).insert(
-        NodeTagsCompanion.insert(nodeId: nodeId, tagId: tagId),
-        mode: InsertMode.insertOrIgnore,
-      );
+  Future<void> tagNode(String nodeId, String tagId) => into(nodeTags).insert(
+    NodeTagsCompanion.insert(nodeId: nodeId, tagId: tagId),
+    mode: InsertMode.insertOrIgnore,
+  );
 
   Stream<List<TagEntry>> watchTagsForNode(String nodeId) {
     final query = select(tags).join([
       innerJoin(nodeTags, nodeTags.tagId.equalsExp(tags.id)),
     ])..where(nodeTags.nodeId.equals(nodeId));
 
-    return query.watch().map((rows) => rows.map((r) => r.readTable(tags)).toList());
+    return query.watch().map(
+      (rows) => rows.map((r) => r.readTable(tags)).toList(),
+    );
   }
 }

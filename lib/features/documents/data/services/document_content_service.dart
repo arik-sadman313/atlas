@@ -12,7 +12,10 @@ class DocumentContentService {
 
   /// Loads a [Document] from CAS storage by [contentHash].
   /// If [contentHash] is null or the blob cannot be found/parsed, returns a blank document.
-  Future<Document> loadDocument(String? contentHash, {String? defaultTitle}) async {
+  Future<Document> loadDocument(
+    String? contentHash, {
+    String? defaultTitle,
+  }) async {
     if (contentHash != null && contentHash.isNotEmpty) {
       try {
         final bytes = await blobStorage.readBlob(contentHash);
@@ -21,7 +24,8 @@ class DocumentContentService {
           final decoded = jsonDecode(jsonStr);
           if (decoded is List) {
             return Document.fromJson(decoded);
-          } else if (decoded is Map<String, dynamic> && decoded.containsKey('ops')) {
+          } else if (decoded is Map<String, dynamic> &&
+              decoded.containsKey('ops')) {
             return Document.fromJson(decoded['ops'] as List);
           }
         }

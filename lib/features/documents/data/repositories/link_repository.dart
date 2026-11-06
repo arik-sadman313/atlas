@@ -11,11 +11,8 @@ class LinkRepository {
   final NodesDao nodesDao;
   final Uuid uuid;
 
-  LinkRepository({
-    required this.linksDao,
-    required this.nodesDao,
-    Uuid? uuid,
-  }) : uuid = uuid ?? const Uuid();
+  LinkRepository({required this.linksDao, required this.nodesDao, Uuid? uuid})
+    : uuid = uuid ?? const Uuid();
 
   /// Watches all incoming backlinks pointing to [nodeId].
   Stream<List<BacklinkItem>> watchBacklinks(String nodeId) {

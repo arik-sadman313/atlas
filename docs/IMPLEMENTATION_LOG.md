@@ -402,4 +402,121 @@
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (145.8s).
 
+---
+
+# ATLAS — Milestone 5 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 5 — Tasks, Calendar & Reminders  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Scope Boundaries
+
+1. **Package Reuse Evaluation:** Audit candidate packages for calendar rendering (`table_calendar`) and local notifications (`flutter_local_notifications` + `timezone`). Document evaluation in `docs/PRODUCTIVITY_PACKAGE_AUDIT.md`.
+2. **Schema Version 5 Migration:** Add `projects`, `tasks`, and `calendar_events` tables to SQLite via Drift with foreign key relationships (`tasks.projectId` SET NULL, `tasks.nodeId` SET NULL, `tasks.parentTaskId` CASCADE, `calendarEvents.nodeId` SET NULL, `calendarEvents.taskId` SET NULL).
+3. **Data Access & Business Repositories:** Implement `TasksDao`, `CalendarDao`, `TaskRepository` (Inbox, Today, Upcoming, Projects, Completed views with reactive filtering), and `CalendarRepository` (merging scheduled events and due tasks into unified agenda streams).
+4. **Task Management UI:** `TasksScreen` with responsive grouping (Project, Due Date, Priority), `TaskItemWidget`, `QuickAddTaskBar`, `TaskDetailSheet` with subtask checklist and progress bar, and embedded `NodeTasksPanel` in `DocumentEditorScreen` and `NotebookEditorScreen`.
+5. **Calendar & Agenda UI:** `CalendarScreen` powered by `table_calendar` (month grid, 2-week view, week view) with event markers, unified daily agenda with `AgendaItemCard`, and `EventDetailSheet` modal.
+6. **Local Notifications:** Platform-agnostic `NotificationService` handling Linux desktop DBus notifications, Android exact alarms with Java 8 core library desugaring, iOS UNUserNotificationCenter, and startup reconciliation in `bootstrap.dart`.
+7. **Strict Scope Boundaries Maintained:** Zero external calendar sync (Google/CalDAV/Outlook), zero cloud push notifications, zero Kanban drag-and-drop boards, zero NLP natural language date parsing.
+
+---
+
+## 2. Implemented Architecture & Components
+
+### 2.1 Persistence & Data Layer
+- [`ProjectsTable`](../lib/core/database/tables/projects_table.dart), [`TasksTable`](../lib/core/database/tables/tasks_table.dart), [`CalendarEventsTable`](../lib/core/database/tables/calendar_events_table.dart).
+- [`TasksDao`](../lib/core/database/daos/tasks_dao.dart):
+  - Streams: `watchTasksForWorkspace`, `watchTasksForNode`, `watchSubtasks`, `watchProjectsForWorkspace`.
+  - Operations: `createTask`, `updateTask`, `deleteTask`, `toggleTaskCompletion`, `batchReorderTasks`, `createProject`, `updateProject`, `deleteProject`.
+- [`CalendarDao`](../lib/core/database/daos/calendar_dao.dart):
+  - Streams: `watchAllEvents`, `watchEventsForRange`, `watchEventsForDay`, `watchEventsForNode`.
+  - Operations: `createEvent`, `updateEvent`, `deleteEvent`.
+- Database schema bumped to **version 5** in [`AppDatabase`](../lib/core/database/app_database.dart) with automated migration.
+
+### 2.2 Domain & Repositories
+- [`TaskRepository`](../lib/features/tasks/data/repositories/task_repository.dart):
+  - Manages view filters (`TaskFilter.inbox`, `today`, `upcoming`, `projects`, `completed`) and grouping modes.
+  - Automatically segregates subtasks from primary views and schedules/cancels reminders upon task mutations.
+- [`CalendarAgendaItem`](../lib/features/calendar/domain/models/calendar_agenda_item.dart):
+  - Unified agenda model unifying both `CalendarEventEntry` and `TaskEntry` items with color coding, start/end timestamps, all-day flags, and linked note references.
+- [`CalendarRepository`](../lib/features/calendar/data/repositories/calendar_repository.dart):
+  - `watchAgendaForDay`: Merges `calendarDao.watchEventsForDay` and `tasksDao.watchTasksForWorkspace` using `Rx.combineLatest2`.
+  - Sorts all-day items first, then chronologically ascending by start time.
+- [`NotificationService`](../lib/core/notifications/notification_service.dart):
+  - Cross-platform scheduling via `flutter_local_notifications` (`LinuxInitializationSettings`, `AndroidInitializationSettings`, `DarwinInitializationSettings`).
+  - Schedules reminders `reminderMinutesBefore` due dates/start times.
+  - `reschedulePendingReminders`: Startup reconciliation invoked during application bootstrap.
+  - Graceful degradation when notifications plugin is uninitialized or permissions are withheld.
+
+### 2.3 Presentation & Interaction
+- [`TasksScreen`](../lib/features/tasks/presentation/tasks_screen.dart):
+  - Filter chips for Inbox, Today, Upcoming, Projects, and Completed views.
+  - Project sub-filter strip and new project creation modal.
+  - Grouping options: None, by Project, by Due Date, by Priority.
+- [`TaskItemWidget`](../lib/features/tasks/presentation/widgets/task_item_widget.dart):
+  - Priority indicator color styling (P1-P4), custom animated circular check, due date badge, project chip, and linked note chip.
+- [`QuickAddTaskBar`](../lib/features/tasks/presentation/widgets/quick_add_task_bar.dart):
+  - Inline task input with priority selector, date picker, project selector, and submission on Enter.
+- [`TaskDetailSheet`](../lib/features/tasks/presentation/widgets/task_detail_sheet.dart):
+  - Modal sheet for editing title, description, due date/time, priority, recurrence, reminder intervals, project assignment, and note links.
+  - Interactive subtasks checklist with visual completion progress bar.
+- [`NodeTasksPanel`](../lib/features/tasks/presentation/widgets/node_tasks_panel.dart):
+  - Collapsible node-level task panel mounted directly in `DocumentEditorScreen` and accessible via AppBar modal in `NotebookEditorScreen`.
+- [`CalendarScreen`](../lib/features/calendar/presentation/calendar_screen.dart):
+  - Powered by `table_calendar: ^3.3.0` with month grid, 2-week view, and week format.
+  - Day markers showing scheduled events and tasks due.
+  - Responsive layout: 2-column on desktop (`width >= 900`), adaptive split on tablet, collapsible week strip on mobile companion.
+  - Daily agenda timeline with `AgendaItemCard` and quick task/event addition.
+- [`EventDetailSheet`](../lib/features/calendar/presentation/widgets/event_detail_sheet.dart):
+  - Event creation and editing modal supporting title, description, location, all-day toggle, start/end dates and times, Atlas color palette tag picker, and note linkage.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Automated Test Suite (101 tests across all modules):**
+   - `test/core/database/database_test.dart` (4 tests)
+   - `test/core/database/schema_migration_v3_test.dart` (2 tests)
+   - `test/core/database/schema_migration_v4_test.dart` (6 tests)
+   - `test/core/database/schema_migration_v5_test.dart` (5 tests)
+   - `test/core/notifications/notification_service_test.dart` (4 tests)
+   - `test/core/storage/cas_storage_service_test.dart` (5 tests)
+   - `test/features/app_smoke_test.dart` (24 tests)
+   - `test/features/handwriting/stroke_tessellator_test.dart` (8 tests)
+   - `test/features/handwriting/ink_serialization_test.dart` (4 tests)
+   - `test/features/handwriting/ink_repository_test.dart` (3 tests)
+   - `test/features/handwriting/ink_canvas_widget_test.dart` (4 tests)
+   - `test/features/handwriting/pencil_kit_converter_test.dart` (3 tests)
+   - `test/features/handwriting/notebook_editor_navigation_test.dart` (3 tests)
+   - `test/features/handwriting/paper_pattern_painter_test.dart` (5 tests)
+   - `test/features/handwriting/notebook_page_drawer_test.dart` (4 tests)
+   - `test/features/pdf/pdf_descriptor_test.dart` (2 tests)
+   - `test/features/pdf/pdf_export_service_test.dart` (3 tests)
+   - `test/features/documents/wiki_link_parser_test.dart` (6 tests)
+   - `test/features/documents/link_repository_test.dart` (2 tests)
+   - `test/features/documents/document_content_service_test.dart` (2 tests)
+   - `test/features/documents/document_editor_test.dart` (3 tests)
+   - `test/features/tasks/task_repository_test.dart` (3 tests)
+   - `test/features/tasks/tasks_screen_test.dart` (2 tests)
+   - `test/features/calendar/calendar_repository_test.dart` (2 tests)
+   - `test/features/calendar/calendar_screen_test.dart` (2 tests)
+   - **Result:** `✓ All 101 tests passed!`.
+
+3. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+4. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (27.8s) with core library desugaring enabled.
+
+
 

@@ -19,7 +19,8 @@ void main() {
     });
 
     test('extracts [[Target|Alias]] wiki-links with custom display text', () {
-      const text = 'Refer to [[Project Atlas Architecture|Atlas Arch]] for details.';
+      const text =
+          'Refer to [[Project Atlas Architecture|Atlas Arch]] for details.';
       final matches = WikiLinkParser.extractLinks(text);
 
       expect(matches.length, 1);
@@ -45,7 +46,8 @@ void main() {
     });
 
     test('extractTargetTitles returns unique set of target titles', () {
-      const text = '[[Atlas]] is great. Read [[Atlas]] again, and [[Overview]].';
+      const text =
+          '[[Atlas]] is great. Read [[Atlas]] again, and [[Overview]].';
       final titles = WikiLinkParser.extractTargetTitles(text);
 
       expect(titles, {'Atlas', 'Overview'});
@@ -54,7 +56,10 @@ void main() {
     test('detectOpenQuery identifies uncompleted query at cursor position', () {
       expect(WikiLinkParser.detectOpenQuery('Hello [[Pro', 11), 'Pro');
       expect(WikiLinkParser.detectOpenQuery('Hello [[', 8), '');
-      expect(WikiLinkParser.detectOpenQuery('Hello [[Closed]] and more', 16), null);
+      expect(
+        WikiLinkParser.detectOpenQuery('Hello [[Closed]] and more', 16),
+        null,
+      );
       expect(WikiLinkParser.detectOpenQuery('Hello world', 5), null);
       expect(WikiLinkParser.detectOpenQuery('Hello [[Line\nBreak', 15), null);
     });

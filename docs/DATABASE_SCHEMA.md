@@ -431,9 +431,14 @@ onUpgrade: (m, from, to) async {
     await m.addColumn(inkPages, inkPages.pdfDocumentId);
     await m.addColumn(inkPages, inkPages.templateSpacing);
   }
+  if (from < 5) {
+    await m.createTable(projects);
+    await m.createTable(tasks);
+    await m.createTable(calendarEvents);
+  }
 }
 ```
-Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).
+Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart), [`TasksDao`](../lib/core/database/daos/tasks_dao.dart), and [`CalendarDao`](../lib/core/database/daos/calendar_dao.dart).
 
 ---
 
@@ -465,4 +470,89 @@ Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).
   - `deletePageAndReorder`: Removes page and adjusts subsequent indices to maintain contiguous 1-based page numbering.
   - `updatePageTemplate`: Fine-grained mutation of paper template type and grid spacing.
   - `insertPdfDocument`, `getPdfDocument`, `getPdfDocumentForNode`, `deletePdfDocument`: CRUD operations for PDF metadata.
+
+---
+
+## 9. Schema Version 5 Migration (Milestone 5: Tasks, Calendar & Reminders)
+
+### 9.1 New Tables
+
+#### `projects` Table
+```sql
+CREATE TABLE projects (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    color_hex TEXT,
+    icon TEXT,
+    sort_order REAL NOT NULL DEFAULT 0.0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_projects_workspace ON projects(workspace_id, sort_order);
+```
+
+#### `tasks` Table
+```sql
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    node_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+    parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    is_completed INTEGER NOT NULL DEFAULT 0,
+    completed_at INTEGER,
+    priority INTEGER NOT NULL DEFAULT 4, -- 1 (Urgent/P1) to 4 (None/P4)
+    due_date INTEGER,
+    has_time INTEGER NOT NULL DEFAULT 0,
+    reminder_minutes_before INTEGER,
+    recurrence_rule TEXT, -- 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'custom'
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_tasks_workspace_due ON tasks(workspace_id, due_date, is_completed);
+CREATE INDEX idx_tasks_project ON tasks(project_id, is_completed, sort_order);
+CREATE INDEX idx_tasks_node ON tasks(node_id, is_completed);
+CREATE INDEX idx_tasks_parent ON tasks(parent_task_id, sort_order);
+```
+
+#### `calendar_events` Table
+```sql
+CREATE TABLE calendar_events (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    node_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    start_time INTEGER NOT NULL,
+    end_time INTEGER NOT NULL,
+    is_all_day INTEGER NOT NULL DEFAULT 0,
+    color_hex TEXT,
+    location TEXT,
+    recurrence_rule TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_calendar_events_range ON calendar_events(workspace_id, start_time, end_time);
+CREATE INDEX idx_calendar_events_node ON calendar_events(node_id);
+```
+
+### 9.2 DAOs & Repositories
+- [`TasksDao`](../lib/core/database/daos/tasks_dao.dart):
+  - `watchTasksForWorkspace`, `watchTasksForNode`, `watchSubtasks`
+  - `batchReorderTasks`, `toggleTaskCompletion`, `createTask`, `updateTask`, `deleteTask`
+  - `watchProjectsForWorkspace`, `createProject`, `updateProject`, `deleteProject`
+- [`CalendarDao`](../lib/core/database/daos/calendar_dao.dart):
+  - `watchAllEvents`, `watchEventsForRange`, `getEventsForRange`, `watchEventsForDay`, `getEventsForDay`, `watchEventsForNode`
+  - `createEvent`, `updateEvent`, `deleteEvent`
+- [`TaskRepository`](../lib/features/tasks/data/repositories/task_repository.dart):
+  - Manages task views: Inbox, Today, Upcoming, Projects, Completed with reactive filtering and subtask hierarchy segregation.
+- [`CalendarRepository`](../lib/features/calendar/data/repositories/calendar_repository.dart):
+  - Merges calendar events and due tasks into unified chronological `CalendarAgendaItem` agenda streams.
 

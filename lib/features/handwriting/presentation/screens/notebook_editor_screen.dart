@@ -13,6 +13,7 @@ import '../../../../core/theme/atlas_colors.dart';
 import '../../../../core/theme/atlas_spacing.dart';
 import '../../../documents/presentation/widgets/backlinks_panel.dart';
 import '../../../pdf/presentation/widgets/pdf_page_background.dart';
+import '../../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
@@ -549,11 +550,7 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     if (index < 0 || index >= _pages.length) return;
     final page = _pages[index];
     final inkDao = ref.read(inkDaoProvider);
-    await inkDao.updatePageTemplate(
-      page.id,
-      newTemplate,
-      page.templateSpacing,
-    );
+    await inkDao.updatePageTemplate(page.id, newTemplate, page.templateSpacing);
 
     final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
     setState(() {
@@ -701,8 +698,10 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                         ? InkPageView(
                             document: _canvasController!.document,
                             showCompanionBadge: true,
-                            backgroundWidget: _pages.isNotEmpty &&
-                                    _pages[_currentPageIndex].pdfSourceHash != null
+                            backgroundWidget:
+                                _pages.isNotEmpty &&
+                                    _pages[_currentPageIndex].pdfSourceHash !=
+                                        null
                                 ? PdfPageBackground(
                                     pdfSourceHash:
                                         _pages[_currentPageIndex].pdfSourceHash,
@@ -854,6 +853,12 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
             onPressed: () => Scaffold.of(scaffoldCtx).openEndDrawer(),
           ),
         ),
+        // Linked Tasks Button
+        IconButton(
+          icon: const Icon(Icons.check_box_outlined),
+          tooltip: 'Notebook Tasks',
+          onPressed: () => _showTasksSheet(context),
+        ),
         // Backlinks Button
         IconButton(
           icon: const Icon(Icons.link_rounded),
@@ -865,6 +870,70 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     );
   }
 
+  void _showTasksSheet(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.55,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollCtrl) => SingleChildScrollView(
+          controller: scrollCtrl,
+          padding: const EdgeInsets.all(AtlasSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AtlasColors.darkBorder
+                        : AtlasColors.lightBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Notebook Tasks',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AtlasSpacing.sm),
+              NodeTasksPanel(nodeId: widget.notebookId, initialExpanded: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showBacklinksSheet(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -872,8 +941,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -920,10 +990,7 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                 ],
               ),
               const SizedBox(height: AtlasSpacing.sm),
-              BacklinksPanel(
-                nodeId: widget.notebookId,
-                initialExpanded: true,
-              ),
+              BacklinksPanel(nodeId: widget.notebookId, initialExpanded: true),
             ],
           ),
         ),
@@ -934,8 +1001,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   Widget _buildDesktopCanvas(bool isDark) {
     final doc = _canvasController!.document;
     final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
-    final isPdf = currentPage?.pdfSourceHash != null &&
-        currentPage?.pdfPageIndex != null;
+    final isPdf =
+        currentPage?.pdfSourceHash != null && currentPage?.pdfPageIndex != null;
 
     return Center(
       child: SingleChildScrollView(
@@ -979,8 +1046,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     final doc = _canvasController!.document;
     final bgColor = Color(doc.backgroundColor);
     final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
-    final isPdf = currentPage?.pdfSourceHash != null &&
-        currentPage?.pdfPageIndex != null;
+    final isPdf =
+        currentPage?.pdfSourceHash != null && currentPage?.pdfPageIndex != null;
 
     return Center(
       child: SingleChildScrollView(

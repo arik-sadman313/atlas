@@ -1,16 +1,21 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/database/app_database.dart';
+import '../core/database/daos/calendar_dao.dart';
 import '../core/database/daos/ink_dao.dart';
 import '../core/database/daos/links_dao.dart';
 import '../core/database/daos/nodes_dao.dart';
+import '../core/database/daos/tasks_dao.dart';
 import '../core/database/daos/workspaces_dao.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/storage/blob_storage_service.dart';
+import '../features/calendar/data/repositories/calendar_repository.dart';
 import '../features/documents/data/repositories/link_repository.dart';
 import '../features/handwriting/data/repositories/ink_repository.dart';
 import '../features/pdf/data/repositories/pdf_repository.dart';
 import '../features/pdf/data/services/pdf_export_service.dart';
 import '../features/pdf/data/services/pdf_rendering_service.dart';
+import '../features/tasks/data/repositories/task_repository.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -32,6 +37,18 @@ final inkDaoProvider = Provider<InkDao>((ref) {
 
 final linksDaoProvider = Provider<LinksDao>((ref) {
   return ref.watch(appDatabaseProvider).linksDao;
+});
+
+final tasksDaoProvider = Provider<TasksDao>((ref) {
+  return ref.watch(appDatabaseProvider).tasksDao;
+});
+
+final calendarDaoProvider = Provider<CalendarDao>((ref) {
+  return ref.watch(appDatabaseProvider).calendarDao;
+});
+
+final notificationServiceProvider = Provider<NotificationService>((ref) {
+  return NotificationService();
 });
 
 final blobStorageServiceProvider = Provider<BlobStorageService>((ref) {
@@ -79,6 +96,26 @@ final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
     blobStorage: blobStorage,
     pdfRenderingService: pdfRenderingService,
     inkRepo: inkRepo,
+  );
+});
+
+final taskRepositoryProvider = Provider<TaskRepository>((ref) {
+  final tasksDao = ref.watch(tasksDaoProvider);
+  final notificationService = ref.watch(notificationServiceProvider);
+  return TaskRepository(
+    tasksDao: tasksDao,
+    notificationService: notificationService,
+  );
+});
+
+final calendarRepositoryProvider = Provider<CalendarRepository>((ref) {
+  final calendarDao = ref.watch(calendarDaoProvider);
+  final tasksDao = ref.watch(tasksDaoProvider);
+  final notificationService = ref.watch(notificationServiceProvider);
+  return CalendarRepository(
+    calendarDao: calendarDao,
+    tasksDao: tasksDao,
+    notificationService: notificationService,
   );
 });
 

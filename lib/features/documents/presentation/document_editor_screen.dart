@@ -11,6 +11,7 @@ import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
+import '../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../data/services/document_content_service.dart';
 import 'widgets/backlinks_panel.dart';
 import 'widgets/wiki_link_dialog.dart';
@@ -204,7 +205,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     // If it's an internal Atlas node link: atlas://node/:id
     final uri = Uri.tryParse(url);
     if (uri != null && uri.scheme == 'atlas' && uri.host == 'node') {
-      final targetId = uri.pathSegments.isNotEmpty ? uri.pathSegments.first : '';
+      final targetId = uri.pathSegments.isNotEmpty
+          ? uri.pathSegments.first
+          : '';
       if (targetId.isNotEmpty) {
         final nodesDao = ref.read(nodesDaoProvider);
         final targetNode = await nodesDao.getNode(targetId);
@@ -246,7 +249,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
       child: Scaffold(
         backgroundColor: isDark ? AtlasColors.darkBg : AtlasColors.lightBg,
         appBar: AppBar(
-          backgroundColor: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+          backgroundColor: isDark
+              ? AtlasColors.darkSurface
+              : AtlasColors.lightSurface,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
@@ -271,7 +276,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? AtlasColors.darkElevated : AtlasColors.lightElevated,
+                  color: isDark
+                      ? AtlasColors.darkElevated
+                      : AtlasColors.lightElevated,
                   borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
                 ),
                 child: Row(
@@ -297,7 +304,11 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                       const SizedBox(width: 6),
                       Text('Unsaved', style: theme.textTheme.labelSmall),
                     ] else ...[
-                      const Icon(Icons.check_circle, size: 12, color: Colors.green),
+                      const Icon(
+                        Icons.check_circle,
+                        size: 12,
+                        color: Colors.green,
+                      ),
                       const SizedBox(width: 6),
                       Text('Saved', style: theme.textTheme.labelSmall),
                     ],
@@ -331,8 +342,8 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : _node == null
-                ? _buildNotFoundView(theme)
-                : _buildEditorContent(theme, isDark),
+            ? _buildNotFoundView(theme)
+            : _buildEditorContent(theme, isDark),
       ),
     );
   }
@@ -369,7 +380,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
             color: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
             border: Border(
               bottom: BorderSide(
-                color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+                color: isDark
+                    ? AtlasColors.darkBorder
+                    : AtlasColors.lightBorder,
                 width: 1.0,
               ),
             ),
@@ -487,7 +500,8 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     QuillEditor.basic(
                       controller: _quillController!,
                       config: QuillEditorConfig(
-                        placeholder: 'Start typing, or insert [[Wiki-Links]]...',
+                        placeholder:
+                            'Start typing, or insert [[Wiki-Links]]...',
                         scrollable: false,
                         autoFocus: false,
                         expands: false,
@@ -497,6 +511,14 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     ),
 
                     const SizedBox(height: AtlasSpacing.xxl),
+
+                    // Node Tasks Panel
+                    NodeTasksPanel(
+                      nodeId: widget.documentId,
+                      initialExpanded: true,
+                    ),
+
+                    const SizedBox(height: AtlasSpacing.xl),
 
                     // Backlinks Panel
                     BacklinksPanel(

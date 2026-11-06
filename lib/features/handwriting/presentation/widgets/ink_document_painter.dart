@@ -150,10 +150,10 @@ class PaperPatternPainter extends CustomPainter {
     if (normalized == 'blank') return;
 
     final isDark = backgroundColor.computeLuminance() < 0.5;
-    final guideColor =
-        isDark ? const Color(0x2EFFFFFF) : const Color(0x1F000000);
-    final dotColor =
-        isDark ? const Color(0x44FFFFFF) : const Color(0x33000000);
+    final guideColor = isDark
+        ? const Color(0x2EFFFFFF)
+        : const Color(0x1F000000);
+    final dotColor = isDark ? const Color(0x44FFFFFF) : const Color(0x33000000);
 
     final gridPaint = Paint()
       ..color = guideColor

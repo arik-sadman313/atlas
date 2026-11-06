@@ -10,6 +10,7 @@ abstract class AtlasColors {
   static const lightTextPrimary = Color(0xFF18181B);
   static const lightTextSecondary = Color(0xFF71717A);
   static const lightTextMuted = Color(0xFFA1A1AA);
+  static const lightTextTertiary = lightTextMuted;
 
   // Dark Palette (OLED/Carbon - calm charcoal avoiding harsh contrast)
   static const darkBg = Color(0xFF0E0E10);
@@ -20,12 +21,14 @@ abstract class AtlasColors {
   static const darkTextPrimary = Color(0xFFF4F4F5);
   static const darkTextSecondary = Color(0xFFA1A1AA);
   static const darkTextMuted = Color(0xFF71717A);
+  static const darkTextTertiary = darkTextMuted;
 
   // Accents & Semantics
   static const accentBlue = Color(0xFF3B82F6);
   static const accentBlueSubtle = Color(0x1A3B82F6);
   static const accentSage = Color(0xFF10B981);
   static const accentSageSubtle = Color(0x1A10B981);
+  static const statusSuccess = Color(0xFF10B981);
   static const accentAmber = Color(0xFFF59E0B);
   static const accentAmberSubtle = Color(0x1AF59E0B);
   static const accentRose = Color(0xFFF43F5E);

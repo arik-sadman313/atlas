@@ -28,22 +28,28 @@ void main() {
       expect(doc.toPlainText(), contains('Test Note'));
     });
 
-    test('saveDocument writes CAS blob and loadDocument recovers document', () async {
-      final doc = Document();
-      doc.insert(0, 'Hello ATLAS World with [[Knowledge Links]]\n');
+    test(
+      'saveDocument writes CAS blob and loadDocument recovers document',
+      () async {
+        final doc = Document();
+        doc.insert(0, 'Hello ATLAS World with [[Knowledge Links]]\n');
 
-      final hash = await service.saveDocument(doc);
-      expect(hash, isNotEmpty);
-      expect(hash.length, 64); // SHA-256 hex string
+        final hash = await service.saveDocument(doc);
+        expect(hash, isNotEmpty);
+        expect(hash.length, 64); // SHA-256 hex string
 
-      // Verify blob exists
-      final exists = await blobStorage.hasBlob(hash);
-      expect(exists, isTrue);
+        // Verify blob exists
+        final exists = await blobStorage.hasBlob(hash);
+        expect(exists, isTrue);
 
-      // Reload document
-      final reloaded = await service.loadDocument(hash);
-      final extractedText = DocumentContentService.extractPlainText(reloaded);
-      expect(extractedText, contains('Hello ATLAS World with [[Knowledge Links]]'));
-    });
+        // Reload document
+        final reloaded = await service.loadDocument(hash);
+        final extractedText = DocumentContentService.extractPlainText(reloaded);
+        expect(
+          extractedText,
+          contains('Hello ATLAS World with [[Knowledge Links]]'),
+        );
+      },
+    );
   });
 }

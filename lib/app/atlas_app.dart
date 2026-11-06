@@ -31,9 +31,7 @@ class AtlasApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
         FlutterQuillLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('en', ''),
-      ],
+      supportedLocales: const [Locale('en', '')],
     );
   }
 }

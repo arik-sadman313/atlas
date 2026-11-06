@@ -68,12 +68,12 @@ class PdfExportService {
       if (page.pdfSourceHash != null && page.pdfPageIndex != null) {
         try {
           final pdfBytes = await blobStorage.readBlob(page.pdfSourceHash!);
-          backgroundRasterBytes =
-              await pdfRenderingService.renderBytesPageToImage(
-            bytes: pdfBytes,
-            pageIndex: page.pdfPageIndex!,
-            scale: rasterScale,
-          );
+          backgroundRasterBytes = await pdfRenderingService
+              .renderBytesPageToImage(
+                bytes: pdfBytes,
+                pageIndex: page.pdfPageIndex!,
+                scale: rasterScale,
+              );
         } catch (_) {
           backgroundRasterBytes = null;
         }
@@ -88,11 +88,7 @@ class PdfExportService {
       );
 
       // 3. Add to PDF document matching page dimensions
-      final pageFormat = PdfPageFormat(
-        page.width,
-        page.height,
-        marginAll: 0,
-      );
+      final pageFormat = PdfPageFormat(page.width, page.height, marginAll: 0);
 
       final pdfImage = pw.MemoryImage(compositeBytes);
 
@@ -102,10 +98,7 @@ class PdfExportService {
           build: (pw.Context context) {
             return pw.FullPage(
               ignoreMargins: true,
-              child: pw.Image(
-                pdfImage,
-                fit: pw.BoxFit.fill,
-              ),
+              child: pw.Image(pdfImage, fit: pw.BoxFit.fill),
             );
           },
         ),

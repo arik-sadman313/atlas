@@ -317,3 +317,54 @@ flowchart TD
 - **iPadOS:** Full hardware-accelerated Apple Pencil support (`PencilKit`) stacked over `PdfPageBackground`.
 - **Android Companion:** Strictly read-only viewer (`InkPageView` with pinch-to-zoom and pan) stacked over `PdfPageBackground`. Zero editing or stroke capture capabilities.
 
+---
+
+## 9. Tasks, Calendar & Reminders Architecture (Milestone 5)
+
+### 9.1 Unified Productivity Model & Relational Schema
+```mermaid
+flowchart TD
+    Workspace[Workspace] -->|Owns| Projects[Projects Table]
+    Workspace -->|Owns| Tasks[Tasks Table]
+    Workspace -->|Owns| Events[Calendar Events Table]
+    
+    Projects -.->|Categorizes| Tasks
+    Tasks -.->|Parent-Child Hierarchy| Tasks
+    
+    Nodes[Nodes Table / Notes & Notebooks] -.->|Linked Context| Tasks
+    Nodes -.->|Linked Context| Events
+    
+    Tasks -.->|Generates Agenda Items| Agenda[Unified Daily Agenda Stream]
+    Events -.->|Generates Agenda Items| Agenda
+```
+
+- **Tasks & Subtask Hierarchy:**
+  - `parent_task_id` self-references `tasks.id` with `ON DELETE CASCADE`. Primary task views (Inbox, Today, Upcoming, Projects) automatically exclude subtasks to keep views organized. Subtasks are rendered inside `TaskDetailSheet` with live progress bars.
+- **Relational Integrity:**
+  - `project_id` and `node_id` use `ON DELETE SET NULL`, preserving tasks when projects or associated notes are removed.
+- **Node-Level Task Embedding:**
+  - `NodeTasksPanel` allows creating and managing tasks directly inside `DocumentEditorScreen` and `NotebookEditorScreen`.
+
+### 9.2 Unified Calendar & Agenda Pipeline
+- **Package Selection:** `table_calendar: ^3.3.0` (Apache-2.0, zero AGPL dependencies). Provides month grid, 2-week view, and week view with custom markers.
+- **Chronological Stream Merging:**
+  - `CalendarRepository.watchAgendaForDay` uses `Rx.combineLatest2` to join `CalendarDao.watchEventsForDay` and `TasksDao.watchTasksForWorkspace`.
+  - All-day events and tasks sort to the top, followed by timed items sorted ascending by start time.
+- **Responsive Layout Adaptation:**
+  - **Linux Desktop (`width >= 900`):** Two-column split layout with a fixed monthly calendar on the left ($380\text{ px}$) and an expansive daily agenda timeline on the right.
+  - **iPadOS (`600 <= width < 900`):** Adaptive split view with quick jumping.
+  - **Android Companion (`width < 600`):** Collapsible week-strip calendar header with a vertical scrollable daily agenda. Full task checking, creation, and event scheduling are supported.
+
+### 9.3 Local Notifications & Reminders Engine
+- **Package Selection:** `flutter_local_notifications: ^23.0.0` (BSD-3-Clause) paired with `timezone: ^0.11.2`.
+- **Encapsulated Service (`NotificationService`):**
+  - **Linux Desktop:** Initializes via native DBus notifications daemon (`defaultActionName: 'Open ATLAS'`).
+  - **Android:** Requests exact alarm permissions (`schedule_exact_alarm`) and configures high-importance notification channels (`AndroidScheduleMode.exactAllowWhileIdle`).
+  - **iOS / iPadOS:** Registers `UNUserNotificationCenter` delegates.
+- **Lifecycle & Reconciliation:**
+  - `dueDate - reminderMinutesBefore` triggers `zonedSchedule`.
+  - Completing or deleting a task/event automatically cancels pending notifications.
+  - `bootstrap.dart` runs startup reconciliation (`reschedulePendingReminders`) to ensure all upcoming tasks and events maintain active notification triggers after device reboots.
+  - Gracefully degrades without exceptions if permissions are denied or notification daemons are absent.
+
+

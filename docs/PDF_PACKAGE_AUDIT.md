@@ -59,3 +59,4 @@ To insulate ATLAS domain logic from the underlying rendering engine:
 - The raw `pdfrx` APIs are encapsulated behind an abstract Dart interface: [`PdfRenderingService`](../lib/features/pdf/data/services/pdf_rendering_service.dart).
 - Handlers convert document instances into immutable domain descriptors ([`PdfDocumentDescriptor`](../lib/features/pdf/domain/models/pdf_document_descriptor.dart)).
 - Layer stacking mounts the PDF page as the background surface beneath `InkCanvas` on Linux and `PencilKit` on iPadOS with a fixed 1:1 point coordinate mapping.
+

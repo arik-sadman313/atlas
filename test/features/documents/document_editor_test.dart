@@ -21,25 +21,29 @@ void main() {
       blobStorage = InMemoryBlobStorageService();
 
       final now = DateTime.now();
-      await database.into(database.workspaces).insert(
-        WorkspacesCompanion.insert(
-          id: 'ws-test',
-          name: 'Test Workspace',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-test',
+              name: 'Test Workspace',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-      await database.into(database.nodes).insert(
-        NodesCompanion.insert(
-          id: 'doc-123',
-          workspaceId: 'ws-test',
-          type: 'document',
-          title: 'Architecture Overview',
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await database
+          .into(database.nodes)
+          .insert(
+            NodesCompanion.insert(
+              id: 'doc-123',
+              workspaceId: 'ws-test',
+              type: 'document',
+              title: 'Architecture Overview',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
     });
 
     tearDown(() async {
@@ -59,48 +63,52 @@ void main() {
             GlobalCupertinoLocalizations.delegate,
             FlutterQuillLocalizations.delegate,
           ],
-          supportedLocales: const [
-            Locale('en', ''),
-          ],
+          supportedLocales: const [Locale('en', '')],
           home: DocumentEditorScreen(documentId: documentId),
         ),
       );
     }
 
-    testWidgets('renders document editor with title, toolbar, and backlinks panel', (tester) async {
+    testWidgets(
+      'renders document editor with title, toolbar, and backlinks panel',
+      (tester) async {
+        await tester.pumpWidget(createTestWidget());
+        await tester.pumpAndSettle();
+
+        // Verify title field is populated with existing title
+        expect(find.text('Architecture Overview'), findsOneWidget);
+
+        // Verify Quill toolbar is rendered
+        expect(find.byType(QuillSimpleToolbar), findsOneWidget);
+
+        // Verify Quill editor is rendered
+        expect(find.byType(QuillEditor), findsOneWidget);
+
+        // Verify BacklinksPanel is rendered
+        expect(find.byType(BacklinksPanel), findsOneWidget);
+
+        // Dispose tree cleanly to drain Drift stream close timer
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 100));
+      },
+    );
+
+    testWidgets('editing document title updates UI and saves to database', (
+      tester,
+    ) async {
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
 
-      // Verify title field is populated with existing title
-      expect(find.text('Architecture Overview'), findsOneWidget);
-
-      // Verify Quill toolbar is rendered
-      expect(find.byType(QuillSimpleToolbar), findsOneWidget);
-
-      // Verify Quill editor is rendered
-      expect(find.byType(QuillEditor), findsOneWidget);
-
-      // Verify BacklinksPanel is rendered
-      expect(find.byType(BacklinksPanel), findsOneWidget);
-
-      // Dispose tree cleanly to drain Drift stream close timer
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(milliseconds: 100));
-    });
-
-    testWidgets('editing document title updates UI and saves to database', (tester) async {
-      await tester.pumpWidget(createTestWidget());
-      await tester.pumpAndSettle();
-
-      final titleFinder = find.byType(TextField);
+      final titleFinder = find.byType(TextField).first;
       expect(titleFinder, findsOneWidget);
 
       await tester.enterText(titleFinder, 'Updated Architecture 2.0');
       await tester.pump();
 
       // Save document explicitly
-      final state =
-          tester.state<DocumentEditorScreenState>(find.byType(DocumentEditorScreen));
+      final state = tester.state<DocumentEditorScreenState>(
+        find.byType(DocumentEditorScreen),
+      );
       await state.saveDocument();
       await tester.pump();
 
@@ -113,7 +121,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     });
 
-    testWidgets('wiki-link action button opens WikiLinkDialog modal', (tester) async {
+    testWidgets('wiki-link action button opens WikiLinkDialog modal', (
+      tester,
+    ) async {
       await tester.pumpWidget(createTestWidget());
       await tester.pumpAndSettle();
 
