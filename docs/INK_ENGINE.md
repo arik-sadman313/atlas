@@ -310,3 +310,31 @@ public class AtlasPencilKitView: NSObject, FlutterPlatformView, PKCanvasViewDele
 - Linux uses a Dart `CustomPainter` backed by a `ui.PictureRecorder` caching strategy.
 - Repaint Boundaries isolate static committed strokes from active ongoing strokes, preventing re-rendering of thousands of historical points during input.
 - Input events from USB graphic tablets (Wacom, XP-Pen, Huion) receive pressure values directly through Flutter's `PointerEvent.pressure`.
+
+---
+
+## 6. Milestone 2 Implementation Verification & Reused Packages
+
+Following the mandatory software reuse directive, ATLAS evaluated existing open-source libraries before implementation (see [INK_PACKAGE_AUDIT.md](INK_PACKAGE_AUDIT.md)):
+
+### 6.1 Adopted Reused Packages
+1. **`perfect_freehand` (v2.5.2+1, MIT)**:
+   - High-performance, pure Dart stroke outline generator adapting Dave Rupert / Steve Ruiz's polygon tessellation algorithm.
+   - Eliminates thousands of lines of fragile custom spline math.
+   - Adapted in [`StrokeTessellator`](../lib/features/handwriting/domain/math/stroke_tessellator.dart) with specific taper, streamline, smoothing, and thinning profiles for Ballpoint Pen, Fountain Pen, Highlighter, and Pencil.
+2. **`pencil_kit` (v2.1.1, MIT)**:
+   - Flutter plugin providing `UiKitView` embedding of native iOS `PKCanvasView`.
+   - Wrapped behind ATLAS abstraction [`PencilKitBridge`](../lib/features/handwriting/presentation/platform/pencil_kit_bridge.dart) and [`AtlasPencilKitPlugin.swift`](../ios/Runner/PencilKit/AtlasPencilKitPlugin.swift).
+
+### 6.2 Component Matrix
+| Component | Class | Path | Description |
+| :--- | :--- | :--- | :--- |
+| **Domain Models** | `AtlasInkDocument` | `lib/features/handwriting/domain/models/` | Immutable, multi-layer ink document model |
+| **Tessellator** | `StrokeTessellator` | `lib/features/handwriting/domain/math/` | Adapts `perfect_freehand` to quadratic Bézier `Path` |
+| **Serialization** | `InkJsonSerializer` / `InkBinarySerializer` | `lib/features/handwriting/data/serializers/` | Dual JSON and packed binary (`ATLASINK` magic) formats |
+| **Repository** | `InkRepository` | `lib/features/handwriting/data/repositories/` | Coordinates `InkDao` SQLite records and CAS blob files |
+| **Canvas** | `InkCanvas` | `lib/features/handwriting/presentation/widgets/` | Interactive pointer listener with pressure support |
+| **Painter** | `InkDocumentPainter` | `lib/features/handwriting/presentation/widgets/` | Paper templates + multiply-composited highlighters |
+| **Companion Viewer**| `InkPageView` | `lib/features/handwriting/presentation/widgets/` | Read-only zoom/pan viewer for Android & preview mode |
+| **Tool Palette** | `InkToolPalette` | `lib/features/handwriting/presentation/widgets/` | Floating pill with tools, widths, colors, undo/redo |
+| **Screen** | `NotebookEditorScreen` | `lib/features/handwriting/presentation/screens/` | Full multi-page editor with autosave |

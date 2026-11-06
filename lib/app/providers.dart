@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/database/app_database.dart';
+import '../core/database/daos/ink_dao.dart';
 import '../core/database/daos/nodes_dao.dart';
 import '../core/database/daos/workspaces_dao.dart';
 import '../core/storage/blob_storage_service.dart';
+import '../features/handwriting/data/repositories/ink_repository.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -19,10 +21,20 @@ final nodesDaoProvider = Provider<NodesDao>((ref) {
   return ref.watch(appDatabaseProvider).nodesDao;
 });
 
+final inkDaoProvider = Provider<InkDao>((ref) {
+  return ref.watch(appDatabaseProvider).inkDao;
+});
+
 final blobStorageServiceProvider = Provider<BlobStorageService>((ref) {
   throw UnimplementedError(
     'blobStorageServiceProvider must be initialized in bootstrap',
   );
+});
+
+final inkRepositoryProvider = Provider<InkRepository>((ref) {
+  final inkDao = ref.watch(inkDaoProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+  return InkRepository(inkDao: inkDao, blobStorage: blobStorage);
 });
 
 class CurrentWorkspaceIdNotifier extends Notifier<String> {

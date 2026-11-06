@@ -353,3 +353,56 @@ class Nodes extends Table {
   Set<Column> get primaryKey => {id};
 }
 ```
+
+---
+
+## 6. Schema Version 2 Migration (Milestone 2)
+
+In Milestone 2, the Drift database schema was upgraded to **version 2** with the introduction of tables supporting the Portable Ink Engine and native handwriting integration:
+
+### 6.1 `ink_documents` Table
+```sql
+CREATE TABLE ink_documents (
+    id TEXT PRIMARY KEY NOT NULL,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    default_page_width REAL NOT NULL DEFAULT 1600.0,
+    default_page_height REAL NOT NULL DEFAULT 2200.0,
+    default_template TEXT NOT NULL DEFAULT 'dot_grid_5mm',
+    default_background_color INTEGER NOT NULL DEFAULT 4294967295, -- 0xFFFFFFFF
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+### 6.2 `ink_pages` Table
+```sql
+CREATE TABLE ink_pages (
+    id TEXT PRIMARY KEY NOT NULL,
+    document_id TEXT NOT NULL REFERENCES ink_documents(id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    width REAL NOT NULL DEFAULT 1600.0,
+    height REAL NOT NULL DEFAULT 2200.0,
+    template_type TEXT NOT NULL DEFAULT 'dot_grid_5mm',
+    background_color INTEGER NOT NULL DEFAULT 4294967295,
+    pdf_source_hash TEXT,
+    pdf_page_index INTEGER,
+    raw_pencilkit_hash TEXT, -- SHA-256 CAS blob reference for iOS native .pkdrawing
+    portable_ink_hash TEXT,   -- SHA-256 CAS blob reference for cross-platform .atlas_ink_bin
+    preview_png_hash TEXT,    -- SHA-256 CAS blob reference for raster thumbnail .png
+    ocr_text TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+```
+
+### 6.3 Migration Strategy
+In `AppDatabase.migration`:
+```dart
+onUpgrade: (m, from, to) async {
+  if (from == 1) {
+    await m.createTable(inkDocuments);
+    await m.createTable(inkPages);
+  }
+}
+```
+Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).

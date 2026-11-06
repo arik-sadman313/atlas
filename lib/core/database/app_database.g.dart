@@ -2294,6 +2294,1431 @@ class AttachmentsCompanion extends UpdateCompanion<AttachmentEntry> {
   }
 }
 
+class $InkDocumentsTable extends InkDocuments
+    with TableInfo<$InkDocumentsTable, InkDocumentEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $InkDocumentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nodeIdMeta = const VerificationMeta('nodeId');
+  @override
+  late final GeneratedColumn<String> nodeId = GeneratedColumn<String>(
+    'node_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES nodes (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _defaultPageWidthMeta = const VerificationMeta(
+    'defaultPageWidth',
+  );
+  @override
+  late final GeneratedColumn<double> defaultPageWidth = GeneratedColumn<double>(
+    'default_page_width',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1600.0),
+  );
+  static const VerificationMeta _defaultPageHeightMeta = const VerificationMeta(
+    'defaultPageHeight',
+  );
+  @override
+  late final GeneratedColumn<double> defaultPageHeight =
+      GeneratedColumn<double>(
+        'default_page_height',
+        aliasedName,
+        false,
+        type: DriftSqlType.double,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(2200.0),
+      );
+  static const VerificationMeta _defaultTemplateMeta = const VerificationMeta(
+    'defaultTemplate',
+  );
+  @override
+  late final GeneratedColumn<String> defaultTemplate = GeneratedColumn<String>(
+    'default_template',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('dot_grid_5mm'),
+  );
+  static const VerificationMeta _defaultBackgroundColorMeta =
+      const VerificationMeta('defaultBackgroundColor');
+  @override
+  late final GeneratedColumn<int> defaultBackgroundColor = GeneratedColumn<int>(
+    'default_background_color',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(4294967295),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    nodeId,
+    defaultPageWidth,
+    defaultPageHeight,
+    defaultTemplate,
+    defaultBackgroundColor,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ink_documents';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<InkDocumentEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('node_id')) {
+      context.handle(
+        _nodeIdMeta,
+        nodeId.isAcceptableOrUnknown(data['node_id']!, _nodeIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nodeIdMeta);
+    }
+    if (data.containsKey('default_page_width')) {
+      context.handle(
+        _defaultPageWidthMeta,
+        defaultPageWidth.isAcceptableOrUnknown(
+          data['default_page_width']!,
+          _defaultPageWidthMeta,
+        ),
+      );
+    }
+    if (data.containsKey('default_page_height')) {
+      context.handle(
+        _defaultPageHeightMeta,
+        defaultPageHeight.isAcceptableOrUnknown(
+          data['default_page_height']!,
+          _defaultPageHeightMeta,
+        ),
+      );
+    }
+    if (data.containsKey('default_template')) {
+      context.handle(
+        _defaultTemplateMeta,
+        defaultTemplate.isAcceptableOrUnknown(
+          data['default_template']!,
+          _defaultTemplateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('default_background_color')) {
+      context.handle(
+        _defaultBackgroundColorMeta,
+        defaultBackgroundColor.isAcceptableOrUnknown(
+          data['default_background_color']!,
+          _defaultBackgroundColorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  InkDocumentEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return InkDocumentEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      nodeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}node_id'],
+      )!,
+      defaultPageWidth: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}default_page_width'],
+      )!,
+      defaultPageHeight: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}default_page_height'],
+      )!,
+      defaultTemplate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}default_template'],
+      )!,
+      defaultBackgroundColor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}default_background_color'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $InkDocumentsTable createAlias(String alias) {
+    return $InkDocumentsTable(attachedDatabase, alias);
+  }
+}
+
+class InkDocumentEntry extends DataClass
+    implements Insertable<InkDocumentEntry> {
+  final String id;
+  final String nodeId;
+  final double defaultPageWidth;
+  final double defaultPageHeight;
+  final String defaultTemplate;
+  final int defaultBackgroundColor;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const InkDocumentEntry({
+    required this.id,
+    required this.nodeId,
+    required this.defaultPageWidth,
+    required this.defaultPageHeight,
+    required this.defaultTemplate,
+    required this.defaultBackgroundColor,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['node_id'] = Variable<String>(nodeId);
+    map['default_page_width'] = Variable<double>(defaultPageWidth);
+    map['default_page_height'] = Variable<double>(defaultPageHeight);
+    map['default_template'] = Variable<String>(defaultTemplate);
+    map['default_background_color'] = Variable<int>(defaultBackgroundColor);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  InkDocumentsCompanion toCompanion(bool nullToAbsent) {
+    return InkDocumentsCompanion(
+      id: Value(id),
+      nodeId: Value(nodeId),
+      defaultPageWidth: Value(defaultPageWidth),
+      defaultPageHeight: Value(defaultPageHeight),
+      defaultTemplate: Value(defaultTemplate),
+      defaultBackgroundColor: Value(defaultBackgroundColor),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory InkDocumentEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return InkDocumentEntry(
+      id: serializer.fromJson<String>(json['id']),
+      nodeId: serializer.fromJson<String>(json['nodeId']),
+      defaultPageWidth: serializer.fromJson<double>(json['defaultPageWidth']),
+      defaultPageHeight: serializer.fromJson<double>(json['defaultPageHeight']),
+      defaultTemplate: serializer.fromJson<String>(json['defaultTemplate']),
+      defaultBackgroundColor: serializer.fromJson<int>(
+        json['defaultBackgroundColor'],
+      ),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'nodeId': serializer.toJson<String>(nodeId),
+      'defaultPageWidth': serializer.toJson<double>(defaultPageWidth),
+      'defaultPageHeight': serializer.toJson<double>(defaultPageHeight),
+      'defaultTemplate': serializer.toJson<String>(defaultTemplate),
+      'defaultBackgroundColor': serializer.toJson<int>(defaultBackgroundColor),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  InkDocumentEntry copyWith({
+    String? id,
+    String? nodeId,
+    double? defaultPageWidth,
+    double? defaultPageHeight,
+    String? defaultTemplate,
+    int? defaultBackgroundColor,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => InkDocumentEntry(
+    id: id ?? this.id,
+    nodeId: nodeId ?? this.nodeId,
+    defaultPageWidth: defaultPageWidth ?? this.defaultPageWidth,
+    defaultPageHeight: defaultPageHeight ?? this.defaultPageHeight,
+    defaultTemplate: defaultTemplate ?? this.defaultTemplate,
+    defaultBackgroundColor:
+        defaultBackgroundColor ?? this.defaultBackgroundColor,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  InkDocumentEntry copyWithCompanion(InkDocumentsCompanion data) {
+    return InkDocumentEntry(
+      id: data.id.present ? data.id.value : this.id,
+      nodeId: data.nodeId.present ? data.nodeId.value : this.nodeId,
+      defaultPageWidth: data.defaultPageWidth.present
+          ? data.defaultPageWidth.value
+          : this.defaultPageWidth,
+      defaultPageHeight: data.defaultPageHeight.present
+          ? data.defaultPageHeight.value
+          : this.defaultPageHeight,
+      defaultTemplate: data.defaultTemplate.present
+          ? data.defaultTemplate.value
+          : this.defaultTemplate,
+      defaultBackgroundColor: data.defaultBackgroundColor.present
+          ? data.defaultBackgroundColor.value
+          : this.defaultBackgroundColor,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InkDocumentEntry(')
+          ..write('id: $id, ')
+          ..write('nodeId: $nodeId, ')
+          ..write('defaultPageWidth: $defaultPageWidth, ')
+          ..write('defaultPageHeight: $defaultPageHeight, ')
+          ..write('defaultTemplate: $defaultTemplate, ')
+          ..write('defaultBackgroundColor: $defaultBackgroundColor, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    nodeId,
+    defaultPageWidth,
+    defaultPageHeight,
+    defaultTemplate,
+    defaultBackgroundColor,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is InkDocumentEntry &&
+          other.id == this.id &&
+          other.nodeId == this.nodeId &&
+          other.defaultPageWidth == this.defaultPageWidth &&
+          other.defaultPageHeight == this.defaultPageHeight &&
+          other.defaultTemplate == this.defaultTemplate &&
+          other.defaultBackgroundColor == this.defaultBackgroundColor &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class InkDocumentsCompanion extends UpdateCompanion<InkDocumentEntry> {
+  final Value<String> id;
+  final Value<String> nodeId;
+  final Value<double> defaultPageWidth;
+  final Value<double> defaultPageHeight;
+  final Value<String> defaultTemplate;
+  final Value<int> defaultBackgroundColor;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const InkDocumentsCompanion({
+    this.id = const Value.absent(),
+    this.nodeId = const Value.absent(),
+    this.defaultPageWidth = const Value.absent(),
+    this.defaultPageHeight = const Value.absent(),
+    this.defaultTemplate = const Value.absent(),
+    this.defaultBackgroundColor = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  InkDocumentsCompanion.insert({
+    required String id,
+    required String nodeId,
+    this.defaultPageWidth = const Value.absent(),
+    this.defaultPageHeight = const Value.absent(),
+    this.defaultTemplate = const Value.absent(),
+    this.defaultBackgroundColor = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       nodeId = Value(nodeId),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<InkDocumentEntry> custom({
+    Expression<String>? id,
+    Expression<String>? nodeId,
+    Expression<double>? defaultPageWidth,
+    Expression<double>? defaultPageHeight,
+    Expression<String>? defaultTemplate,
+    Expression<int>? defaultBackgroundColor,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (nodeId != null) 'node_id': nodeId,
+      if (defaultPageWidth != null) 'default_page_width': defaultPageWidth,
+      if (defaultPageHeight != null) 'default_page_height': defaultPageHeight,
+      if (defaultTemplate != null) 'default_template': defaultTemplate,
+      if (defaultBackgroundColor != null)
+        'default_background_color': defaultBackgroundColor,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  InkDocumentsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? nodeId,
+    Value<double>? defaultPageWidth,
+    Value<double>? defaultPageHeight,
+    Value<String>? defaultTemplate,
+    Value<int>? defaultBackgroundColor,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return InkDocumentsCompanion(
+      id: id ?? this.id,
+      nodeId: nodeId ?? this.nodeId,
+      defaultPageWidth: defaultPageWidth ?? this.defaultPageWidth,
+      defaultPageHeight: defaultPageHeight ?? this.defaultPageHeight,
+      defaultTemplate: defaultTemplate ?? this.defaultTemplate,
+      defaultBackgroundColor:
+          defaultBackgroundColor ?? this.defaultBackgroundColor,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (nodeId.present) {
+      map['node_id'] = Variable<String>(nodeId.value);
+    }
+    if (defaultPageWidth.present) {
+      map['default_page_width'] = Variable<double>(defaultPageWidth.value);
+    }
+    if (defaultPageHeight.present) {
+      map['default_page_height'] = Variable<double>(defaultPageHeight.value);
+    }
+    if (defaultTemplate.present) {
+      map['default_template'] = Variable<String>(defaultTemplate.value);
+    }
+    if (defaultBackgroundColor.present) {
+      map['default_background_color'] = Variable<int>(
+        defaultBackgroundColor.value,
+      );
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InkDocumentsCompanion(')
+          ..write('id: $id, ')
+          ..write('nodeId: $nodeId, ')
+          ..write('defaultPageWidth: $defaultPageWidth, ')
+          ..write('defaultPageHeight: $defaultPageHeight, ')
+          ..write('defaultTemplate: $defaultTemplate, ')
+          ..write('defaultBackgroundColor: $defaultBackgroundColor, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $InkPagesTable extends InkPages
+    with TableInfo<$InkPagesTable, InkPageEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $InkPagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _documentIdMeta = const VerificationMeta(
+    'documentId',
+  );
+  @override
+  late final GeneratedColumn<String> documentId = GeneratedColumn<String>(
+    'document_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES ink_documents (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _pageNumberMeta = const VerificationMeta(
+    'pageNumber',
+  );
+  @override
+  late final GeneratedColumn<int> pageNumber = GeneratedColumn<int>(
+    'page_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _widthMeta = const VerificationMeta('width');
+  @override
+  late final GeneratedColumn<double> width = GeneratedColumn<double>(
+    'width',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1600.0),
+  );
+  static const VerificationMeta _heightMeta = const VerificationMeta('height');
+  @override
+  late final GeneratedColumn<double> height = GeneratedColumn<double>(
+    'height',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(2200.0),
+  );
+  static const VerificationMeta _templateTypeMeta = const VerificationMeta(
+    'templateType',
+  );
+  @override
+  late final GeneratedColumn<String> templateType = GeneratedColumn<String>(
+    'template_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('dot_grid_5mm'),
+  );
+  static const VerificationMeta _backgroundColorMeta = const VerificationMeta(
+    'backgroundColor',
+  );
+  @override
+  late final GeneratedColumn<int> backgroundColor = GeneratedColumn<int>(
+    'background_color',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(4294967295),
+  );
+  static const VerificationMeta _pdfSourceHashMeta = const VerificationMeta(
+    'pdfSourceHash',
+  );
+  @override
+  late final GeneratedColumn<String> pdfSourceHash = GeneratedColumn<String>(
+    'pdf_source_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pdfPageIndexMeta = const VerificationMeta(
+    'pdfPageIndex',
+  );
+  @override
+  late final GeneratedColumn<int> pdfPageIndex = GeneratedColumn<int>(
+    'pdf_page_index',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _rawPencilkitHashMeta = const VerificationMeta(
+    'rawPencilkitHash',
+  );
+  @override
+  late final GeneratedColumn<String> rawPencilkitHash = GeneratedColumn<String>(
+    'raw_pencilkit_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _portableInkHashMeta = const VerificationMeta(
+    'portableInkHash',
+  );
+  @override
+  late final GeneratedColumn<String> portableInkHash = GeneratedColumn<String>(
+    'portable_ink_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _previewPngHashMeta = const VerificationMeta(
+    'previewPngHash',
+  );
+  @override
+  late final GeneratedColumn<String> previewPngHash = GeneratedColumn<String>(
+    'preview_png_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _ocrTextMeta = const VerificationMeta(
+    'ocrText',
+  );
+  @override
+  late final GeneratedColumn<String> ocrText = GeneratedColumn<String>(
+    'ocr_text',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    documentId,
+    pageNumber,
+    width,
+    height,
+    templateType,
+    backgroundColor,
+    pdfSourceHash,
+    pdfPageIndex,
+    rawPencilkitHash,
+    portableInkHash,
+    previewPngHash,
+    ocrText,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ink_pages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<InkPageEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('document_id')) {
+      context.handle(
+        _documentIdMeta,
+        documentId.isAcceptableOrUnknown(data['document_id']!, _documentIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_documentIdMeta);
+    }
+    if (data.containsKey('page_number')) {
+      context.handle(
+        _pageNumberMeta,
+        pageNumber.isAcceptableOrUnknown(data['page_number']!, _pageNumberMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pageNumberMeta);
+    }
+    if (data.containsKey('width')) {
+      context.handle(
+        _widthMeta,
+        width.isAcceptableOrUnknown(data['width']!, _widthMeta),
+      );
+    }
+    if (data.containsKey('height')) {
+      context.handle(
+        _heightMeta,
+        height.isAcceptableOrUnknown(data['height']!, _heightMeta),
+      );
+    }
+    if (data.containsKey('template_type')) {
+      context.handle(
+        _templateTypeMeta,
+        templateType.isAcceptableOrUnknown(
+          data['template_type']!,
+          _templateTypeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('background_color')) {
+      context.handle(
+        _backgroundColorMeta,
+        backgroundColor.isAcceptableOrUnknown(
+          data['background_color']!,
+          _backgroundColorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('pdf_source_hash')) {
+      context.handle(
+        _pdfSourceHashMeta,
+        pdfSourceHash.isAcceptableOrUnknown(
+          data['pdf_source_hash']!,
+          _pdfSourceHashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('pdf_page_index')) {
+      context.handle(
+        _pdfPageIndexMeta,
+        pdfPageIndex.isAcceptableOrUnknown(
+          data['pdf_page_index']!,
+          _pdfPageIndexMeta,
+        ),
+      );
+    }
+    if (data.containsKey('raw_pencilkit_hash')) {
+      context.handle(
+        _rawPencilkitHashMeta,
+        rawPencilkitHash.isAcceptableOrUnknown(
+          data['raw_pencilkit_hash']!,
+          _rawPencilkitHashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('portable_ink_hash')) {
+      context.handle(
+        _portableInkHashMeta,
+        portableInkHash.isAcceptableOrUnknown(
+          data['portable_ink_hash']!,
+          _portableInkHashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('preview_png_hash')) {
+      context.handle(
+        _previewPngHashMeta,
+        previewPngHash.isAcceptableOrUnknown(
+          data['preview_png_hash']!,
+          _previewPngHashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('ocr_text')) {
+      context.handle(
+        _ocrTextMeta,
+        ocrText.isAcceptableOrUnknown(data['ocr_text']!, _ocrTextMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  InkPageEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return InkPageEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      documentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_id'],
+      )!,
+      pageNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_number'],
+      )!,
+      width: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}width'],
+      )!,
+      height: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}height'],
+      )!,
+      templateType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}template_type'],
+      )!,
+      backgroundColor: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}background_color'],
+      )!,
+      pdfSourceHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pdf_source_hash'],
+      ),
+      pdfPageIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pdf_page_index'],
+      ),
+      rawPencilkitHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}raw_pencilkit_hash'],
+      ),
+      portableInkHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}portable_ink_hash'],
+      ),
+      previewPngHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}preview_png_hash'],
+      ),
+      ocrText: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ocr_text'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $InkPagesTable createAlias(String alias) {
+    return $InkPagesTable(attachedDatabase, alias);
+  }
+}
+
+class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
+  final String id;
+  final String documentId;
+  final int pageNumber;
+  final double width;
+  final double height;
+  final String templateType;
+  final int backgroundColor;
+  final String? pdfSourceHash;
+  final int? pdfPageIndex;
+  final String? rawPencilkitHash;
+  final String? portableInkHash;
+  final String? previewPngHash;
+  final String? ocrText;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const InkPageEntry({
+    required this.id,
+    required this.documentId,
+    required this.pageNumber,
+    required this.width,
+    required this.height,
+    required this.templateType,
+    required this.backgroundColor,
+    this.pdfSourceHash,
+    this.pdfPageIndex,
+    this.rawPencilkitHash,
+    this.portableInkHash,
+    this.previewPngHash,
+    this.ocrText,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['document_id'] = Variable<String>(documentId);
+    map['page_number'] = Variable<int>(pageNumber);
+    map['width'] = Variable<double>(width);
+    map['height'] = Variable<double>(height);
+    map['template_type'] = Variable<String>(templateType);
+    map['background_color'] = Variable<int>(backgroundColor);
+    if (!nullToAbsent || pdfSourceHash != null) {
+      map['pdf_source_hash'] = Variable<String>(pdfSourceHash);
+    }
+    if (!nullToAbsent || pdfPageIndex != null) {
+      map['pdf_page_index'] = Variable<int>(pdfPageIndex);
+    }
+    if (!nullToAbsent || rawPencilkitHash != null) {
+      map['raw_pencilkit_hash'] = Variable<String>(rawPencilkitHash);
+    }
+    if (!nullToAbsent || portableInkHash != null) {
+      map['portable_ink_hash'] = Variable<String>(portableInkHash);
+    }
+    if (!nullToAbsent || previewPngHash != null) {
+      map['preview_png_hash'] = Variable<String>(previewPngHash);
+    }
+    if (!nullToAbsent || ocrText != null) {
+      map['ocr_text'] = Variable<String>(ocrText);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  InkPagesCompanion toCompanion(bool nullToAbsent) {
+    return InkPagesCompanion(
+      id: Value(id),
+      documentId: Value(documentId),
+      pageNumber: Value(pageNumber),
+      width: Value(width),
+      height: Value(height),
+      templateType: Value(templateType),
+      backgroundColor: Value(backgroundColor),
+      pdfSourceHash: pdfSourceHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pdfSourceHash),
+      pdfPageIndex: pdfPageIndex == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pdfPageIndex),
+      rawPencilkitHash: rawPencilkitHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rawPencilkitHash),
+      portableInkHash: portableInkHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(portableInkHash),
+      previewPngHash: previewPngHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(previewPngHash),
+      ocrText: ocrText == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ocrText),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory InkPageEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return InkPageEntry(
+      id: serializer.fromJson<String>(json['id']),
+      documentId: serializer.fromJson<String>(json['documentId']),
+      pageNumber: serializer.fromJson<int>(json['pageNumber']),
+      width: serializer.fromJson<double>(json['width']),
+      height: serializer.fromJson<double>(json['height']),
+      templateType: serializer.fromJson<String>(json['templateType']),
+      backgroundColor: serializer.fromJson<int>(json['backgroundColor']),
+      pdfSourceHash: serializer.fromJson<String?>(json['pdfSourceHash']),
+      pdfPageIndex: serializer.fromJson<int?>(json['pdfPageIndex']),
+      rawPencilkitHash: serializer.fromJson<String?>(json['rawPencilkitHash']),
+      portableInkHash: serializer.fromJson<String?>(json['portableInkHash']),
+      previewPngHash: serializer.fromJson<String?>(json['previewPngHash']),
+      ocrText: serializer.fromJson<String?>(json['ocrText']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'documentId': serializer.toJson<String>(documentId),
+      'pageNumber': serializer.toJson<int>(pageNumber),
+      'width': serializer.toJson<double>(width),
+      'height': serializer.toJson<double>(height),
+      'templateType': serializer.toJson<String>(templateType),
+      'backgroundColor': serializer.toJson<int>(backgroundColor),
+      'pdfSourceHash': serializer.toJson<String?>(pdfSourceHash),
+      'pdfPageIndex': serializer.toJson<int?>(pdfPageIndex),
+      'rawPencilkitHash': serializer.toJson<String?>(rawPencilkitHash),
+      'portableInkHash': serializer.toJson<String?>(portableInkHash),
+      'previewPngHash': serializer.toJson<String?>(previewPngHash),
+      'ocrText': serializer.toJson<String?>(ocrText),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  InkPageEntry copyWith({
+    String? id,
+    String? documentId,
+    int? pageNumber,
+    double? width,
+    double? height,
+    String? templateType,
+    int? backgroundColor,
+    Value<String?> pdfSourceHash = const Value.absent(),
+    Value<int?> pdfPageIndex = const Value.absent(),
+    Value<String?> rawPencilkitHash = const Value.absent(),
+    Value<String?> portableInkHash = const Value.absent(),
+    Value<String?> previewPngHash = const Value.absent(),
+    Value<String?> ocrText = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => InkPageEntry(
+    id: id ?? this.id,
+    documentId: documentId ?? this.documentId,
+    pageNumber: pageNumber ?? this.pageNumber,
+    width: width ?? this.width,
+    height: height ?? this.height,
+    templateType: templateType ?? this.templateType,
+    backgroundColor: backgroundColor ?? this.backgroundColor,
+    pdfSourceHash: pdfSourceHash.present
+        ? pdfSourceHash.value
+        : this.pdfSourceHash,
+    pdfPageIndex: pdfPageIndex.present ? pdfPageIndex.value : this.pdfPageIndex,
+    rawPencilkitHash: rawPencilkitHash.present
+        ? rawPencilkitHash.value
+        : this.rawPencilkitHash,
+    portableInkHash: portableInkHash.present
+        ? portableInkHash.value
+        : this.portableInkHash,
+    previewPngHash: previewPngHash.present
+        ? previewPngHash.value
+        : this.previewPngHash,
+    ocrText: ocrText.present ? ocrText.value : this.ocrText,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  InkPageEntry copyWithCompanion(InkPagesCompanion data) {
+    return InkPageEntry(
+      id: data.id.present ? data.id.value : this.id,
+      documentId: data.documentId.present
+          ? data.documentId.value
+          : this.documentId,
+      pageNumber: data.pageNumber.present
+          ? data.pageNumber.value
+          : this.pageNumber,
+      width: data.width.present ? data.width.value : this.width,
+      height: data.height.present ? data.height.value : this.height,
+      templateType: data.templateType.present
+          ? data.templateType.value
+          : this.templateType,
+      backgroundColor: data.backgroundColor.present
+          ? data.backgroundColor.value
+          : this.backgroundColor,
+      pdfSourceHash: data.pdfSourceHash.present
+          ? data.pdfSourceHash.value
+          : this.pdfSourceHash,
+      pdfPageIndex: data.pdfPageIndex.present
+          ? data.pdfPageIndex.value
+          : this.pdfPageIndex,
+      rawPencilkitHash: data.rawPencilkitHash.present
+          ? data.rawPencilkitHash.value
+          : this.rawPencilkitHash,
+      portableInkHash: data.portableInkHash.present
+          ? data.portableInkHash.value
+          : this.portableInkHash,
+      previewPngHash: data.previewPngHash.present
+          ? data.previewPngHash.value
+          : this.previewPngHash,
+      ocrText: data.ocrText.present ? data.ocrText.value : this.ocrText,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InkPageEntry(')
+          ..write('id: $id, ')
+          ..write('documentId: $documentId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('width: $width, ')
+          ..write('height: $height, ')
+          ..write('templateType: $templateType, ')
+          ..write('backgroundColor: $backgroundColor, ')
+          ..write('pdfSourceHash: $pdfSourceHash, ')
+          ..write('pdfPageIndex: $pdfPageIndex, ')
+          ..write('rawPencilkitHash: $rawPencilkitHash, ')
+          ..write('portableInkHash: $portableInkHash, ')
+          ..write('previewPngHash: $previewPngHash, ')
+          ..write('ocrText: $ocrText, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    documentId,
+    pageNumber,
+    width,
+    height,
+    templateType,
+    backgroundColor,
+    pdfSourceHash,
+    pdfPageIndex,
+    rawPencilkitHash,
+    portableInkHash,
+    previewPngHash,
+    ocrText,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is InkPageEntry &&
+          other.id == this.id &&
+          other.documentId == this.documentId &&
+          other.pageNumber == this.pageNumber &&
+          other.width == this.width &&
+          other.height == this.height &&
+          other.templateType == this.templateType &&
+          other.backgroundColor == this.backgroundColor &&
+          other.pdfSourceHash == this.pdfSourceHash &&
+          other.pdfPageIndex == this.pdfPageIndex &&
+          other.rawPencilkitHash == this.rawPencilkitHash &&
+          other.portableInkHash == this.portableInkHash &&
+          other.previewPngHash == this.previewPngHash &&
+          other.ocrText == this.ocrText &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
+  final Value<String> id;
+  final Value<String> documentId;
+  final Value<int> pageNumber;
+  final Value<double> width;
+  final Value<double> height;
+  final Value<String> templateType;
+  final Value<int> backgroundColor;
+  final Value<String?> pdfSourceHash;
+  final Value<int?> pdfPageIndex;
+  final Value<String?> rawPencilkitHash;
+  final Value<String?> portableInkHash;
+  final Value<String?> previewPngHash;
+  final Value<String?> ocrText;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const InkPagesCompanion({
+    this.id = const Value.absent(),
+    this.documentId = const Value.absent(),
+    this.pageNumber = const Value.absent(),
+    this.width = const Value.absent(),
+    this.height = const Value.absent(),
+    this.templateType = const Value.absent(),
+    this.backgroundColor = const Value.absent(),
+    this.pdfSourceHash = const Value.absent(),
+    this.pdfPageIndex = const Value.absent(),
+    this.rawPencilkitHash = const Value.absent(),
+    this.portableInkHash = const Value.absent(),
+    this.previewPngHash = const Value.absent(),
+    this.ocrText = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  InkPagesCompanion.insert({
+    required String id,
+    required String documentId,
+    required int pageNumber,
+    this.width = const Value.absent(),
+    this.height = const Value.absent(),
+    this.templateType = const Value.absent(),
+    this.backgroundColor = const Value.absent(),
+    this.pdfSourceHash = const Value.absent(),
+    this.pdfPageIndex = const Value.absent(),
+    this.rawPencilkitHash = const Value.absent(),
+    this.portableInkHash = const Value.absent(),
+    this.previewPngHash = const Value.absent(),
+    this.ocrText = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       documentId = Value(documentId),
+       pageNumber = Value(pageNumber),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<InkPageEntry> custom({
+    Expression<String>? id,
+    Expression<String>? documentId,
+    Expression<int>? pageNumber,
+    Expression<double>? width,
+    Expression<double>? height,
+    Expression<String>? templateType,
+    Expression<int>? backgroundColor,
+    Expression<String>? pdfSourceHash,
+    Expression<int>? pdfPageIndex,
+    Expression<String>? rawPencilkitHash,
+    Expression<String>? portableInkHash,
+    Expression<String>? previewPngHash,
+    Expression<String>? ocrText,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (documentId != null) 'document_id': documentId,
+      if (pageNumber != null) 'page_number': pageNumber,
+      if (width != null) 'width': width,
+      if (height != null) 'height': height,
+      if (templateType != null) 'template_type': templateType,
+      if (backgroundColor != null) 'background_color': backgroundColor,
+      if (pdfSourceHash != null) 'pdf_source_hash': pdfSourceHash,
+      if (pdfPageIndex != null) 'pdf_page_index': pdfPageIndex,
+      if (rawPencilkitHash != null) 'raw_pencilkit_hash': rawPencilkitHash,
+      if (portableInkHash != null) 'portable_ink_hash': portableInkHash,
+      if (previewPngHash != null) 'preview_png_hash': previewPngHash,
+      if (ocrText != null) 'ocr_text': ocrText,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  InkPagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? documentId,
+    Value<int>? pageNumber,
+    Value<double>? width,
+    Value<double>? height,
+    Value<String>? templateType,
+    Value<int>? backgroundColor,
+    Value<String?>? pdfSourceHash,
+    Value<int?>? pdfPageIndex,
+    Value<String?>? rawPencilkitHash,
+    Value<String?>? portableInkHash,
+    Value<String?>? previewPngHash,
+    Value<String?>? ocrText,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return InkPagesCompanion(
+      id: id ?? this.id,
+      documentId: documentId ?? this.documentId,
+      pageNumber: pageNumber ?? this.pageNumber,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      templateType: templateType ?? this.templateType,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      pdfSourceHash: pdfSourceHash ?? this.pdfSourceHash,
+      pdfPageIndex: pdfPageIndex ?? this.pdfPageIndex,
+      rawPencilkitHash: rawPencilkitHash ?? this.rawPencilkitHash,
+      portableInkHash: portableInkHash ?? this.portableInkHash,
+      previewPngHash: previewPngHash ?? this.previewPngHash,
+      ocrText: ocrText ?? this.ocrText,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (documentId.present) {
+      map['document_id'] = Variable<String>(documentId.value);
+    }
+    if (pageNumber.present) {
+      map['page_number'] = Variable<int>(pageNumber.value);
+    }
+    if (width.present) {
+      map['width'] = Variable<double>(width.value);
+    }
+    if (height.present) {
+      map['height'] = Variable<double>(height.value);
+    }
+    if (templateType.present) {
+      map['template_type'] = Variable<String>(templateType.value);
+    }
+    if (backgroundColor.present) {
+      map['background_color'] = Variable<int>(backgroundColor.value);
+    }
+    if (pdfSourceHash.present) {
+      map['pdf_source_hash'] = Variable<String>(pdfSourceHash.value);
+    }
+    if (pdfPageIndex.present) {
+      map['pdf_page_index'] = Variable<int>(pdfPageIndex.value);
+    }
+    if (rawPencilkitHash.present) {
+      map['raw_pencilkit_hash'] = Variable<String>(rawPencilkitHash.value);
+    }
+    if (portableInkHash.present) {
+      map['portable_ink_hash'] = Variable<String>(portableInkHash.value);
+    }
+    if (previewPngHash.present) {
+      map['preview_png_hash'] = Variable<String>(previewPngHash.value);
+    }
+    if (ocrText.present) {
+      map['ocr_text'] = Variable<String>(ocrText.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InkPagesCompanion(')
+          ..write('id: $id, ')
+          ..write('documentId: $documentId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('width: $width, ')
+          ..write('height: $height, ')
+          ..write('templateType: $templateType, ')
+          ..write('backgroundColor: $backgroundColor, ')
+          ..write('pdfSourceHash: $pdfSourceHash, ')
+          ..write('pdfPageIndex: $pdfPageIndex, ')
+          ..write('rawPencilkitHash: $rawPencilkitHash, ')
+          ..write('portableInkHash: $portableInkHash, ')
+          ..write('previewPngHash: $previewPngHash, ')
+          ..write('ocrText: $ocrText, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2301,8 +3726,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $NodesTable nodes = $NodesTable(this);
   late final $NodeBlocksTable nodeBlocks = $NodeBlocksTable(this);
   late final $AttachmentsTable attachments = $AttachmentsTable(this);
+  late final $InkDocumentsTable inkDocuments = $InkDocumentsTable(this);
+  late final $InkPagesTable inkPages = $InkPagesTable(this);
   late final WorkspacesDao workspacesDao = WorkspacesDao(this as AppDatabase);
   late final NodesDao nodesDao = NodesDao(this as AppDatabase);
+  late final InkDao inkDao = InkDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2312,6 +3740,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     nodes,
     nodeBlocks,
     attachments,
+    inkDocuments,
+    inkPages,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2342,6 +3772,20 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('node_blocks', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'nodes',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('ink_documents', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'ink_documents',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('ink_pages', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -2775,6 +4219,24 @@ final class $$NodesTableReferences
       manager.$state.copyWith(prefetchedData: cache),
     );
   }
+
+  static MultiTypedResultKey<$InkDocumentsTable, List<InkDocumentEntry>>
+  _inkDocumentsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.inkDocuments,
+    aliasName: 'nodes__id__ink_documents__node_id',
+  );
+
+  $$InkDocumentsTableProcessedTableManager get inkDocumentsRefs {
+    final manager = $$InkDocumentsTableTableManager(
+      $_db,
+      $_db.inkDocuments,
+    ).filter((f) => f.nodeId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_inkDocumentsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 }
 
 class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
@@ -2912,6 +4374,31 @@ class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
           }) => $$NodeBlocksTableFilterComposer(
             $db: $db,
             $table: $db.nodeBlocks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> inkDocumentsRefs(
+    Expression<bool> Function($$InkDocumentsTableFilterComposer f) f,
+  ) {
+    final $$InkDocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkDocuments,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkDocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.inkDocuments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -3169,6 +4656,31 @@ class $$NodesTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> inkDocumentsRefs<T extends Object>(
+    Expression<T> Function($$InkDocumentsTableAnnotationComposer a) f,
+  ) {
+    final $$InkDocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkDocuments,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkDocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inkDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$NodesTableTableManager
@@ -3188,6 +4700,7 @@ class $$NodesTableTableManager
             bool workspaceId,
             bool parentId,
             bool nodeBlocksRefs,
+            bool inkDocumentsRefs,
           })
         > {
   $$NodesTableTableManager(_$AppDatabase db, $NodesTable table)
@@ -3286,10 +4799,14 @@ class $$NodesTableTableManager
                 workspaceId = false,
                 parentId = false,
                 nodeBlocksRefs = false,
+                inkDocumentsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
-                  explicitlyWatchedTables: [if (nodeBlocksRefs) db.nodeBlocks],
+                  explicitlyWatchedTables: [
+                    if (nodeBlocksRefs) db.nodeBlocks,
+                    if (inkDocumentsRefs) db.inkDocuments,
+                  ],
                   addJoins:
                       <
                         T extends TableManagerState<
@@ -3353,6 +4870,26 @@ class $$NodesTableTableManager
                           referencedColumn: 'node_id',
                           typedResults: items,
                         ),
+                      if (inkDocumentsRefs)
+                        await $_getPrefetchedDataByColumns<
+                          NodeEntry,
+                          $NodesTable,
+                          InkDocumentEntry,
+                          $InkDocumentsTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$NodesTableReferences
+                              ._inkDocumentsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$NodesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).inkDocumentsRefs,
+                          currentColumn: 'id',
+                          referencedColumn: 'node_id',
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -3377,6 +4914,7 @@ typedef $$NodesTableProcessedTableManager =
         bool workspaceId,
         bool parentId,
         bool nodeBlocksRefs,
+        bool inkDocumentsRefs,
       })
     >;
 typedef $$NodeBlocksTableCreateCompanionBuilder = NodeBlocksCompanion Function({
@@ -4067,6 +5605,995 @@ typedef $$AttachmentsTableProcessedTableManager =
       AttachmentEntry,
       PrefetchHooks Function()
     >;
+typedef $$InkDocumentsTableCreateCompanionBuilder =
+    InkDocumentsCompanion Function({
+      required String id,
+      required String nodeId,
+      Value<double> defaultPageWidth,
+      Value<double> defaultPageHeight,
+      Value<String> defaultTemplate,
+      Value<int> defaultBackgroundColor,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$InkDocumentsTableUpdateCompanionBuilder =
+    InkDocumentsCompanion Function({
+      Value<String> id,
+      Value<String> nodeId,
+      Value<double> defaultPageWidth,
+      Value<double> defaultPageHeight,
+      Value<String> defaultTemplate,
+      Value<int> defaultBackgroundColor,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$InkDocumentsTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $InkDocumentsTable, InkDocumentEntry> {
+  $$InkDocumentsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $NodesTable _nodeIdTable(_$AppDatabase db) =>
+      db.nodes.createAlias('ink_documents__node_id__nodes__id');
+
+  $$NodesTableProcessedTableManager get nodeId {
+    final $_column = $_itemColumn<String>('node_id')!;
+
+    final manager = $$NodesTableTableManager(
+      $_db,
+      $_db.nodes,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_nodeIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static MultiTypedResultKey<$InkPagesTable, List<InkPageEntry>>
+  _inkPagesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.inkPages,
+    aliasName: 'ink_documents__id__ink_pages__document_id',
+  );
+
+  $$InkPagesTableProcessedTableManager get inkPagesRefs {
+    final manager = $$InkPagesTableTableManager(
+      $_db,
+      $_db.inkPages,
+    ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_inkPagesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$InkDocumentsTableFilterComposer
+    extends Composer<_$AppDatabase, $InkDocumentsTable> {
+  $$InkDocumentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get defaultPageWidth => $composableBuilder(
+    column: $table.defaultPageWidth,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get defaultPageHeight => $composableBuilder(
+    column: $table.defaultPageHeight,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get defaultTemplate => $composableBuilder(
+    column: $table.defaultTemplate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get defaultBackgroundColor => $composableBuilder(
+    column: $table.defaultBackgroundColor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$NodesTableFilterComposer get nodeId {
+    final $$NodesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableFilterComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<bool> inkPagesRefs(
+    Expression<bool> Function($$InkPagesTableFilterComposer f) f,
+  ) {
+    final $$InkPagesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkPages,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkPagesTableFilterComposer(
+            $db: $db,
+            $table: $db.inkPages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$InkDocumentsTableOrderingComposer
+    extends Composer<_$AppDatabase, $InkDocumentsTable> {
+  $$InkDocumentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get defaultPageWidth => $composableBuilder(
+    column: $table.defaultPageWidth,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get defaultPageHeight => $composableBuilder(
+    column: $table.defaultPageHeight,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get defaultTemplate => $composableBuilder(
+    column: $table.defaultTemplate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get defaultBackgroundColor => $composableBuilder(
+    column: $table.defaultBackgroundColor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$NodesTableOrderingComposer get nodeId {
+    final $$NodesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableOrderingComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$InkDocumentsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $InkDocumentsTable> {
+  $$InkDocumentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<double> get defaultPageWidth => $composableBuilder(
+    column: $table.defaultPageWidth,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get defaultPageHeight => $composableBuilder(
+    column: $table.defaultPageHeight,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get defaultTemplate => $composableBuilder(
+    column: $table.defaultTemplate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get defaultBackgroundColor => $composableBuilder(
+    column: $table.defaultBackgroundColor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$NodesTableAnnotationComposer get nodeId {
+    final $$NodesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<T> inkPagesRefs<T extends Object>(
+    Expression<T> Function($$InkPagesTableAnnotationComposer a) f,
+  ) {
+    final $$InkPagesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkPages,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkPagesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inkPages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$InkDocumentsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $InkDocumentsTable,
+          InkDocumentEntry,
+          $$InkDocumentsTableFilterComposer,
+          $$InkDocumentsTableOrderingComposer,
+          $$InkDocumentsTableAnnotationComposer,
+          $$InkDocumentsTableCreateCompanionBuilder,
+          $$InkDocumentsTableUpdateCompanionBuilder,
+          (InkDocumentEntry, $$InkDocumentsTableReferences),
+          InkDocumentEntry,
+          PrefetchHooks Function({bool nodeId, bool inkPagesRefs})
+        > {
+  $$InkDocumentsTableTableManager(_$AppDatabase db, $InkDocumentsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$InkDocumentsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$InkDocumentsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$InkDocumentsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> nodeId = const Value.absent(),
+                Value<double> defaultPageWidth = const Value.absent(),
+                Value<double> defaultPageHeight = const Value.absent(),
+                Value<String> defaultTemplate = const Value.absent(),
+                Value<int> defaultBackgroundColor = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => InkDocumentsCompanion(
+                id: id,
+                nodeId: nodeId,
+                defaultPageWidth: defaultPageWidth,
+                defaultPageHeight: defaultPageHeight,
+                defaultTemplate: defaultTemplate,
+                defaultBackgroundColor: defaultBackgroundColor,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String nodeId,
+                Value<double> defaultPageWidth = const Value.absent(),
+                Value<double> defaultPageHeight = const Value.absent(),
+                Value<String> defaultTemplate = const Value.absent(),
+                Value<int> defaultBackgroundColor = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => InkDocumentsCompanion.insert(
+                id: id,
+                nodeId: nodeId,
+                defaultPageWidth: defaultPageWidth,
+                defaultPageHeight: defaultPageHeight,
+                defaultTemplate: defaultTemplate,
+                defaultBackgroundColor: defaultBackgroundColor,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$InkDocumentsTable, InkDocumentEntry>(table),
+                  $$InkDocumentsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({nodeId = false, inkPagesRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (inkPagesRefs) db.inkPages],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (nodeId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.nodeId,
+                        referencedTable: $$InkDocumentsTableReferences
+                            ._nodeIdTable(db),
+                        referencedColumn: $$InkDocumentsTableReferences
+                            ._nodeIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (inkPagesRefs)
+                    await $_getPrefetchedDataByColumns<
+                      InkDocumentEntry,
+                      $InkDocumentsTable,
+                      InkPageEntry,
+                      $InkPagesTable
+                    >(
+                      currentTable: table,
+                      referencedTable: $$InkDocumentsTableReferences
+                          ._inkPagesRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$InkDocumentsTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).inkPagesRefs,
+                      currentColumn: 'id',
+                      referencedColumn: 'document_id',
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$InkDocumentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $InkDocumentsTable,
+      InkDocumentEntry,
+      $$InkDocumentsTableFilterComposer,
+      $$InkDocumentsTableOrderingComposer,
+      $$InkDocumentsTableAnnotationComposer,
+      $$InkDocumentsTableCreateCompanionBuilder,
+      $$InkDocumentsTableUpdateCompanionBuilder,
+      (InkDocumentEntry, $$InkDocumentsTableReferences),
+      InkDocumentEntry,
+      PrefetchHooks Function({bool nodeId, bool inkPagesRefs})
+    >;
+typedef $$InkPagesTableCreateCompanionBuilder = InkPagesCompanion Function({
+  required String id,
+  required String documentId,
+  required int pageNumber,
+  Value<double> width,
+  Value<double> height,
+  Value<String> templateType,
+  Value<int> backgroundColor,
+  Value<String?> pdfSourceHash,
+  Value<int?> pdfPageIndex,
+  Value<String?> rawPencilkitHash,
+  Value<String?> portableInkHash,
+  Value<String?> previewPngHash,
+  Value<String?> ocrText,
+  required DateTime createdAt,
+  required DateTime updatedAt,
+  Value<int> rowid,
+});
+typedef $$InkPagesTableUpdateCompanionBuilder = InkPagesCompanion Function({
+  Value<String> id,
+  Value<String> documentId,
+  Value<int> pageNumber,
+  Value<double> width,
+  Value<double> height,
+  Value<String> templateType,
+  Value<int> backgroundColor,
+  Value<String?> pdfSourceHash,
+  Value<int?> pdfPageIndex,
+  Value<String?> rawPencilkitHash,
+  Value<String?> portableInkHash,
+  Value<String?> previewPngHash,
+  Value<String?> ocrText,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<int> rowid,
+});
+
+final class $$InkPagesTableReferences
+    extends BaseReferences<_$AppDatabase, $InkPagesTable, InkPageEntry> {
+  $$InkPagesTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $InkDocumentsTable _documentIdTable(_$AppDatabase db) =>
+      db.inkDocuments.createAlias('ink_pages__document_id__ink_documents__id');
+
+  $$InkDocumentsTableProcessedTableManager get documentId {
+    final $_column = $_itemColumn<String>('document_id')!;
+
+    final manager = $$InkDocumentsTableTableManager(
+      $_db,
+      $_db.inkDocuments,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_documentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$InkPagesTableFilterComposer
+    extends Composer<_$AppDatabase, $InkPagesTable> {
+  $$InkPagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get width => $composableBuilder(
+    column: $table.width,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get height => $composableBuilder(
+    column: $table.height,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get templateType => $composableBuilder(
+    column: $table.templateType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get backgroundColor => $composableBuilder(
+    column: $table.backgroundColor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pdfSourceHash => $composableBuilder(
+    column: $table.pdfSourceHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pdfPageIndex => $composableBuilder(
+    column: $table.pdfPageIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rawPencilkitHash => $composableBuilder(
+    column: $table.rawPencilkitHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get portableInkHash => $composableBuilder(
+    column: $table.portableInkHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get previewPngHash => $composableBuilder(
+    column: $table.previewPngHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ocrText => $composableBuilder(
+    column: $table.ocrText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$InkDocumentsTableFilterComposer get documentId {
+    final $$InkDocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.inkDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkDocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.inkDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$InkPagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $InkPagesTable> {
+  $$InkPagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get width => $composableBuilder(
+    column: $table.width,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get height => $composableBuilder(
+    column: $table.height,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get templateType => $composableBuilder(
+    column: $table.templateType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get backgroundColor => $composableBuilder(
+    column: $table.backgroundColor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pdfSourceHash => $composableBuilder(
+    column: $table.pdfSourceHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pdfPageIndex => $composableBuilder(
+    column: $table.pdfPageIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rawPencilkitHash => $composableBuilder(
+    column: $table.rawPencilkitHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get portableInkHash => $composableBuilder(
+    column: $table.portableInkHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get previewPngHash => $composableBuilder(
+    column: $table.previewPngHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ocrText => $composableBuilder(
+    column: $table.ocrText,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$InkDocumentsTableOrderingComposer get documentId {
+    final $$InkDocumentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.inkDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkDocumentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.inkDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$InkPagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $InkPagesTable> {
+  $$InkPagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get width =>
+      $composableBuilder(column: $table.width, builder: (column) => column);
+
+  GeneratedColumn<double> get height =>
+      $composableBuilder(column: $table.height, builder: (column) => column);
+
+  GeneratedColumn<String> get templateType => $composableBuilder(
+    column: $table.templateType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get backgroundColor => $composableBuilder(
+    column: $table.backgroundColor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get pdfSourceHash => $composableBuilder(
+    column: $table.pdfSourceHash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get pdfPageIndex => $composableBuilder(
+    column: $table.pdfPageIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get rawPencilkitHash => $composableBuilder(
+    column: $table.rawPencilkitHash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get portableInkHash => $composableBuilder(
+    column: $table.portableInkHash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get previewPngHash => $composableBuilder(
+    column: $table.previewPngHash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ocrText =>
+      $composableBuilder(column: $table.ocrText, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$InkDocumentsTableAnnotationComposer get documentId {
+    final $$InkDocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.inkDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkDocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inkDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$InkPagesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $InkPagesTable,
+          InkPageEntry,
+          $$InkPagesTableFilterComposer,
+          $$InkPagesTableOrderingComposer,
+          $$InkPagesTableAnnotationComposer,
+          $$InkPagesTableCreateCompanionBuilder,
+          $$InkPagesTableUpdateCompanionBuilder,
+          (InkPageEntry, $$InkPagesTableReferences),
+          InkPageEntry,
+          PrefetchHooks Function({bool documentId})
+        > {
+  $$InkPagesTableTableManager(_$AppDatabase db, $InkPagesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$InkPagesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$InkPagesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$InkPagesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> documentId = const Value.absent(),
+                Value<int> pageNumber = const Value.absent(),
+                Value<double> width = const Value.absent(),
+                Value<double> height = const Value.absent(),
+                Value<String> templateType = const Value.absent(),
+                Value<int> backgroundColor = const Value.absent(),
+                Value<String?> pdfSourceHash = const Value.absent(),
+                Value<int?> pdfPageIndex = const Value.absent(),
+                Value<String?> rawPencilkitHash = const Value.absent(),
+                Value<String?> portableInkHash = const Value.absent(),
+                Value<String?> previewPngHash = const Value.absent(),
+                Value<String?> ocrText = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => InkPagesCompanion(
+                id: id,
+                documentId: documentId,
+                pageNumber: pageNumber,
+                width: width,
+                height: height,
+                templateType: templateType,
+                backgroundColor: backgroundColor,
+                pdfSourceHash: pdfSourceHash,
+                pdfPageIndex: pdfPageIndex,
+                rawPencilkitHash: rawPencilkitHash,
+                portableInkHash: portableInkHash,
+                previewPngHash: previewPngHash,
+                ocrText: ocrText,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String documentId,
+                required int pageNumber,
+                Value<double> width = const Value.absent(),
+                Value<double> height = const Value.absent(),
+                Value<String> templateType = const Value.absent(),
+                Value<int> backgroundColor = const Value.absent(),
+                Value<String?> pdfSourceHash = const Value.absent(),
+                Value<int?> pdfPageIndex = const Value.absent(),
+                Value<String?> rawPencilkitHash = const Value.absent(),
+                Value<String?> portableInkHash = const Value.absent(),
+                Value<String?> previewPngHash = const Value.absent(),
+                Value<String?> ocrText = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => InkPagesCompanion.insert(
+                id: id,
+                documentId: documentId,
+                pageNumber: pageNumber,
+                width: width,
+                height: height,
+                templateType: templateType,
+                backgroundColor: backgroundColor,
+                pdfSourceHash: pdfSourceHash,
+                pdfPageIndex: pdfPageIndex,
+                rawPencilkitHash: rawPencilkitHash,
+                portableInkHash: portableInkHash,
+                previewPngHash: previewPngHash,
+                ocrText: ocrText,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$InkPagesTable, InkPageEntry>(table),
+                  $$InkPagesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({documentId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (documentId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.documentId,
+                        referencedTable: $$InkPagesTableReferences
+                            ._documentIdTable(db),
+                        referencedColumn: $$InkPagesTableReferences
+                            ._documentIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$InkPagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $InkPagesTable,
+      InkPageEntry,
+      $$InkPagesTableFilterComposer,
+      $$InkPagesTableOrderingComposer,
+      $$InkPagesTableAnnotationComposer,
+      $$InkPagesTableCreateCompanionBuilder,
+      $$InkPagesTableUpdateCompanionBuilder,
+      (InkPageEntry, $$InkPagesTableReferences),
+      InkPageEntry,
+      PrefetchHooks Function({bool documentId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4079,4 +6606,8 @@ class $AppDatabaseManager {
       $$NodeBlocksTableTableManager(_db, _db.nodeBlocks);
   $$AttachmentsTableTableManager get attachments =>
       $$AttachmentsTableTableManager(_db, _db.attachments);
+  $$InkDocumentsTableTableManager get inkDocuments =>
+      $$InkDocumentsTableTableManager(_db, _db.inkDocuments);
+  $$InkPagesTableTableManager get inkPages =>
+      $$InkPagesTableTableManager(_db, _db.inkPages);
 }

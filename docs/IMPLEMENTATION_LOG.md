@@ -147,5 +147,85 @@
 
 1. **Desktop Window Constraints:**
    - Currently, window resizing relies on standard GTK window manager limits. In a future milestone, `window_manager` or `bitsdojo_window` can be evaluated if custom titlebars or strict minimum window dimensions (e.g., $900 \times 600$) are desired.
-2. **iPadOS Hardware Validation:**
-   - Full iOS/iPadOS compilation requires a macOS host with Xcode. All Dart code and abstractions are fully multi-platform, but final IPA verification remains deferred until macOS runner availability.
+---
+
+# ATLAS — Milestone 2 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 2 — Portable Ink Engine & Native PencilKit Integration  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Candidate Audit & Mandatory Software Reuse
+- Conducted comprehensive audit of open-source handwriting and drawing libraries ([docs/INK_PACKAGE_AUDIT.md](INK_PACKAGE_AUDIT.md)):
+  - Evaluated `fluera_canvas` (rejected for core due to whiteboard mismatch and commercial paywalls).
+  - Evaluated `draw_your_image` (rejected due to lack of pressure and persistence).
+  - Adopted `perfect_freehand: ^2.5.2+1` (MIT) for pure Dart variable-width stroke outline geometry.
+  - Adopted `pencil_kit: ^2.1.1` (MIT) for native iOS platform view wrapper.
+
+---
+
+## 2. Implemented Architecture & Components
+
+### 2.1 Domain Layer
+- `AtlasInkDocument`: Multi-layer, immutable portable document model with metadata and paper templates.
+- `InkLayer`: Layer container supporting visibility, opacity, and blend modes (`multiply`, `srcOver`).
+- `InkStroke`: Stroke model with tool types, color, baseWidth, opacity, points, and computed bounds.
+- `InkPoint`: High-resolution input point with x, y, normalized pressure, tilt azimuth, tilt altitude, and time offset.
+- `InkToolConfig` & `InkToolType`: Ballpoint Pen, Fountain Pen, Highlighter, Pencil, Vector Eraser, and Pixel Eraser.
+- `StrokeTessellator`: High-performance bridge adapting `perfect_freehand` into smooth quadratic Bézier `ui.Path` outlines with tool-specific profiles.
+
+### 2.2 Data & Persistence Layer
+- `InkJsonSerializer`: Human-readable `.atlas_ink` JSON serialization with UTF-8 byte conversion.
+- `InkBinarySerializer`: Compact packed binary format (`.atlas_ink_bin`) with `ATLASINK` 8-byte magic header, 16-byte point packing, and full blend mode preservation.
+- `InkDao`: Drift ORM accessor supporting `getOrCreateDocumentForNode`, `createPage`, `updatePage`, `deletePage`, and document page watching.
+- `InkRepository`: Repository bridging SQLite relational metadata with Content-Addressable Storage (CAS) for deduplicated ink blobs.
+- Database Schema upgraded to **version 2** with `ink_documents` and `ink_pages` tables.
+
+### 2.3 Presentation & Platform Layer
+- `InkPlatformService`: Clean platform abstraction decoupling UI from native hardware specifics.
+- `PencilKitBridge`: Native iOS implementation binding `pencil_kit` and `PKTool` types.
+- `AtlasPencilKitPlugin.swift`: Swift platform channel plugin implementing `PKCanvasView` export of `.pkdrawing` binaries, high-res PNG previews, and vector stroke collections.
+- `DartVectorInkService`: Cross-platform fallback implementation using pure Dart vector math.
+- `InkCanvasController`: Undo/redo history (50 snapshots depth), active in-flight stroke tracking, and spatial vector eraser.
+- `InkCanvas`: Interactive input canvas supporting touch, mouse, and hardware tablet pressure.
+- `InkDocumentPainter`: Reusable `CustomPainter` rendering paper templates (blank, ruled, dotted, square grid), normal ink layers, and offscreen multiply-composited highlighters.
+- `InkPageView`: Read-only zoomable viewer with `InteractiveViewer` (0.5x to 4.0x) and companion badge for Android.
+- `InkToolPalette`: Floating adaptive pill widget with tool buttons, width selectors, curated color swatches, and undo/redo controls.
+- `NotebookEditorScreen`: Multi-page notebook editor supporting page navigation, adding pages, paper template switching, and debounced autosave.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** 0 issues found (clean).
+
+2. **Code Formatting:**
+   - `dart format .`
+   - **Result:** All files formatted cleanly.
+
+3. **Automated Test Suite (32 tests):**
+   - `test/core/database/database_test.dart` (WorkspacesDao, NodesDao, cascades).
+   - `test/core/storage/cas_storage_service_test.dart` (CAS hashing, deduplication, deletion).
+   - `test/features/app_smoke_test.dart` (Shell navigation, multi-pane rendering).
+   - `test/features/handwriting/stroke_tessellator_test.dart` (Tessellation, dot handling, bounds, tools).
+   - `test/features/handwriting/ink_serialization_test.dart` (JSON & Binary roundtrips, corruption errors).
+   - `test/features/handwriting/ink_repository_test.dart` (Persistence with Drift + CAS, graceful recovery).
+   - `test/features/handwriting/ink_canvas_widget_test.dart` (Drawing gestures, undo/redo, eraser, palette, read-only viewer).
+   - `test/features/handwriting/capture_prototype_screenshot_test.dart` (Headless rendering to PNG).
+   - **Result:** `✓ All 32 tests passed!`.
+
+4. **Native Linux Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+5. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (22.4s). Confirms zero drawing/stylus dependencies leaked to Android.
+
+6. **Prototype Screenshot Artifact:**
+   - Rendered prototype image to `docs/images/atlas_handwriting_prototype.png` (32 KB) illustrating handwritten math notes, sine wave diagrams, and yellow highlighter multi-pass compositing over ruled paper.

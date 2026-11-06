@@ -6,6 +6,7 @@ import '../../features/calendar/presentation/calendar_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/documents/presentation/document_detail_screen.dart';
 import '../../features/documents/presentation/documents_screen.dart';
+import '../../features/handwriting/presentation/screens/notebook_editor_screen.dart';
 import '../../features/notebooks/presentation/notebooks_screen.dart';
 import '../../features/search/presentation/search_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
@@ -36,6 +37,17 @@ GoRouter createAppRouter({String initialLocation = AtlasRoutes.dashboard}) {
             path: AtlasRoutes.notebooks,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: NotebooksScreen()),
+            routes: [
+              GoRoute(
+                path: ':id',
+                pageBuilder: (context, state) {
+                  final id = state.pathParameters['id'] ?? '';
+                  return NoTransitionPage(
+                    child: NotebookEditorScreen(notebookId: id),
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: AtlasRoutes.documents,

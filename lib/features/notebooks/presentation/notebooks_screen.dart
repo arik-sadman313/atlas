@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
+import '../../../core/router/routes.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
 import '../../../shared/widgets/atlas_button.dart';
@@ -173,14 +175,7 @@ class NotebooksScreen extends ConsumerWidget {
 
                         return AtlasCard(
                           onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Notebook "${nb.title}" opened. Handwriting canvas engine arrives in Milestone 2.',
-                                ),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
+                            context.go('${AtlasRoutes.notebooks}/${nb.id}');
                           },
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

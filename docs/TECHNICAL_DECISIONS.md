@@ -14,6 +14,9 @@
 - [ADR-010: Adoption of pdfrx (PDFium) for High-Performance PDF Rendering](#adr-010-adoption-of-pdfrx-pdfium-for-high-performance-pdf-rendering)
 - [ADR-011: Staging of SQLite FTS5 with Custom SQLite Bundling for Milestone 3](#adr-011-staging-of-sqlite-fts5-with-custom-sqlite-bundling-for-milestone-3)
 - [ADR-012: Adoption of Riverpod 3.x Notifier Pattern over Legacy StateNotifier](#adr-012-adoption-of-riverpod-3x-notifier-pattern-over-legacy-statenotifier)
+- [ADR-013: Variable-width Ink Tessellation via perfect_freehand](#adr-013-variable-width-ink-tessellation-via-perfect_freehand)
+- [ADR-014: Native Apple Pencil Integration via pencil_kit and InkPlatformService](#adr-014-native-apple-pencil-integration-via-pencil_kit-and-inkplatformservice)
+- [ADR-015: Offscreen Multiply Compositing for Multi-Layer Highlighters](#adr-015-offscreen-multiply-compositing-for-multi-layer-highlighters)
 
 ---
 
@@ -174,4 +177,40 @@
 - **Consequences:**
   - (+) Eliminates technical debt from using deprecated state primitives.
   - (+) Future-proof code compatible with Riverpod code generation and testing.
+
+---
+
+### ADR-013: Variable-width Ink Tessellation via perfect_freehand
+
+- **Status:** Accepted
+- **Context:** Milestone 2 requires high-performance, variable-width, pressure-sensitive stroke outline calculation across desktop, tablet, and mobile companion platforms without reinventing mature geometry pipelines from scratch.
+- **Decision:** Adopt `perfect_freehand` (v2.5.2+1, MIT License), which generates dynamic polygon outlines based on Dave Rupert / Steve Ruiz's algorithm, adapted inside [`StrokeTessellator`](../lib/features/handwriting/domain/math/stroke_tessellator.dart).
+- **Alternatives Considered:**
+  - *Custom Catmull-Rom Splines from scratch:* Reinventing the wheel; high risk of edge-case artifacts, corner pinching, and maintenance overhead.
+  - *Fluera Canvas:* Evaluated in `docs/INK_PACKAGE_AUDIT.md`; rejected due to infinite whiteboard focus mismatch, undocumented serialization, and commercial paywall.
+- **Consequences:**
+  - (+) Pure Dart, zero native dependency, runs identically on Linux, Android, and iOS.
+  - (+) Flawless quadratic Bézier interpolation producing natural pen, pencil, and chisel highlighter outlines.
+
+---
+
+### ADR-014: Native Apple Pencil Integration via pencil_kit and InkPlatformService
+
+- **Status:** Accepted
+- **Context:** On iPadOS, achieving sub-10ms latency and native Apple Pencil interactions (Pencil hover, double-tap, squeeze, tilt, hardware palm rejection) requires Apple's `PencilKit`.
+- **Decision:** Integrate `pencil_kit` (v2.1.1, MIT License) to embed native `PKCanvasView` inside Flutter, abstracted behind the ATLAS [`InkPlatformService`](../lib/features/handwriting/presentation/platform/ink_platform_service.dart) and [`PencilKitBridge`](../lib/features/handwriting/presentation/platform/pencil_kit_bridge.dart), paired with custom Swift native plugin [`AtlasPencilKitPlugin.swift`](../ios/Runner/PencilKit/AtlasPencilKitPlugin.swift).
+- **Consequences:**
+  - (+) First-class native Apple Pencil support on iPadOS.
+  - (+) Platform abstraction enables seamless fallback to pure Dart vector rendering on Linux desktop and Android companion.
+
+---
+
+### ADR-015: Offscreen Multiply Compositing for Multi-Layer Highlighters
+
+- **Status:** Accepted
+- **Context:** Standard vector stroke rendering draws each stroke sequentially on top of previous strokes. For translucent highlighter markers (e.g. 40% opacity yellow), overlapping strokes or strokes doubling back on themselves artificially darken, creating ugly muddy artifacts.
+- **Decision:** In [`InkDocumentPainter`](../lib/features/handwriting/presentation/widgets/ink_document_painter.dart), all highlighter strokes on a page are isolated into a dedicated offscreen canvas layer (`canvas.saveLayer`) rendered using `BlendMode.multiply` onto the paper background.
+- **Consequences:**
+  - (+) Overlapping highlighter strokes fuse seamlessly like physical ink on paper without darkening seams.
+  - (+) Text beneath the highlighter remains perfectly crisp and readable.
 
