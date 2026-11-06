@@ -178,6 +178,18 @@ void main() {
           throwsA(isA<StorageException>()),
         );
       });
+
+      test('rejects binary data with future unsupported version', () {
+        final futureVersionBytes = Uint8List.fromList([
+          0x41, 0x54, 0x4C, 0x41, 0x53, 0x49, 0x4E, 0x4B, // ATLASINK
+          0x00, 0x63, // version 99
+        ]);
+
+        expect(
+          () => InkBinarySerializer.deserialize(futureVersionBytes),
+          throwsA(isA<StorageException>()),
+        );
+      });
     });
   });
 }

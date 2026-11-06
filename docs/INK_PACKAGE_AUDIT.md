@@ -135,3 +135,4 @@ graph TD
 | **Desktop Linux Input** | **Flutter Native `PointerEvent` API** | BSD-3 | Native USB graphics tablet pressure & tilt capture. |
 | **Rendering & Caching** | **`CustomPainter` + `ui.PictureRecorder`** | BSD-3 | Texture-backed caching isolates historical strokes from in-flight input, maintaining 60fps/120fps. |
 | **Portable Document Model** | **ATLAS-Owned `.atlas_ink` Engine** | ATLAS Core | Open, versioned JSON and binary packed format bridging PencilKit and Dart vector rendering. |
+
