@@ -16,9 +16,9 @@ void main() {
     });
 
     test(
-      'fresh database initializes schema version 6 with all tables',
+      'fresh database initializes schema version 6+ with all tables',
       () async {
-        expect(database.schemaVersion, 6);
+        expect(database.schemaVersion, greaterThanOrEqualTo(6));
 
         final now = DateTime.now();
         const wsId = 'ws-v6-test';
@@ -333,36 +333,30 @@ void main() {
           sortOrder: 0,
           createdAt: DateTime(2026, 11, 1),
           updatedAt: DateTime(2026, 11, 1),
+          clientModifiedAt: DateTime(2026, 11, 1),
+          modifiedDeviceId: 'test-device',
+          syncVersion: 1,
         );
 
         final today = DateTime(2026, 11, 6);
 
+        HabitLogEntry makeLog(String id, String logDate) => HabitLogEntry(
+          id: id,
+          habitId: habit.id,
+          logDate: logDate,
+          completedCount: 1,
+          isCompleted: true,
+          createdAt: today,
+          clientModifiedAt: today,
+          modifiedDeviceId: 'test-device',
+          syncVersion: 1,
+        );
+
         // Case A: Completed today (Nov 6), yesterday (Nov 5), Nov 4 -> 3-day current streak
         final logsA = [
-          HabitLogEntry(
-            id: '1',
-            habitId: habit.id,
-            logDate: '2026-11-06',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '2',
-            habitId: habit.id,
-            logDate: '2026-11-05',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '3',
-            habitId: habit.id,
-            logDate: '2026-11-04',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
+          makeLog('1', '2026-11-06'),
+          makeLog('2', '2026-11-05'),
+          makeLog('3', '2026-11-04'),
         ];
         final progA = HabitsDao.calculateProgress(habit, logsA, today);
         expect(progA.isCompletedToday, isTrue);
@@ -370,48 +364,14 @@ void main() {
         expect(progA.bestStreak, 3);
 
         // Case B: Not completed today, but completed yesterday (Nov 5) and Nov 4 -> 2-day current streak alive
-        final logsB = [
-          HabitLogEntry(
-            id: '2',
-            habitId: habit.id,
-            logDate: '2026-11-05',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '3',
-            habitId: habit.id,
-            logDate: '2026-11-04',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-        ];
+        final logsB = [makeLog('2', '2026-11-05'), makeLog('3', '2026-11-04')];
         final progB = HabitsDao.calculateProgress(habit, logsB, today);
         expect(progB.isCompletedToday, isFalse);
         expect(progB.currentStreak, 2);
         expect(progB.bestStreak, 2);
 
         // Case C: Broken streak (missed yesterday Nov 5, completed Nov 4 and Nov 3) -> current streak 0, best streak 2
-        final logsC = [
-          HabitLogEntry(
-            id: '3',
-            habitId: habit.id,
-            logDate: '2026-11-04',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '4',
-            habitId: habit.id,
-            logDate: '2026-11-03',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-        ];
+        final logsC = [makeLog('3', '2026-11-04'), makeLog('4', '2026-11-03')];
         final progC = HabitsDao.calculateProgress(habit, logsC, today);
         expect(progC.isCompletedToday, isFalse);
         expect(progC.currentStreak, 0);
@@ -419,46 +379,11 @@ void main() {
 
         // Case D: Reset with today check-in (Nov 6 done, Nov 5 missed, Nov 4-1 done) -> current streak 1, best streak 4
         final logsD = [
-          HabitLogEntry(
-            id: '1',
-            habitId: habit.id,
-            logDate: '2026-11-06',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '3',
-            habitId: habit.id,
-            logDate: '2026-11-04',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '4',
-            habitId: habit.id,
-            logDate: '2026-11-03',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '5',
-            habitId: habit.id,
-            logDate: '2026-11-02',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
-          HabitLogEntry(
-            id: '6',
-            habitId: habit.id,
-            logDate: '2026-11-01',
-            completedCount: 1,
-            isCompleted: true,
-            createdAt: today,
-          ),
+          makeLog('1', '2026-11-06'),
+          makeLog('3', '2026-11-04'),
+          makeLog('4', '2026-11-03'),
+          makeLog('5', '2026-11-02'),
+          makeLog('6', '2026-11-01'),
         ];
         final progD = HabitsDao.calculateProgress(habit, logsD, today);
         expect(progD.isCompletedToday, isTrue);

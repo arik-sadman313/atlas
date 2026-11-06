@@ -14,7 +14,10 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
 
   Stream<List<CalendarEventEntry>> watchAllEvents(String workspaceId) {
     return (select(calendarEvents)
-          ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+          ..where(
+            (tbl) =>
+                tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull(),
+          )
           ..orderBy([
             (tbl) =>
                 OrderingTerm(expression: tbl.startTime, mode: OrderingMode.asc),
@@ -31,6 +34,7 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
           ..where(
             (tbl) =>
                 tbl.workspaceId.equals(workspaceId) &
+                tbl.deletedAt.isNull() &
                 tbl.endTime.isBiggerOrEqualValue(start) &
                 tbl.startTime.isSmallerOrEqualValue(end),
           )
@@ -52,6 +56,7 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
           ..where(
             (tbl) =>
                 tbl.workspaceId.equals(workspaceId) &
+                tbl.deletedAt.isNull() &
                 tbl.endTime.isBiggerOrEqualValue(start) &
                 tbl.startTime.isSmallerOrEqualValue(end),
           )
@@ -84,7 +89,7 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
 
   Stream<List<CalendarEventEntry>> watchEventsForNode(String nodeId) {
     return (select(calendarEvents)
-          ..where((tbl) => tbl.nodeId.equals(nodeId))
+          ..where((tbl) => tbl.nodeId.equals(nodeId) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) =>
                 OrderingTerm(expression: tbl.startTime, mode: OrderingMode.asc),
@@ -93,9 +98,9 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
   }
 
   Future<CalendarEventEntry?> getEvent(String id) {
-    return (select(
-      calendarEvents,
-    )..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
+    return (select(calendarEvents)
+          ..where((tbl) => tbl.id.equals(id) & tbl.deletedAt.isNull()))
+        .getSingleOrNull();
   }
 
   Future<void> createEvent(CalendarEventsCompanion event) {
@@ -106,7 +111,17 @@ class CalendarDao extends DatabaseAccessor<AppDatabase>
     return update(calendarEvents).replace(event);
   }
 
-  Future<int> deleteEvent(String id) {
-    return (delete(calendarEvents)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deleteEvent(String id, {bool hardDelete = false}) {
+    if (hardDelete) {
+      return (delete(calendarEvents)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    return (update(calendarEvents)..where((tbl) => tbl.id.equals(id))).write(
+      CalendarEventsCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 }

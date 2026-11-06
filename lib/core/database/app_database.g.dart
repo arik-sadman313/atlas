@@ -89,6 +89,54 @@ class $WorkspacesTable extends Workspaces
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -98,6 +146,10 @@ class $WorkspacesTable extends Workspaces
     createdAt,
     updatedAt,
     isDeleted,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -161,6 +213,39 @@ class $WorkspacesTable extends Workspaces
         isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta),
       );
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -198,6 +283,22 @@ class $WorkspacesTable extends Workspaces
         DriftSqlType.bool,
         data['${effectivePrefix}is_deleted'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -215,6 +316,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isDeleted;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const WorkspaceEntry({
     required this.id,
     required this.name,
@@ -223,6 +328,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
     required this.createdAt,
     required this.updatedAt,
     required this.isDeleted,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -236,6 +345,12 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     map['is_deleted'] = Variable<bool>(isDeleted);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -248,6 +363,12 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       isDeleted: Value(isDeleted),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -264,6 +385,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -277,6 +402,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'isDeleted': serializer.toJson<bool>(isDeleted),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -288,6 +417,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
     DateTime? createdAt,
     DateTime? updatedAt,
     bool? isDeleted,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => WorkspaceEntry(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -296,6 +429,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     isDeleted: isDeleted ?? this.isDeleted,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   WorkspaceEntry copyWithCompanion(WorkspacesCompanion data) {
     return WorkspaceEntry(
@@ -308,6 +445,16 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -320,7 +467,11 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
           ..write('settingsJson: $settingsJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('isDeleted: $isDeleted')
+          ..write('isDeleted: $isDeleted, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -334,6 +485,10 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
     createdAt,
     updatedAt,
     isDeleted,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -345,7 +500,11 @@ class WorkspaceEntry extends DataClass implements Insertable<WorkspaceEntry> {
           other.settingsJson == this.settingsJson &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
-          other.isDeleted == this.isDeleted);
+          other.isDeleted == this.isDeleted &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
@@ -356,6 +515,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<bool> isDeleted;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const WorkspacesCompanion({
     this.id = const Value.absent(),
@@ -365,6 +528,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WorkspacesCompanion.insert({
@@ -375,6 +542,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
     required DateTime createdAt,
     required DateTime updatedAt,
     this.isDeleted = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -388,6 +559,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<bool>? isDeleted,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -398,6 +573,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (isDeleted != null) 'is_deleted': isDeleted,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -410,6 +589,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<bool>? isDeleted,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return WorkspacesCompanion(
@@ -420,6 +603,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       isDeleted: isDeleted ?? this.isDeleted,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -448,6 +635,18 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -464,6 +663,10 @@ class WorkspacesCompanion extends UpdateCompanion<WorkspaceEntry> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -671,6 +874,54 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -689,6 +940,10 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
     metadataJson,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -819,6 +1074,39 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -892,6 +1180,22 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -918,6 +1222,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
   final String metadataJson;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const NodeEntry({
     required this.id,
     required this.workspaceId,
@@ -935,6 +1243,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     required this.metadataJson,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -963,6 +1275,12 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     map['metadata_json'] = Variable<String>(metadataJson);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -990,6 +1308,12 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       metadataJson: Value(metadataJson),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -1015,6 +1339,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       metadataJson: serializer.fromJson<String>(json['metadataJson']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -1037,6 +1365,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       'metadataJson': serializer.toJson<String>(metadataJson),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -1057,6 +1389,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     String? metadataJson,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => NodeEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -1076,6 +1412,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     metadataJson: metadataJson ?? this.metadataJson,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   NodeEntry copyWithCompanion(NodesCompanion data) {
     return NodeEntry(
@@ -1107,6 +1447,16 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
           : this.metadataJson,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -1128,7 +1478,11 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
           ..write('isDeleted: $isDeleted, ')
           ..write('metadataJson: $metadataJson, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -1151,6 +1505,10 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     metadataJson,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -1171,7 +1529,11 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
           other.isDeleted == this.isDeleted &&
           other.metadataJson == this.metadataJson &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class NodesCompanion extends UpdateCompanion<NodeEntry> {
@@ -1191,6 +1553,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
   final Value<String> metadataJson;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const NodesCompanion({
     this.id = const Value.absent(),
@@ -1209,6 +1575,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     this.metadataJson = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NodesCompanion.insert({
@@ -1228,6 +1598,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     this.metadataJson = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -1252,6 +1626,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     Expression<String>? metadataJson,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1271,6 +1649,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
       if (metadataJson != null) 'metadata_json': metadataJson,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1292,6 +1674,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     Value<String>? metadataJson,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return NodesCompanion(
@@ -1311,6 +1697,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
       metadataJson: metadataJson ?? this.metadataJson,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1366,6 +1756,18 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1391,6 +1793,10 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
           ..write('metadataJson: $metadataJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2963,6 +3369,54 @@ class $PdfDocumentsTable extends PdfDocuments
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2972,6 +3426,10 @@ class $PdfDocumentsTable extends PdfDocuments
     fileSizeBytes,
     pageCount,
     createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3041,6 +3499,39 @@ class $PdfDocumentsTable extends PdfDocuments
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3078,6 +3569,22 @@ class $PdfDocumentsTable extends PdfDocuments
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -3096,6 +3603,10 @@ class PdfDocumentEntry extends DataClass
   final int fileSizeBytes;
   final int pageCount;
   final DateTime createdAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const PdfDocumentEntry({
     required this.id,
     required this.nodeId,
@@ -3104,6 +3615,10 @@ class PdfDocumentEntry extends DataClass
     required this.fileSizeBytes,
     required this.pageCount,
     required this.createdAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3115,6 +3630,12 @@ class PdfDocumentEntry extends DataClass
     map['file_size_bytes'] = Variable<int>(fileSizeBytes);
     map['page_count'] = Variable<int>(pageCount);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -3127,6 +3648,12 @@ class PdfDocumentEntry extends DataClass
       fileSizeBytes: Value(fileSizeBytes),
       pageCount: Value(pageCount),
       createdAt: Value(createdAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -3143,6 +3670,10 @@ class PdfDocumentEntry extends DataClass
       fileSizeBytes: serializer.fromJson<int>(json['fileSizeBytes']),
       pageCount: serializer.fromJson<int>(json['pageCount']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -3156,6 +3687,10 @@ class PdfDocumentEntry extends DataClass
       'fileSizeBytes': serializer.toJson<int>(fileSizeBytes),
       'pageCount': serializer.toJson<int>(pageCount),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -3167,6 +3702,10 @@ class PdfDocumentEntry extends DataClass
     int? fileSizeBytes,
     int? pageCount,
     DateTime? createdAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => PdfDocumentEntry(
     id: id ?? this.id,
     nodeId: nodeId ?? this.nodeId,
@@ -3175,6 +3714,10 @@ class PdfDocumentEntry extends DataClass
     fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
     pageCount: pageCount ?? this.pageCount,
     createdAt: createdAt ?? this.createdAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   PdfDocumentEntry copyWithCompanion(PdfDocumentsCompanion data) {
     return PdfDocumentEntry(
@@ -3187,6 +3730,16 @@ class PdfDocumentEntry extends DataClass
           : this.fileSizeBytes,
       pageCount: data.pageCount.present ? data.pageCount.value : this.pageCount,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -3199,7 +3752,11 @@ class PdfDocumentEntry extends DataClass
           ..write('fileName: $fileName, ')
           ..write('fileSizeBytes: $fileSizeBytes, ')
           ..write('pageCount: $pageCount, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -3213,6 +3770,10 @@ class PdfDocumentEntry extends DataClass
     fileSizeBytes,
     pageCount,
     createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -3224,7 +3785,11 @@ class PdfDocumentEntry extends DataClass
           other.fileName == this.fileName &&
           other.fileSizeBytes == this.fileSizeBytes &&
           other.pageCount == this.pageCount &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
@@ -3235,6 +3800,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
   final Value<int> fileSizeBytes;
   final Value<int> pageCount;
   final Value<DateTime> createdAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const PdfDocumentsCompanion({
     this.id = const Value.absent(),
@@ -3244,6 +3813,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
     this.fileSizeBytes = const Value.absent(),
     this.pageCount = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PdfDocumentsCompanion.insert({
@@ -3254,6 +3827,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
     required int fileSizeBytes,
     required int pageCount,
     required DateTime createdAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        nodeId = Value(nodeId),
@@ -3270,6 +3847,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
     Expression<int>? fileSizeBytes,
     Expression<int>? pageCount,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3280,6 +3861,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
       if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
       if (pageCount != null) 'page_count': pageCount,
       if (createdAt != null) 'created_at': createdAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3292,6 +3877,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
     Value<int>? fileSizeBytes,
     Value<int>? pageCount,
     Value<DateTime>? createdAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return PdfDocumentsCompanion(
@@ -3302,6 +3891,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
       pageCount: pageCount ?? this.pageCount,
       createdAt: createdAt ?? this.createdAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3330,6 +3923,18 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3346,6 +3951,10 @@ class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
           ..write('fileSizeBytes: $fileSizeBytes, ')
           ..write('pageCount: $pageCount, ')
           ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3550,6 +4159,54 @@ class $InkPagesTable extends InkPages
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3569,6 +4226,10 @@ class $InkPagesTable extends InkPages
     ocrText,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3718,6 +4379,39 @@ class $InkPagesTable extends InkPages
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3795,6 +4489,22 @@ class $InkPagesTable extends InkPages
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -3822,6 +4532,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
   final String? ocrText;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const InkPageEntry({
     required this.id,
     required this.documentId,
@@ -3840,6 +4554,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     this.ocrText,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3875,6 +4593,12 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -3911,6 +4635,12 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
           : Value(ocrText),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -3937,6 +4667,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       ocrText: serializer.fromJson<String?>(json['ocrText']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -3960,6 +4694,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       'ocrText': serializer.toJson<String?>(ocrText),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -3981,6 +4719,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     Value<String?> ocrText = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => InkPageEntry(
     id: id ?? this.id,
     documentId: documentId ?? this.documentId,
@@ -4009,6 +4751,10 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     ocrText: ocrText.present ? ocrText.value : this.ocrText,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   InkPageEntry copyWithCompanion(InkPagesCompanion data) {
     return InkPageEntry(
@@ -4051,6 +4797,16 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       ocrText: data.ocrText.present ? data.ocrText.value : this.ocrText,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -4073,13 +4829,17 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
           ..write('previewPngHash: $previewPngHash, ')
           ..write('ocrText: $ocrText, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     documentId,
     pageNumber,
@@ -4097,7 +4857,11 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     ocrText,
     createdAt,
     updatedAt,
-  );
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -4118,7 +4882,11 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
           other.previewPngHash == this.previewPngHash &&
           other.ocrText == this.ocrText &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
@@ -4139,6 +4907,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
   final Value<String?> ocrText;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const InkPagesCompanion({
     this.id = const Value.absent(),
@@ -4158,6 +4930,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     this.ocrText = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   InkPagesCompanion.insert({
@@ -4178,6 +4954,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     this.ocrText = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        documentId = Value(documentId),
@@ -4202,6 +4982,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     Expression<String>? ocrText,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -4222,6 +5006,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
       if (ocrText != null) 'ocr_text': ocrText,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4244,6 +5032,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     Value<String?>? ocrText,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return InkPagesCompanion(
@@ -4264,6 +5056,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
       ocrText: ocrText ?? this.ocrText,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4322,6 +5118,18 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4348,6 +5156,10 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
           ..write('ocrText: $ocrText, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4419,6 +5231,54 @@ class $NodeLinksTable extends NodeLinks
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4426,6 +5286,10 @@ class $NodeLinksTable extends NodeLinks
     targetNodeId,
     linkText,
     createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4480,6 +5344,39 @@ class $NodeLinksTable extends NodeLinks
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -4509,6 +5406,22 @@ class $NodeLinksTable extends NodeLinks
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -4524,12 +5437,20 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
   final String targetNodeId;
   final String? linkText;
   final DateTime createdAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const NodeLinkEntry({
     required this.id,
     required this.sourceNodeId,
     required this.targetNodeId,
     this.linkText,
     required this.createdAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4541,6 +5462,12 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
       map['link_text'] = Variable<String>(linkText);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -4553,6 +5480,12 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
           ? const Value.absent()
           : Value(linkText),
       createdAt: Value(createdAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -4567,6 +5500,10 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
       targetNodeId: serializer.fromJson<String>(json['targetNodeId']),
       linkText: serializer.fromJson<String?>(json['linkText']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -4578,6 +5515,10 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
       'targetNodeId': serializer.toJson<String>(targetNodeId),
       'linkText': serializer.toJson<String?>(linkText),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -4587,12 +5528,20 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
     String? targetNodeId,
     Value<String?> linkText = const Value.absent(),
     DateTime? createdAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => NodeLinkEntry(
     id: id ?? this.id,
     sourceNodeId: sourceNodeId ?? this.sourceNodeId,
     targetNodeId: targetNodeId ?? this.targetNodeId,
     linkText: linkText.present ? linkText.value : this.linkText,
     createdAt: createdAt ?? this.createdAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   NodeLinkEntry copyWithCompanion(NodeLinksCompanion data) {
     return NodeLinkEntry(
@@ -4605,6 +5554,16 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
           : this.targetNodeId,
       linkText: data.linkText.present ? data.linkText.value : this.linkText,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -4615,14 +5574,27 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
           ..write('sourceNodeId: $sourceNodeId, ')
           ..write('targetNodeId: $targetNodeId, ')
           ..write('linkText: $linkText, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, sourceNodeId, targetNodeId, linkText, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    sourceNodeId,
+    targetNodeId,
+    linkText,
+    createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -4631,7 +5603,11 @@ class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
           other.sourceNodeId == this.sourceNodeId &&
           other.targetNodeId == this.targetNodeId &&
           other.linkText == this.linkText &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
@@ -4640,6 +5616,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
   final Value<String> targetNodeId;
   final Value<String?> linkText;
   final Value<DateTime> createdAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const NodeLinksCompanion({
     this.id = const Value.absent(),
@@ -4647,6 +5627,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
     this.targetNodeId = const Value.absent(),
     this.linkText = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NodeLinksCompanion.insert({
@@ -4655,6 +5639,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
     required String targetNodeId,
     this.linkText = const Value.absent(),
     required DateTime createdAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        sourceNodeId = Value(sourceNodeId),
@@ -4666,6 +5654,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
     Expression<String>? targetNodeId,
     Expression<String>? linkText,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -4674,6 +5666,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
       if (targetNodeId != null) 'target_node_id': targetNodeId,
       if (linkText != null) 'link_text': linkText,
       if (createdAt != null) 'created_at': createdAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4684,6 +5680,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
     Value<String>? targetNodeId,
     Value<String?>? linkText,
     Value<DateTime>? createdAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return NodeLinksCompanion(
@@ -4692,6 +5692,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
       targetNodeId: targetNodeId ?? this.targetNodeId,
       linkText: linkText ?? this.linkText,
       createdAt: createdAt ?? this.createdAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4714,6 +5718,18 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4728,6 +5744,10 @@ class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
           ..write('targetNodeId: $targetNodeId, ')
           ..write('linkText: $linkText, ')
           ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4795,6 +5815,54 @@ class $TagsTable extends Tags with TableInfo<$TagsTable, TagEntry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4802,6 +5870,10 @@ class $TagsTable extends Tags with TableInfo<$TagsTable, TagEntry> {
     name,
     color,
     createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4853,6 +5925,39 @@ class $TagsTable extends Tags with TableInfo<$TagsTable, TagEntry> {
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -4886,6 +5991,22 @@ class $TagsTable extends Tags with TableInfo<$TagsTable, TagEntry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -4901,12 +6022,20 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
   final String name;
   final int? color;
   final DateTime createdAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const TagEntry({
     required this.id,
     required this.workspaceId,
     required this.name,
     this.color,
     required this.createdAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4918,6 +6047,12 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
       map['color'] = Variable<int>(color);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -4930,6 +6065,12 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
           ? const Value.absent()
           : Value(color),
       createdAt: Value(createdAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -4944,6 +6085,10 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
       name: serializer.fromJson<String>(json['name']),
       color: serializer.fromJson<int?>(json['color']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -4955,6 +6100,10 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
       'name': serializer.toJson<String>(name),
       'color': serializer.toJson<int?>(color),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -4964,12 +6113,20 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
     String? name,
     Value<int?> color = const Value.absent(),
     DateTime? createdAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => TagEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
     name: name ?? this.name,
     color: color.present ? color.value : this.color,
     createdAt: createdAt ?? this.createdAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   TagEntry copyWithCompanion(TagsCompanion data) {
     return TagEntry(
@@ -4980,6 +6137,16 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
       name: data.name.present ? data.name.value : this.name,
       color: data.color.present ? data.color.value : this.color,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -4990,13 +6157,27 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
           ..write('workspaceId: $workspaceId, ')
           ..write('name: $name, ')
           ..write('color: $color, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, workspaceId, name, color, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    workspaceId,
+    name,
+    color,
+    createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -5005,7 +6186,11 @@ class TagEntry extends DataClass implements Insertable<TagEntry> {
           other.workspaceId == this.workspaceId &&
           other.name == this.name &&
           other.color == this.color &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class TagsCompanion extends UpdateCompanion<TagEntry> {
@@ -5014,6 +6199,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
   final Value<String> name;
   final Value<int?> color;
   final Value<DateTime> createdAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const TagsCompanion({
     this.id = const Value.absent(),
@@ -5021,6 +6210,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
     this.name = const Value.absent(),
     this.color = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TagsCompanion.insert({
@@ -5029,6 +6222,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
     required String name,
     this.color = const Value.absent(),
     required DateTime createdAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -5040,6 +6237,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
     Expression<String>? name,
     Expression<int>? color,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5048,6 +6249,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
       if (name != null) 'name': name,
       if (color != null) 'color': color,
       if (createdAt != null) 'created_at': createdAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5058,6 +6263,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
     Value<String>? name,
     Value<int?>? color,
     Value<DateTime>? createdAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return TagsCompanion(
@@ -5066,6 +6275,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
       name: name ?? this.name,
       color: color ?? this.color,
       createdAt: createdAt ?? this.createdAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5088,6 +6301,18 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5102,6 +6327,10 @@ class TagsCompanion extends UpdateCompanion<TagEntry> {
           ..write('name: $name, ')
           ..write('color: $color, ')
           ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5138,8 +6367,63 @@ class $NodeTagsTable extends NodeTags
       'REFERENCES tags (id) ON DELETE CASCADE',
     ),
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
   @override
-  List<GeneratedColumn> get $columns => [nodeId, tagId];
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    nodeId,
+    tagId,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -5168,6 +6452,39 @@ class $NodeTagsTable extends NodeTags
     } else if (isInserting) {
       context.missing(_tagIdMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -5185,6 +6502,22 @@ class $NodeTagsTable extends NodeTags
         DriftSqlType.string,
         data['${effectivePrefix}tag_id'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -5197,17 +6530,43 @@ class $NodeTagsTable extends NodeTags
 class NodeTagEntry extends DataClass implements Insertable<NodeTagEntry> {
   final String nodeId;
   final String tagId;
-  const NodeTagEntry({required this.nodeId, required this.tagId});
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
+  const NodeTagEntry({
+    required this.nodeId,
+    required this.tagId,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['node_id'] = Variable<String>(nodeId);
     map['tag_id'] = Variable<String>(tagId);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
   NodeTagsCompanion toCompanion(bool nullToAbsent) {
-    return NodeTagsCompanion(nodeId: Value(nodeId), tagId: Value(tagId));
+    return NodeTagsCompanion(
+      nodeId: Value(nodeId),
+      tagId: Value(tagId),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
+    );
   }
 
   factory NodeTagEntry.fromJson(
@@ -5218,6 +6577,10 @@ class NodeTagEntry extends DataClass implements Insertable<NodeTagEntry> {
     return NodeTagEntry(
       nodeId: serializer.fromJson<String>(json['nodeId']),
       tagId: serializer.fromJson<String>(json['tagId']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -5226,15 +6589,42 @@ class NodeTagEntry extends DataClass implements Insertable<NodeTagEntry> {
     return <String, dynamic>{
       'nodeId': serializer.toJson<String>(nodeId),
       'tagId': serializer.toJson<String>(tagId),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
-  NodeTagEntry copyWith({String? nodeId, String? tagId}) =>
-      NodeTagEntry(nodeId: nodeId ?? this.nodeId, tagId: tagId ?? this.tagId);
+  NodeTagEntry copyWith({
+    String? nodeId,
+    String? tagId,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
+  }) => NodeTagEntry(
+    nodeId: nodeId ?? this.nodeId,
+    tagId: tagId ?? this.tagId,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
+  );
   NodeTagEntry copyWithCompanion(NodeTagsCompanion data) {
     return NodeTagEntry(
       nodeId: data.nodeId.present ? data.nodeId.value : this.nodeId,
       tagId: data.tagId.present ? data.tagId.value : this.tagId,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -5242,44 +6632,79 @@ class NodeTagEntry extends DataClass implements Insertable<NodeTagEntry> {
   String toString() {
     return (StringBuffer('NodeTagEntry(')
           ..write('nodeId: $nodeId, ')
-          ..write('tagId: $tagId')
+          ..write('tagId: $tagId, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(nodeId, tagId);
+  int get hashCode => Object.hash(
+    nodeId,
+    tagId,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is NodeTagEntry &&
           other.nodeId == this.nodeId &&
-          other.tagId == this.tagId);
+          other.tagId == this.tagId &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class NodeTagsCompanion extends UpdateCompanion<NodeTagEntry> {
   final Value<String> nodeId;
   final Value<String> tagId;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const NodeTagsCompanion({
     this.nodeId = const Value.absent(),
     this.tagId = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NodeTagsCompanion.insert({
     required String nodeId,
     required String tagId,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : nodeId = Value(nodeId),
        tagId = Value(tagId);
   static Insertable<NodeTagEntry> custom({
     Expression<String>? nodeId,
     Expression<String>? tagId,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (nodeId != null) 'node_id': nodeId,
       if (tagId != null) 'tag_id': tagId,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5287,11 +6712,19 @@ class NodeTagsCompanion extends UpdateCompanion<NodeTagEntry> {
   NodeTagsCompanion copyWith({
     Value<String>? nodeId,
     Value<String>? tagId,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return NodeTagsCompanion(
       nodeId: nodeId ?? this.nodeId,
       tagId: tagId ?? this.tagId,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5305,6 +6738,18 @@ class NodeTagsCompanion extends UpdateCompanion<NodeTagEntry> {
     if (tagId.present) {
       map['tag_id'] = Variable<String>(tagId.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5316,6 +6761,10 @@ class NodeTagsCompanion extends UpdateCompanion<NodeTagEntry> {
     return (StringBuffer('NodeTagsCompanion(')
           ..write('nodeId: $nodeId, ')
           ..write('tagId: $tagId, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5445,6 +6894,54 @@ class $ProjectsTable extends Projects
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -5457,6 +6954,10 @@ class $ProjectsTable extends Projects
     sortOrder,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -5543,6 +7044,39 @@ class $ProjectsTable extends Projects
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -5592,6 +7126,22 @@ class $ProjectsTable extends Projects
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -5612,6 +7162,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
   final int sortOrder;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const ProjectEntry({
     required this.id,
     required this.workspaceId,
@@ -5623,6 +7177,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
     required this.sortOrder,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -5641,6 +7199,12 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
     map['sort_order'] = Variable<int>(sortOrder);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -5658,6 +7222,12 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
       sortOrder: Value(sortOrder),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -5677,6 +7247,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -5693,6 +7267,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
       'sortOrder': serializer.toJson<int>(sortOrder),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -5707,6 +7285,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
     int? sortOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => ProjectEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -5718,6 +7300,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
     sortOrder: sortOrder ?? this.sortOrder,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   ProjectEntry copyWithCompanion(ProjectsCompanion data) {
     return ProjectEntry(
@@ -5737,6 +7323,16 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -5752,7 +7348,11 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
           ..write('isArchived: $isArchived, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -5769,6 +7369,10 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
     sortOrder,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -5783,7 +7387,11 @@ class ProjectEntry extends DataClass implements Insertable<ProjectEntry> {
           other.isArchived == this.isArchived &&
           other.sortOrder == this.sortOrder &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
@@ -5797,6 +7405,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
   final Value<int> sortOrder;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const ProjectsCompanion({
     this.id = const Value.absent(),
@@ -5809,6 +7421,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ProjectsCompanion.insert({
@@ -5822,6 +7438,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
     this.sortOrder = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -5839,6 +7459,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
     Expression<int>? sortOrder,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5852,6 +7476,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5867,6 +7495,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
     Value<int>? sortOrder,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return ProjectsCompanion(
@@ -5880,6 +7512,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
       sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5917,6 +7553,18 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5936,6 +7584,10 @@ class ProjectsCompanion extends UpdateCompanion<ProjectEntry> {
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -6153,6 +7805,54 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -6172,6 +7872,10 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
     sortOrder,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -6315,6 +8019,39 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -6392,6 +8129,22 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -6419,6 +8172,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
   final int sortOrder;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const TaskEntry({
     required this.id,
     required this.workspaceId,
@@ -6437,6 +8194,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     required this.sortOrder,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -6474,6 +8235,12 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     map['sort_order'] = Variable<int>(sortOrder);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -6512,6 +8279,12 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       sortOrder: Value(sortOrder),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -6540,6 +8313,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -6563,6 +8340,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       'sortOrder': serializer.toJson<int>(sortOrder),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -6584,6 +8365,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     int? sortOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => TaskEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -6606,6 +8391,10 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     sortOrder: sortOrder ?? this.sortOrder,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   TaskEntry copyWithCompanion(TasksCompanion data) {
     return TaskEntry(
@@ -6640,6 +8429,16 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -6662,13 +8461,17 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
           ..write('reminderMinutesBefore: $reminderMinutesBefore, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     workspaceId,
     projectId,
@@ -6686,7 +8489,11 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     sortOrder,
     createdAt,
     updatedAt,
-  );
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -6707,7 +8514,11 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
           other.reminderMinutesBefore == this.reminderMinutesBefore &&
           other.sortOrder == this.sortOrder &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class TasksCompanion extends UpdateCompanion<TaskEntry> {
@@ -6728,6 +8539,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
   final Value<int> sortOrder;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const TasksCompanion({
     this.id = const Value.absent(),
@@ -6747,6 +8562,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TasksCompanion.insert({
@@ -6767,6 +8586,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     this.sortOrder = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -6791,6 +8614,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     Expression<int>? sortOrder,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -6812,6 +8639,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -6834,6 +8665,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     Value<int>? sortOrder,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return TasksCompanion(
@@ -6855,6 +8690,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
       sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -6915,6 +8754,18 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -6941,6 +8792,10 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7105,6 +8960,54 @@ class $CalendarEventsTable extends CalendarEvents
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -7120,6 +9023,10 @@ class $CalendarEventsTable extends CalendarEvents
     location,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -7228,6 +9135,39 @@ class $CalendarEventsTable extends CalendarEvents
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -7289,6 +9229,22 @@ class $CalendarEventsTable extends CalendarEvents
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -7313,6 +9269,10 @@ class CalendarEventEntry extends DataClass
   final String? location;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const CalendarEventEntry({
     required this.id,
     required this.workspaceId,
@@ -7327,6 +9287,10 @@ class CalendarEventEntry extends DataClass
     this.location,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -7354,6 +9318,12 @@ class CalendarEventEntry extends DataClass
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -7382,6 +9352,12 @@ class CalendarEventEntry extends DataClass
           : Value(location),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -7404,6 +9380,10 @@ class CalendarEventEntry extends DataClass
       location: serializer.fromJson<String?>(json['location']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -7423,6 +9403,10 @@ class CalendarEventEntry extends DataClass
       'location': serializer.toJson<String?>(location),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -7440,6 +9424,10 @@ class CalendarEventEntry extends DataClass
     Value<String?> location = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => CalendarEventEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -7454,6 +9442,10 @@ class CalendarEventEntry extends DataClass
     location: location.present ? location.value : this.location,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   CalendarEventEntry copyWithCompanion(CalendarEventsCompanion data) {
     return CalendarEventEntry(
@@ -7474,6 +9466,16 @@ class CalendarEventEntry extends DataClass
       location: data.location.present ? data.location.value : this.location,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -7492,7 +9494,11 @@ class CalendarEventEntry extends DataClass
           ..write('colorHex: $colorHex, ')
           ..write('location: $location, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -7512,6 +9518,10 @@ class CalendarEventEntry extends DataClass
     location,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -7529,7 +9539,11 @@ class CalendarEventEntry extends DataClass
           other.colorHex == this.colorHex &&
           other.location == this.location &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
@@ -7546,6 +9560,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
   final Value<String?> location;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const CalendarEventsCompanion({
     this.id = const Value.absent(),
@@ -7561,6 +9579,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
     this.location = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CalendarEventsCompanion.insert({
@@ -7577,6 +9599,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
     this.location = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -7599,6 +9625,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
     Expression<String>? location,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -7615,6 +9645,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
       if (location != null) 'location': location,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -7633,6 +9667,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
     Value<String?>? location,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return CalendarEventsCompanion(
@@ -7649,6 +9687,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
       location: location ?? this.location,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -7695,6 +9737,18 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -7717,6 +9771,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEventEntry> {
           ..write('location: $location, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7868,6 +9926,54 @@ class $HabitsTable extends Habits with TableInfo<$HabitsTable, HabitEntry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -7882,6 +9988,10 @@ class $HabitsTable extends Habits with TableInfo<$HabitsTable, HabitEntry> {
     sortOrder,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -7983,6 +10093,39 @@ class $HabitsTable extends Habits with TableInfo<$HabitsTable, HabitEntry> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -8040,6 +10183,22 @@ class $HabitsTable extends Habits with TableInfo<$HabitsTable, HabitEntry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -8062,6 +10221,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
   final int sortOrder;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const HabitEntry({
     required this.id,
     required this.workspaceId,
@@ -8075,6 +10238,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
     required this.sortOrder,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -8095,6 +10262,12 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
     map['sort_order'] = Variable<int>(sortOrder);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -8114,6 +10287,12 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
       sortOrder: Value(sortOrder),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -8137,6 +10316,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -8155,6 +10338,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
       'sortOrder': serializer.toJson<int>(sortOrder),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -8171,6 +10358,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
     int? sortOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => HabitEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -8184,6 +10375,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
     sortOrder: sortOrder ?? this.sortOrder,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   HabitEntry copyWithCompanion(HabitsCompanion data) {
     return HabitEntry(
@@ -8207,6 +10402,16 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -8224,7 +10429,11 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
           ..write('isArchived: $isArchived, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -8243,6 +10452,10 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
     sortOrder,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -8259,7 +10472,11 @@ class HabitEntry extends DataClass implements Insertable<HabitEntry> {
           other.isArchived == this.isArchived &&
           other.sortOrder == this.sortOrder &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class HabitsCompanion extends UpdateCompanion<HabitEntry> {
@@ -8275,6 +10492,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
   final Value<int> sortOrder;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const HabitsCompanion({
     this.id = const Value.absent(),
@@ -8289,6 +10510,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   HabitsCompanion.insert({
@@ -8304,6 +10529,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
     this.sortOrder = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -8323,6 +10552,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
     Expression<int>? sortOrder,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -8339,6 +10572,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -8356,6 +10593,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
     Value<int>? sortOrder,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return HabitsCompanion(
@@ -8371,6 +10612,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
       sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -8416,6 +10661,18 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -8437,6 +10694,10 @@ class HabitsCompanion extends UpdateCompanion<HabitEntry> {
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -8521,6 +10782,54 @@ class $HabitLogsTable extends HabitLogs
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -8529,6 +10838,10 @@ class $HabitLogsTable extends HabitLogs
     completedCount,
     isCompleted,
     createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -8589,6 +10902,39 @@ class $HabitLogsTable extends HabitLogs
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -8626,6 +10972,22 @@ class $HabitLogsTable extends HabitLogs
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -8642,6 +11004,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
   final int completedCount;
   final bool isCompleted;
   final DateTime createdAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const HabitLogEntry({
     required this.id,
     required this.habitId,
@@ -8649,6 +11015,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
     required this.completedCount,
     required this.isCompleted,
     required this.createdAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -8659,6 +11029,12 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
     map['completed_count'] = Variable<int>(completedCount);
     map['is_completed'] = Variable<bool>(isCompleted);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -8670,6 +11046,12 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
       completedCount: Value(completedCount),
       isCompleted: Value(isCompleted),
       createdAt: Value(createdAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -8685,6 +11067,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
       completedCount: serializer.fromJson<int>(json['completedCount']),
       isCompleted: serializer.fromJson<bool>(json['isCompleted']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -8697,6 +11083,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
       'completedCount': serializer.toJson<int>(completedCount),
       'isCompleted': serializer.toJson<bool>(isCompleted),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -8707,6 +11097,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
     int? completedCount,
     bool? isCompleted,
     DateTime? createdAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => HabitLogEntry(
     id: id ?? this.id,
     habitId: habitId ?? this.habitId,
@@ -8714,6 +11108,10 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
     completedCount: completedCount ?? this.completedCount,
     isCompleted: isCompleted ?? this.isCompleted,
     createdAt: createdAt ?? this.createdAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   HabitLogEntry copyWithCompanion(HabitLogsCompanion data) {
     return HabitLogEntry(
@@ -8727,6 +11125,16 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
           ? data.isCompleted.value
           : this.isCompleted,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -8738,14 +11146,28 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
           ..write('logDate: $logDate, ')
           ..write('completedCount: $completedCount, ')
           ..write('isCompleted: $isCompleted, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, habitId, logDate, completedCount, isCompleted, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    habitId,
+    logDate,
+    completedCount,
+    isCompleted,
+    createdAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -8755,7 +11177,11 @@ class HabitLogEntry extends DataClass implements Insertable<HabitLogEntry> {
           other.logDate == this.logDate &&
           other.completedCount == this.completedCount &&
           other.isCompleted == this.isCompleted &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
@@ -8765,6 +11191,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
   final Value<int> completedCount;
   final Value<bool> isCompleted;
   final Value<DateTime> createdAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const HabitLogsCompanion({
     this.id = const Value.absent(),
@@ -8773,6 +11203,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
     this.completedCount = const Value.absent(),
     this.isCompleted = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   HabitLogsCompanion.insert({
@@ -8782,6 +11216,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
     this.completedCount = const Value.absent(),
     this.isCompleted = const Value.absent(),
     required DateTime createdAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        habitId = Value(habitId),
@@ -8794,6 +11232,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
     Expression<int>? completedCount,
     Expression<bool>? isCompleted,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -8803,6 +11245,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
       if (completedCount != null) 'completed_count': completedCount,
       if (isCompleted != null) 'is_completed': isCompleted,
       if (createdAt != null) 'created_at': createdAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -8814,6 +11260,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
     Value<int>? completedCount,
     Value<bool>? isCompleted,
     Value<DateTime>? createdAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return HabitLogsCompanion(
@@ -8823,6 +11273,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
       completedCount: completedCount ?? this.completedCount,
       isCompleted: isCompleted ?? this.isCompleted,
       createdAt: createdAt ?? this.createdAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -8848,6 +11302,18 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -8863,6 +11329,10 @@ class HabitLogsCompanion extends UpdateCompanion<HabitLogEntry> {
           ..write('completedCount: $completedCount, ')
           ..write('isCompleted: $isCompleted, ')
           ..write('createdAt: $createdAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -8975,6 +11445,54 @@ class $GoalsTable extends Goals with TableInfo<$GoalsTable, GoalEntry> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -8986,6 +11504,10 @@ class $GoalsTable extends Goals with TableInfo<$GoalsTable, GoalEntry> {
     colorHex,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -9066,6 +11588,39 @@ class $GoalsTable extends Goals with TableInfo<$GoalsTable, GoalEntry> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -9111,6 +11666,22 @@ class $GoalsTable extends Goals with TableInfo<$GoalsTable, GoalEntry> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -9130,6 +11701,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
   final String? colorHex;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const GoalEntry({
     required this.id,
     required this.workspaceId,
@@ -9140,6 +11715,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
     this.colorHex,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -9159,6 +11738,12 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -9179,6 +11764,12 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
           : Value(colorHex),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -9197,6 +11788,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
       colorHex: serializer.fromJson<String?>(json['colorHex']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -9212,6 +11807,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
       'colorHex': serializer.toJson<String?>(colorHex),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -9225,6 +11824,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
     Value<String?> colorHex = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => GoalEntry(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -9235,6 +11838,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
     colorHex: colorHex.present ? colorHex.value : this.colorHex,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   GoalEntry copyWithCompanion(GoalsCompanion data) {
     return GoalEntry(
@@ -9253,6 +11860,16 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
       colorHex: data.colorHex.present ? data.colorHex.value : this.colorHex,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -9267,7 +11884,11 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
           ..write('status: $status, ')
           ..write('colorHex: $colorHex, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -9283,6 +11904,10 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
     colorHex,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -9296,7 +11921,11 @@ class GoalEntry extends DataClass implements Insertable<GoalEntry> {
           other.status == this.status &&
           other.colorHex == this.colorHex &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class GoalsCompanion extends UpdateCompanion<GoalEntry> {
@@ -9309,6 +11938,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
   final Value<String?> colorHex;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const GoalsCompanion({
     this.id = const Value.absent(),
@@ -9320,6 +11953,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
     this.colorHex = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   GoalsCompanion.insert({
@@ -9332,6 +11969,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
     this.colorHex = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -9348,6 +11989,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
     Expression<String>? colorHex,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -9360,6 +12005,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
       if (colorHex != null) 'color_hex': colorHex,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -9374,6 +12023,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
     Value<String?>? colorHex,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return GoalsCompanion(
@@ -9386,6 +12039,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
       colorHex: colorHex ?? this.colorHex,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -9420,6 +12077,18 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -9438,6 +12107,10 @@ class GoalsCompanion extends UpdateCompanion<GoalEntry> {
           ..write('colorHex: $colorHex, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -9527,6 +12200,54 @@ class $JournalEntriesTable extends JournalEntries
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _clientModifiedAtMeta = const VerificationMeta(
+    'clientModifiedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> clientModifiedAt =
+      GeneratedColumn<DateTime>(
+        'client_modified_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+        defaultValue: currentDateAndTime,
+      );
+  static const VerificationMeta _modifiedDeviceIdMeta = const VerificationMeta(
+    'modifiedDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> modifiedDeviceId = GeneratedColumn<String>(
+    'modified_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('local'),
+  );
+  static const VerificationMeta _syncVersionMeta = const VerificationMeta(
+    'syncVersion',
+  );
+  @override
+  late final GeneratedColumn<int> syncVersion = GeneratedColumn<int>(
+    'sync_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -9536,6 +12257,10 @@ class $JournalEntriesTable extends JournalEntries
     mood,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -9606,6 +12331,39 @@ class $JournalEntriesTable extends JournalEntries
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    if (data.containsKey('client_modified_at')) {
+      context.handle(
+        _clientModifiedAtMeta,
+        clientModifiedAt.isAcceptableOrUnknown(
+          data['client_modified_at']!,
+          _clientModifiedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('modified_device_id')) {
+      context.handle(
+        _modifiedDeviceIdMeta,
+        modifiedDeviceId.isAcceptableOrUnknown(
+          data['modified_device_id']!,
+          _modifiedDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_version')) {
+      context.handle(
+        _syncVersionMeta,
+        syncVersion.isAcceptableOrUnknown(
+          data['sync_version']!,
+          _syncVersionMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -9647,6 +12405,22 @@ class $JournalEntriesTable extends JournalEntries
         DriftSqlType.dateTime,
         data['${effectivePrefix}updated_at'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+      clientModifiedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}client_modified_at'],
+      )!,
+      modifiedDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}modified_device_id'],
+      )!,
+      syncVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_version'],
+      )!,
     );
   }
 
@@ -9665,6 +12439,10 @@ class JournalEntryData extends DataClass
   final String? mood;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? deletedAt;
+  final DateTime clientModifiedAt;
+  final String modifiedDeviceId;
+  final int syncVersion;
   const JournalEntryData({
     required this.id,
     required this.workspaceId,
@@ -9673,6 +12451,10 @@ class JournalEntryData extends DataClass
     this.mood,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    required this.clientModifiedAt,
+    required this.modifiedDeviceId,
+    required this.syncVersion,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -9686,6 +12468,12 @@ class JournalEntryData extends DataClass
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    map['client_modified_at'] = Variable<DateTime>(clientModifiedAt);
+    map['modified_device_id'] = Variable<String>(modifiedDeviceId);
+    map['sync_version'] = Variable<int>(syncVersion);
     return map;
   }
 
@@ -9698,6 +12486,12 @@ class JournalEntryData extends DataClass
       mood: mood == null && nullToAbsent ? const Value.absent() : Value(mood),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+      clientModifiedAt: Value(clientModifiedAt),
+      modifiedDeviceId: Value(modifiedDeviceId),
+      syncVersion: Value(syncVersion),
     );
   }
 
@@ -9714,6 +12508,10 @@ class JournalEntryData extends DataClass
       mood: serializer.fromJson<String?>(json['mood']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      clientModifiedAt: serializer.fromJson<DateTime>(json['clientModifiedAt']),
+      modifiedDeviceId: serializer.fromJson<String>(json['modifiedDeviceId']),
+      syncVersion: serializer.fromJson<int>(json['syncVersion']),
     );
   }
   @override
@@ -9727,6 +12525,10 @@ class JournalEntryData extends DataClass
       'mood': serializer.toJson<String?>(mood),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'clientModifiedAt': serializer.toJson<DateTime>(clientModifiedAt),
+      'modifiedDeviceId': serializer.toJson<String>(modifiedDeviceId),
+      'syncVersion': serializer.toJson<int>(syncVersion),
     };
   }
 
@@ -9738,6 +12540,10 @@ class JournalEntryData extends DataClass
     Value<String?> mood = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
+    Value<DateTime?> deletedAt = const Value.absent(),
+    DateTime? clientModifiedAt,
+    String? modifiedDeviceId,
+    int? syncVersion,
   }) => JournalEntryData(
     id: id ?? this.id,
     workspaceId: workspaceId ?? this.workspaceId,
@@ -9746,6 +12552,10 @@ class JournalEntryData extends DataClass
     mood: mood.present ? mood.value : this.mood,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+    modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+    syncVersion: syncVersion ?? this.syncVersion,
   );
   JournalEntryData copyWithCompanion(JournalEntriesCompanion data) {
     return JournalEntryData(
@@ -9760,6 +12570,16 @@ class JournalEntryData extends DataClass
       mood: data.mood.present ? data.mood.value : this.mood,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      clientModifiedAt: data.clientModifiedAt.present
+          ? data.clientModifiedAt.value
+          : this.clientModifiedAt,
+      modifiedDeviceId: data.modifiedDeviceId.present
+          ? data.modifiedDeviceId.value
+          : this.modifiedDeviceId,
+      syncVersion: data.syncVersion.present
+          ? data.syncVersion.value
+          : this.syncVersion,
     );
   }
 
@@ -9772,7 +12592,11 @@ class JournalEntryData extends DataClass
           ..write('journalDate: $journalDate, ')
           ..write('mood: $mood, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion')
           ..write(')'))
         .toString();
   }
@@ -9786,6 +12610,10 @@ class JournalEntryData extends DataClass
     mood,
     createdAt,
     updatedAt,
+    deletedAt,
+    clientModifiedAt,
+    modifiedDeviceId,
+    syncVersion,
   );
   @override
   bool operator ==(Object other) =>
@@ -9797,7 +12625,11 @@ class JournalEntryData extends DataClass
           other.journalDate == this.journalDate &&
           other.mood == this.mood &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt &&
+          other.clientModifiedAt == this.clientModifiedAt &&
+          other.modifiedDeviceId == this.modifiedDeviceId &&
+          other.syncVersion == this.syncVersion);
 }
 
 class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
@@ -9808,6 +12640,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
   final Value<String?> mood;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<DateTime> clientModifiedAt;
+  final Value<String> modifiedDeviceId;
+  final Value<int> syncVersion;
   final Value<int> rowid;
   const JournalEntriesCompanion({
     this.id = const Value.absent(),
@@ -9817,6 +12653,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
     this.mood = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   JournalEntriesCompanion.insert({
@@ -9827,6 +12667,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
     this.mood = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.clientModifiedAt = const Value.absent(),
+    this.modifiedDeviceId = const Value.absent(),
+    this.syncVersion = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        workspaceId = Value(workspaceId),
@@ -9842,6 +12686,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
     Expression<String>? mood,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<DateTime>? clientModifiedAt,
+    Expression<String>? modifiedDeviceId,
+    Expression<int>? syncVersion,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -9852,6 +12700,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
       if (mood != null) 'mood': mood,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (clientModifiedAt != null) 'client_modified_at': clientModifiedAt,
+      if (modifiedDeviceId != null) 'modified_device_id': modifiedDeviceId,
+      if (syncVersion != null) 'sync_version': syncVersion,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -9864,6 +12716,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
     Value<String?>? mood,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
+    Value<DateTime?>? deletedAt,
+    Value<DateTime>? clientModifiedAt,
+    Value<String>? modifiedDeviceId,
+    Value<int>? syncVersion,
     Value<int>? rowid,
   }) {
     return JournalEntriesCompanion(
@@ -9874,6 +12730,10 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
       mood: mood ?? this.mood,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      clientModifiedAt: clientModifiedAt ?? this.clientModifiedAt,
+      modifiedDeviceId: modifiedDeviceId ?? this.modifiedDeviceId,
+      syncVersion: syncVersion ?? this.syncVersion,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -9902,6 +12762,18 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (clientModifiedAt.present) {
+      map['client_modified_at'] = Variable<DateTime>(clientModifiedAt.value);
+    }
+    if (modifiedDeviceId.present) {
+      map['modified_device_id'] = Variable<String>(modifiedDeviceId.value);
+    }
+    if (syncVersion.present) {
+      map['sync_version'] = Variable<int>(syncVersion.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -9918,6 +12790,599 @@ class JournalEntriesCompanion extends UpdateCompanion<JournalEntryData> {
           ..write('mood: $mood, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('clientModifiedAt: $clientModifiedAt, ')
+          ..write('modifiedDeviceId: $modifiedDeviceId, ')
+          ..write('syncVersion: $syncVersion, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SyncHistoryTable extends SyncHistory
+    with TableInfo<$SyncHistoryTable, SyncHistoryEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SyncHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _syncStartedAtMeta = const VerificationMeta(
+    'syncStartedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> syncStartedAt =
+      GeneratedColumn<DateTime>(
+        'sync_started_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _syncCompletedAtMeta = const VerificationMeta(
+    'syncCompletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> syncCompletedAt =
+      GeneratedColumn<DateTime>(
+        'sync_completed_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _syncTypeMeta = const VerificationMeta(
+    'syncType',
+  );
+  @override
+  late final GeneratedColumn<String> syncType = GeneratedColumn<String>(
+    'sync_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _recordsExportedMeta = const VerificationMeta(
+    'recordsExported',
+  );
+  @override
+  late final GeneratedColumn<int> recordsExported = GeneratedColumn<int>(
+    'records_exported',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _recordsImportedMeta = const VerificationMeta(
+    'recordsImported',
+  );
+  @override
+  late final GeneratedColumn<int> recordsImported = GeneratedColumn<int>(
+    'records_imported',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _blobsTransferredMeta = const VerificationMeta(
+    'blobsTransferred',
+  );
+  @override
+  late final GeneratedColumn<int> blobsTransferred = GeneratedColumn<int>(
+    'blobs_transferred',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _errorMessageMeta = const VerificationMeta(
+    'errorMessage',
+  );
+  @override
+  late final GeneratedColumn<String> errorMessage = GeneratedColumn<String>(
+    'error_message',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    syncStartedAt,
+    syncCompletedAt,
+    syncType,
+    status,
+    recordsExported,
+    recordsImported,
+    blobsTransferred,
+    errorMessage,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sync_history';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SyncHistoryEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('sync_started_at')) {
+      context.handle(
+        _syncStartedAtMeta,
+        syncStartedAt.isAcceptableOrUnknown(
+          data['sync_started_at']!,
+          _syncStartedAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_syncStartedAtMeta);
+    }
+    if (data.containsKey('sync_completed_at')) {
+      context.handle(
+        _syncCompletedAtMeta,
+        syncCompletedAt.isAcceptableOrUnknown(
+          data['sync_completed_at']!,
+          _syncCompletedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_type')) {
+      context.handle(
+        _syncTypeMeta,
+        syncType.isAcceptableOrUnknown(data['sync_type']!, _syncTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_syncTypeMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('records_exported')) {
+      context.handle(
+        _recordsExportedMeta,
+        recordsExported.isAcceptableOrUnknown(
+          data['records_exported']!,
+          _recordsExportedMeta,
+        ),
+      );
+    }
+    if (data.containsKey('records_imported')) {
+      context.handle(
+        _recordsImportedMeta,
+        recordsImported.isAcceptableOrUnknown(
+          data['records_imported']!,
+          _recordsImportedMeta,
+        ),
+      );
+    }
+    if (data.containsKey('blobs_transferred')) {
+      context.handle(
+        _blobsTransferredMeta,
+        blobsTransferred.isAcceptableOrUnknown(
+          data['blobs_transferred']!,
+          _blobsTransferredMeta,
+        ),
+      );
+    }
+    if (data.containsKey('error_message')) {
+      context.handle(
+        _errorMessageMeta,
+        errorMessage.isAcceptableOrUnknown(
+          data['error_message']!,
+          _errorMessageMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SyncHistoryEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SyncHistoryEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      syncStartedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}sync_started_at'],
+      )!,
+      syncCompletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}sync_completed_at'],
+      ),
+      syncType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_type'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      recordsExported: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}records_exported'],
+      )!,
+      recordsImported: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}records_imported'],
+      )!,
+      blobsTransferred: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}blobs_transferred'],
+      )!,
+      errorMessage: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error_message'],
+      ),
+    );
+  }
+
+  @override
+  $SyncHistoryTable createAlias(String alias) {
+    return $SyncHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class SyncHistoryEntry extends DataClass
+    implements Insertable<SyncHistoryEntry> {
+  final String id;
+  final DateTime syncStartedAt;
+  final DateTime? syncCompletedAt;
+  final String syncType;
+  final String status;
+  final int recordsExported;
+  final int recordsImported;
+  final int blobsTransferred;
+  final String? errorMessage;
+  const SyncHistoryEntry({
+    required this.id,
+    required this.syncStartedAt,
+    this.syncCompletedAt,
+    required this.syncType,
+    required this.status,
+    required this.recordsExported,
+    required this.recordsImported,
+    required this.blobsTransferred,
+    this.errorMessage,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['sync_started_at'] = Variable<DateTime>(syncStartedAt);
+    if (!nullToAbsent || syncCompletedAt != null) {
+      map['sync_completed_at'] = Variable<DateTime>(syncCompletedAt);
+    }
+    map['sync_type'] = Variable<String>(syncType);
+    map['status'] = Variable<String>(status);
+    map['records_exported'] = Variable<int>(recordsExported);
+    map['records_imported'] = Variable<int>(recordsImported);
+    map['blobs_transferred'] = Variable<int>(blobsTransferred);
+    if (!nullToAbsent || errorMessage != null) {
+      map['error_message'] = Variable<String>(errorMessage);
+    }
+    return map;
+  }
+
+  SyncHistoryCompanion toCompanion(bool nullToAbsent) {
+    return SyncHistoryCompanion(
+      id: Value(id),
+      syncStartedAt: Value(syncStartedAt),
+      syncCompletedAt: syncCompletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncCompletedAt),
+      syncType: Value(syncType),
+      status: Value(status),
+      recordsExported: Value(recordsExported),
+      recordsImported: Value(recordsImported),
+      blobsTransferred: Value(blobsTransferred),
+      errorMessage: errorMessage == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorMessage),
+    );
+  }
+
+  factory SyncHistoryEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SyncHistoryEntry(
+      id: serializer.fromJson<String>(json['id']),
+      syncStartedAt: serializer.fromJson<DateTime>(json['syncStartedAt']),
+      syncCompletedAt: serializer.fromJson<DateTime?>(json['syncCompletedAt']),
+      syncType: serializer.fromJson<String>(json['syncType']),
+      status: serializer.fromJson<String>(json['status']),
+      recordsExported: serializer.fromJson<int>(json['recordsExported']),
+      recordsImported: serializer.fromJson<int>(json['recordsImported']),
+      blobsTransferred: serializer.fromJson<int>(json['blobsTransferred']),
+      errorMessage: serializer.fromJson<String?>(json['errorMessage']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'syncStartedAt': serializer.toJson<DateTime>(syncStartedAt),
+      'syncCompletedAt': serializer.toJson<DateTime?>(syncCompletedAt),
+      'syncType': serializer.toJson<String>(syncType),
+      'status': serializer.toJson<String>(status),
+      'recordsExported': serializer.toJson<int>(recordsExported),
+      'recordsImported': serializer.toJson<int>(recordsImported),
+      'blobsTransferred': serializer.toJson<int>(blobsTransferred),
+      'errorMessage': serializer.toJson<String?>(errorMessage),
+    };
+  }
+
+  SyncHistoryEntry copyWith({
+    String? id,
+    DateTime? syncStartedAt,
+    Value<DateTime?> syncCompletedAt = const Value.absent(),
+    String? syncType,
+    String? status,
+    int? recordsExported,
+    int? recordsImported,
+    int? blobsTransferred,
+    Value<String?> errorMessage = const Value.absent(),
+  }) => SyncHistoryEntry(
+    id: id ?? this.id,
+    syncStartedAt: syncStartedAt ?? this.syncStartedAt,
+    syncCompletedAt: syncCompletedAt.present
+        ? syncCompletedAt.value
+        : this.syncCompletedAt,
+    syncType: syncType ?? this.syncType,
+    status: status ?? this.status,
+    recordsExported: recordsExported ?? this.recordsExported,
+    recordsImported: recordsImported ?? this.recordsImported,
+    blobsTransferred: blobsTransferred ?? this.blobsTransferred,
+    errorMessage: errorMessage.present ? errorMessage.value : this.errorMessage,
+  );
+  SyncHistoryEntry copyWithCompanion(SyncHistoryCompanion data) {
+    return SyncHistoryEntry(
+      id: data.id.present ? data.id.value : this.id,
+      syncStartedAt: data.syncStartedAt.present
+          ? data.syncStartedAt.value
+          : this.syncStartedAt,
+      syncCompletedAt: data.syncCompletedAt.present
+          ? data.syncCompletedAt.value
+          : this.syncCompletedAt,
+      syncType: data.syncType.present ? data.syncType.value : this.syncType,
+      status: data.status.present ? data.status.value : this.status,
+      recordsExported: data.recordsExported.present
+          ? data.recordsExported.value
+          : this.recordsExported,
+      recordsImported: data.recordsImported.present
+          ? data.recordsImported.value
+          : this.recordsImported,
+      blobsTransferred: data.blobsTransferred.present
+          ? data.blobsTransferred.value
+          : this.blobsTransferred,
+      errorMessage: data.errorMessage.present
+          ? data.errorMessage.value
+          : this.errorMessage,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncHistoryEntry(')
+          ..write('id: $id, ')
+          ..write('syncStartedAt: $syncStartedAt, ')
+          ..write('syncCompletedAt: $syncCompletedAt, ')
+          ..write('syncType: $syncType, ')
+          ..write('status: $status, ')
+          ..write('recordsExported: $recordsExported, ')
+          ..write('recordsImported: $recordsImported, ')
+          ..write('blobsTransferred: $blobsTransferred, ')
+          ..write('errorMessage: $errorMessage')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    syncStartedAt,
+    syncCompletedAt,
+    syncType,
+    status,
+    recordsExported,
+    recordsImported,
+    blobsTransferred,
+    errorMessage,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SyncHistoryEntry &&
+          other.id == this.id &&
+          other.syncStartedAt == this.syncStartedAt &&
+          other.syncCompletedAt == this.syncCompletedAt &&
+          other.syncType == this.syncType &&
+          other.status == this.status &&
+          other.recordsExported == this.recordsExported &&
+          other.recordsImported == this.recordsImported &&
+          other.blobsTransferred == this.blobsTransferred &&
+          other.errorMessage == this.errorMessage);
+}
+
+class SyncHistoryCompanion extends UpdateCompanion<SyncHistoryEntry> {
+  final Value<String> id;
+  final Value<DateTime> syncStartedAt;
+  final Value<DateTime?> syncCompletedAt;
+  final Value<String> syncType;
+  final Value<String> status;
+  final Value<int> recordsExported;
+  final Value<int> recordsImported;
+  final Value<int> blobsTransferred;
+  final Value<String?> errorMessage;
+  final Value<int> rowid;
+  const SyncHistoryCompanion({
+    this.id = const Value.absent(),
+    this.syncStartedAt = const Value.absent(),
+    this.syncCompletedAt = const Value.absent(),
+    this.syncType = const Value.absent(),
+    this.status = const Value.absent(),
+    this.recordsExported = const Value.absent(),
+    this.recordsImported = const Value.absent(),
+    this.blobsTransferred = const Value.absent(),
+    this.errorMessage = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SyncHistoryCompanion.insert({
+    required String id,
+    required DateTime syncStartedAt,
+    this.syncCompletedAt = const Value.absent(),
+    required String syncType,
+    required String status,
+    this.recordsExported = const Value.absent(),
+    this.recordsImported = const Value.absent(),
+    this.blobsTransferred = const Value.absent(),
+    this.errorMessage = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       syncStartedAt = Value(syncStartedAt),
+       syncType = Value(syncType),
+       status = Value(status);
+  static Insertable<SyncHistoryEntry> custom({
+    Expression<String>? id,
+    Expression<DateTime>? syncStartedAt,
+    Expression<DateTime>? syncCompletedAt,
+    Expression<String>? syncType,
+    Expression<String>? status,
+    Expression<int>? recordsExported,
+    Expression<int>? recordsImported,
+    Expression<int>? blobsTransferred,
+    Expression<String>? errorMessage,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (syncStartedAt != null) 'sync_started_at': syncStartedAt,
+      if (syncCompletedAt != null) 'sync_completed_at': syncCompletedAt,
+      if (syncType != null) 'sync_type': syncType,
+      if (status != null) 'status': status,
+      if (recordsExported != null) 'records_exported': recordsExported,
+      if (recordsImported != null) 'records_imported': recordsImported,
+      if (blobsTransferred != null) 'blobs_transferred': blobsTransferred,
+      if (errorMessage != null) 'error_message': errorMessage,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SyncHistoryCompanion copyWith({
+    Value<String>? id,
+    Value<DateTime>? syncStartedAt,
+    Value<DateTime?>? syncCompletedAt,
+    Value<String>? syncType,
+    Value<String>? status,
+    Value<int>? recordsExported,
+    Value<int>? recordsImported,
+    Value<int>? blobsTransferred,
+    Value<String?>? errorMessage,
+    Value<int>? rowid,
+  }) {
+    return SyncHistoryCompanion(
+      id: id ?? this.id,
+      syncStartedAt: syncStartedAt ?? this.syncStartedAt,
+      syncCompletedAt: syncCompletedAt ?? this.syncCompletedAt,
+      syncType: syncType ?? this.syncType,
+      status: status ?? this.status,
+      recordsExported: recordsExported ?? this.recordsExported,
+      recordsImported: recordsImported ?? this.recordsImported,
+      blobsTransferred: blobsTransferred ?? this.blobsTransferred,
+      errorMessage: errorMessage ?? this.errorMessage,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (syncStartedAt.present) {
+      map['sync_started_at'] = Variable<DateTime>(syncStartedAt.value);
+    }
+    if (syncCompletedAt.present) {
+      map['sync_completed_at'] = Variable<DateTime>(syncCompletedAt.value);
+    }
+    if (syncType.present) {
+      map['sync_type'] = Variable<String>(syncType.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (recordsExported.present) {
+      map['records_exported'] = Variable<int>(recordsExported.value);
+    }
+    if (recordsImported.present) {
+      map['records_imported'] = Variable<int>(recordsImported.value);
+    }
+    if (blobsTransferred.present) {
+      map['blobs_transferred'] = Variable<int>(blobsTransferred.value);
+    }
+    if (errorMessage.present) {
+      map['error_message'] = Variable<String>(errorMessage.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncHistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('syncStartedAt: $syncStartedAt, ')
+          ..write('syncCompletedAt: $syncCompletedAt, ')
+          ..write('syncType: $syncType, ')
+          ..write('status: $status, ')
+          ..write('recordsExported: $recordsExported, ')
+          ..write('recordsImported: $recordsImported, ')
+          ..write('blobsTransferred: $blobsTransferred, ')
+          ..write('errorMessage: $errorMessage, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -9944,6 +13409,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $HabitLogsTable habitLogs = $HabitLogsTable(this);
   late final $GoalsTable goals = $GoalsTable(this);
   late final $JournalEntriesTable journalEntries = $JournalEntriesTable(this);
+  late final $SyncHistoryTable syncHistory = $SyncHistoryTable(this);
   late final Index idxNodeLinksSource = Index(
     'idx_node_links_source',
     'CREATE INDEX idx_node_links_source ON node_links (source_node_id)',
@@ -9960,6 +13426,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final CalendarDao calendarDao = CalendarDao(this as AppDatabase);
   late final HabitsDao habitsDao = HabitsDao(this as AppDatabase);
   late final JournalDao journalDao = JournalDao(this as AppDatabase);
+  late final SyncDao syncDao = SyncDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -9982,6 +13449,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     habitLogs,
     goals,
     journalEntries,
+    syncHistory,
     idxNodeLinksSource,
     idxNodeLinksTarget,
   ];
@@ -10180,6 +13648,10 @@ typedef $$WorkspacesTableCreateCompanionBuilder = WorkspacesCompanion Function({
   required DateTime createdAt,
   required DateTime updatedAt,
   Value<bool> isDeleted,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$WorkspacesTableUpdateCompanionBuilder = WorkspacesCompanion Function({
@@ -10190,6 +13662,10 @@ typedef $$WorkspacesTableUpdateCompanionBuilder = WorkspacesCompanion Function({
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<bool> isDeleted,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -10388,6 +13864,26 @@ class $$WorkspacesTableFilterComposer
 
   ColumnFilters<bool> get isDeleted => $composableBuilder(
     column: $table.isDeleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10635,6 +14131,26 @@ class $$WorkspacesTableOrderingComposer
     column: $table.isDeleted,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$WorkspacesTableAnnotationComposer
@@ -10668,6 +14184,24 @@ class $$WorkspacesTableAnnotationComposer
 
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   Expression<T> nodesRefs<T extends Object>(
     Expression<T> Function($$NodesTableAnnotationComposer a) f,
@@ -10914,6 +14448,10 @@ class $$WorkspacesTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkspacesCompanion(
                 id: id,
@@ -10923,6 +14461,10 @@ class $$WorkspacesTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 isDeleted: isDeleted,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -10934,6 +14476,10 @@ class $$WorkspacesTableTableManager
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<bool> isDeleted = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkspacesCompanion.insert(
                 id: id,
@@ -10943,6 +14489,10 @@ class $$WorkspacesTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 isDeleted: isDeleted,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -11187,6 +14737,10 @@ typedef $$NodesTableCreateCompanionBuilder = NodesCompanion Function({
   Value<String> metadataJson,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$NodesTableUpdateCompanionBuilder = NodesCompanion Function({
@@ -11206,6 +14760,10 @@ typedef $$NodesTableUpdateCompanionBuilder = NodesCompanion Function({
   Value<String> metadataJson,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -11486,6 +15044,26 @@ class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -11840,6 +15418,26 @@ class $$NodesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -11947,6 +15545,24 @@ class $$NodesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -12276,6 +15892,10 @@ class $$NodesTableTableManager
                 Value<String> metadataJson = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NodesCompanion(
                 id: id,
@@ -12294,6 +15914,10 @@ class $$NodesTableTableManager
                 metadataJson: metadataJson,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -12314,6 +15938,10 @@ class $$NodesTableTableManager
                 Value<String> metadataJson = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NodesCompanion.insert(
                 id: id,
@@ -12332,6 +15960,10 @@ class $$NodesTableTableManager
                 metadataJson: metadataJson,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -13789,6 +17421,10 @@ typedef $$PdfDocumentsTableCreateCompanionBuilder =
       required int fileSizeBytes,
       required int pageCount,
       required DateTime createdAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 typedef $$PdfDocumentsTableUpdateCompanionBuilder =
@@ -13800,6 +17436,10 @@ typedef $$PdfDocumentsTableUpdateCompanionBuilder =
       Value<int> fileSizeBytes,
       Value<int> pageCount,
       Value<DateTime> createdAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 
@@ -13880,6 +17520,26 @@ class $$PdfDocumentsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -13971,6 +17631,26 @@ class $$PdfDocumentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$NodesTableOrderingComposer get nodeId {
     final $$NodesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -14023,6 +17703,24 @@ class $$PdfDocumentsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$NodesTableAnnotationComposer get nodeId {
     final $$NodesTableAnnotationComposer composer = $composerBuilder(
@@ -14108,6 +17806,10 @@ class $$PdfDocumentsTableTableManager
                 Value<int> fileSizeBytes = const Value.absent(),
                 Value<int> pageCount = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PdfDocumentsCompanion(
                 id: id,
@@ -14117,6 +17819,10 @@ class $$PdfDocumentsTableTableManager
                 fileSizeBytes: fileSizeBytes,
                 pageCount: pageCount,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -14128,6 +17834,10 @@ class $$PdfDocumentsTableTableManager
                 required int fileSizeBytes,
                 required int pageCount,
                 required DateTime createdAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PdfDocumentsCompanion.insert(
                 id: id,
@@ -14137,6 +17847,10 @@ class $$PdfDocumentsTableTableManager
                 fileSizeBytes: fileSizeBytes,
                 pageCount: pageCount,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -14243,6 +17957,10 @@ typedef $$InkPagesTableCreateCompanionBuilder = InkPagesCompanion Function({
   Value<String?> ocrText,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$InkPagesTableUpdateCompanionBuilder = InkPagesCompanion Function({
@@ -14263,6 +17981,10 @@ typedef $$InkPagesTableUpdateCompanionBuilder = InkPagesCompanion Function({
   Value<String?> ocrText,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -14387,6 +18109,26 @@ class $$InkPagesTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -14521,6 +18263,26 @@ class $$InkPagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$InkDocumentsTableOrderingComposer get documentId {
     final $$InkDocumentsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -14640,6 +18402,24 @@ class $$InkPagesTableAnnotationComposer
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
+
   $$InkDocumentsTableAnnotationComposer get documentId {
     final $$InkDocumentsTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -14732,6 +18512,10 @@ class $$InkPagesTableTableManager
                 Value<String?> ocrText = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => InkPagesCompanion(
                 id: id,
@@ -14751,6 +18535,10 @@ class $$InkPagesTableTableManager
                 ocrText: ocrText,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -14772,6 +18560,10 @@ class $$InkPagesTableTableManager
                 Value<String?> ocrText = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => InkPagesCompanion.insert(
                 id: id,
@@ -14791,6 +18583,10 @@ class $$InkPagesTableTableManager
                 ocrText: ocrText,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -14875,6 +18671,10 @@ typedef $$NodeLinksTableCreateCompanionBuilder = NodeLinksCompanion Function({
   required String targetNodeId,
   Value<String?> linkText,
   required DateTime createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$NodeLinksTableUpdateCompanionBuilder = NodeLinksCompanion Function({
@@ -14883,6 +18683,10 @@ typedef $$NodeLinksTableUpdateCompanionBuilder = NodeLinksCompanion Function({
   Value<String> targetNodeId,
   Value<String?> linkText,
   Value<DateTime> createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -14946,6 +18750,26 @@ class $$NodeLinksTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -15020,6 +18844,26 @@ class $$NodeLinksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$NodesTableOrderingComposer get sourceNodeId {
     final $$NodesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -15084,6 +18928,24 @@ class $$NodeLinksTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$NodesTableAnnotationComposer get sourceNodeId {
     final $$NodesTableAnnotationComposer composer = $composerBuilder(
@@ -15165,6 +19027,10 @@ class $$NodeLinksTableTableManager
                 Value<String> targetNodeId = const Value.absent(),
                 Value<String?> linkText = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NodeLinksCompanion(
                 id: id,
@@ -15172,6 +19038,10 @@ class $$NodeLinksTableTableManager
                 targetNodeId: targetNodeId,
                 linkText: linkText,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -15181,6 +19051,10 @@ class $$NodeLinksTableTableManager
                 required String targetNodeId,
                 Value<String?> linkText = const Value.absent(),
                 required DateTime createdAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NodeLinksCompanion.insert(
                 id: id,
@@ -15188,6 +19062,10 @@ class $$NodeLinksTableTableManager
                 targetNodeId: targetNodeId,
                 linkText: linkText,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -15273,6 +19151,10 @@ typedef $$TagsTableCreateCompanionBuilder = TagsCompanion Function({
   required String name,
   Value<int?> color,
   required DateTime createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$TagsTableUpdateCompanionBuilder = TagsCompanion Function({
@@ -15281,6 +19163,10 @@ typedef $$TagsTableUpdateCompanionBuilder = TagsCompanion Function({
   Value<String> name,
   Value<int?> color,
   Value<DateTime> createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -15349,6 +19235,26 @@ class $$TagsTableFilterComposer extends Composer<_$AppDatabase, $TagsTable> {
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -15429,6 +19335,26 @@ class $$TagsTableOrderingComposer extends Composer<_$AppDatabase, $TagsTable> {
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -15473,6 +19399,24 @@ class $$TagsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -15556,6 +19500,10 @@ class $$TagsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<int?> color = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TagsCompanion(
                 id: id,
@@ -15563,6 +19511,10 @@ class $$TagsTableTableManager
                 name: name,
                 color: color,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -15572,6 +19524,10 @@ class $$TagsTableTableManager
                 required String name,
                 Value<int?> color = const Value.absent(),
                 required DateTime createdAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TagsCompanion.insert(
                 id: id,
@@ -15579,6 +19535,10 @@ class $$TagsTableTableManager
                 name: name,
                 color: color,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -15667,11 +19627,19 @@ typedef $$TagsTableProcessedTableManager =
 typedef $$NodeTagsTableCreateCompanionBuilder = NodeTagsCompanion Function({
   required String nodeId,
   required String tagId,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$NodeTagsTableUpdateCompanionBuilder = NodeTagsCompanion Function({
   Value<String> nodeId,
   Value<String> tagId,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -15723,6 +19691,26 @@ class $$NodeTagsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$NodesTableFilterComposer get nodeId {
     final $$NodesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -15779,6 +19767,26 @@ class $$NodeTagsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$NodesTableOrderingComposer get nodeId {
     final $$NodesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -15835,6 +19843,24 @@ class $$NodeTagsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
+
   $$NodesTableAnnotationComposer get nodeId {
     final $$NodesTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -15908,19 +19934,40 @@ class $$NodeTagsTableTableManager
               $$NodeTagsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
               $$NodeTagsTableAnnotationComposer($db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<String> nodeId = const Value.absent(),
-            Value<String> tagId = const Value.absent(),
-            Value<int> rowid = const Value.absent(),
-          }) => NodeTagsCompanion(nodeId: nodeId, tagId: tagId, rowid: rowid),
+          updateCompanionCallback:
+              ({
+                Value<String> nodeId = const Value.absent(),
+                Value<String> tagId = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => NodeTagsCompanion(
+                nodeId: nodeId,
+                tagId: tagId,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
+                rowid: rowid,
+              ),
           createCompanionCallback:
               ({
                 required String nodeId,
                 required String tagId,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NodeTagsCompanion.insert(
                 nodeId: nodeId,
                 tagId: tagId,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -16012,6 +20059,10 @@ typedef $$ProjectsTableCreateCompanionBuilder = ProjectsCompanion Function({
   Value<int> sortOrder,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$ProjectsTableUpdateCompanionBuilder = ProjectsCompanion Function({
@@ -16025,6 +20076,10 @@ typedef $$ProjectsTableUpdateCompanionBuilder = ProjectsCompanion Function({
   Value<int> sortOrder,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -16120,6 +20175,26 @@ class $$ProjectsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -16226,6 +20301,26 @@ class $$ProjectsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -16289,6 +20384,24 @@ class $$ProjectsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -16377,6 +20490,10 @@ class $$ProjectsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProjectsCompanion(
                 id: id,
@@ -16389,6 +20506,10 @@ class $$ProjectsTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -16403,6 +20524,10 @@ class $$ProjectsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProjectsCompanion.insert(
                 id: id,
@@ -16415,6 +20540,10 @@ class $$ProjectsTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -16517,6 +20646,10 @@ typedef $$TasksTableCreateCompanionBuilder = TasksCompanion Function({
   Value<int> sortOrder,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$TasksTableUpdateCompanionBuilder = TasksCompanion Function({
@@ -16537,6 +20670,10 @@ typedef $$TasksTableUpdateCompanionBuilder = TasksCompanion Function({
   Value<int> sortOrder,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -16701,6 +20838,26 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -16896,6 +21053,26 @@ class $$TasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -17046,6 +21223,24 @@ class $$TasksTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -17216,6 +21411,10 @@ class $$TasksTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TasksCompanion(
                 id: id,
@@ -17235,6 +21434,10 @@ class $$TasksTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -17256,6 +21459,10 @@ class $$TasksTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TasksCompanion.insert(
                 id: id,
@@ -17275,6 +21482,10 @@ class $$TasksTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -17426,6 +21637,10 @@ typedef $$CalendarEventsTableCreateCompanionBuilder =
       Value<String?> location,
       required DateTime createdAt,
       required DateTime updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 typedef $$CalendarEventsTableUpdateCompanionBuilder =
@@ -17443,6 +21658,10 @@ typedef $$CalendarEventsTableUpdateCompanionBuilder =
       Value<String?> location,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 
@@ -17567,6 +21786,26 @@ class $$CalendarEventsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -17699,6 +21938,26 @@ class $$CalendarEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -17809,6 +22068,24 @@ class $$CalendarEventsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -17923,6 +22200,10 @@ class $$CalendarEventsTableTableManager
                 Value<String?> location = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CalendarEventsCompanion(
                 id: id,
@@ -17938,6 +22219,10 @@ class $$CalendarEventsTableTableManager
                 location: location,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -17955,6 +22240,10 @@ class $$CalendarEventsTableTableManager
                 Value<String?> location = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CalendarEventsCompanion.insert(
                 id: id,
@@ -17970,6 +22259,10 @@ class $$CalendarEventsTableTableManager
                 location: location,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -18073,6 +22366,10 @@ typedef $$HabitsTableCreateCompanionBuilder = HabitsCompanion Function({
   Value<int> sortOrder,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$HabitsTableUpdateCompanionBuilder = HabitsCompanion Function({
@@ -18088,6 +22385,10 @@ typedef $$HabitsTableUpdateCompanionBuilder = HabitsCompanion Function({
   Value<int> sortOrder,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -18192,6 +22493,26 @@ class $$HabitsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -18308,6 +22629,26 @@ class $$HabitsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -18379,6 +22720,24 @@ class $$HabitsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -18469,6 +22828,10 @@ class $$HabitsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => HabitsCompanion(
                 id: id,
@@ -18483,6 +22846,10 @@ class $$HabitsTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -18499,6 +22866,10 @@ class $$HabitsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => HabitsCompanion.insert(
                 id: id,
@@ -18513,6 +22884,10 @@ class $$HabitsTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -18609,6 +22984,10 @@ typedef $$HabitLogsTableCreateCompanionBuilder = HabitLogsCompanion Function({
   Value<int> completedCount,
   Value<bool> isCompleted,
   required DateTime createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$HabitLogsTableUpdateCompanionBuilder = HabitLogsCompanion Function({
@@ -18618,6 +22997,10 @@ typedef $$HabitLogsTableUpdateCompanionBuilder = HabitLogsCompanion Function({
   Value<int> completedCount,
   Value<bool> isCompleted,
   Value<DateTime> createdAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -18674,6 +23057,26 @@ class $$HabitLogsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -18735,6 +23138,26 @@ class $$HabitLogsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$HabitsTableOrderingComposer get habitId {
     final $$HabitsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -18786,6 +23209,24 @@ class $$HabitLogsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$HabitsTableAnnotationComposer get habitId {
     final $$HabitsTableAnnotationComposer composer = $composerBuilder(
@@ -18845,6 +23286,10 @@ class $$HabitLogsTableTableManager
                 Value<int> completedCount = const Value.absent(),
                 Value<bool> isCompleted = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => HabitLogsCompanion(
                 id: id,
@@ -18853,6 +23298,10 @@ class $$HabitLogsTableTableManager
                 completedCount: completedCount,
                 isCompleted: isCompleted,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -18863,6 +23312,10 @@ class $$HabitLogsTableTableManager
                 Value<int> completedCount = const Value.absent(),
                 Value<bool> isCompleted = const Value.absent(),
                 required DateTime createdAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => HabitLogsCompanion.insert(
                 id: id,
@@ -18871,6 +23324,10 @@ class $$HabitLogsTableTableManager
                 completedCount: completedCount,
                 isCompleted: isCompleted,
                 createdAt: createdAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -18948,6 +23405,10 @@ typedef $$GoalsTableCreateCompanionBuilder = GoalsCompanion Function({
   Value<String?> colorHex,
   required DateTime createdAt,
   required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 typedef $$GoalsTableUpdateCompanionBuilder = GoalsCompanion Function({
@@ -18960,6 +23421,10 @@ typedef $$GoalsTableUpdateCompanionBuilder = GoalsCompanion Function({
   Value<String?> colorHex,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<DateTime> clientModifiedAt,
+  Value<String> modifiedDeviceId,
+  Value<int> syncVersion,
   Value<int> rowid,
 });
 
@@ -19030,6 +23495,26 @@ class $$GoalsTableFilterComposer extends Composer<_$AppDatabase, $GoalsTable> {
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -19106,6 +23591,26 @@ class $$GoalsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -19166,6 +23671,24 @@ class $$GoalsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -19228,6 +23751,10 @@ class $$GoalsTableTableManager
                 Value<String?> colorHex = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GoalsCompanion(
                 id: id,
@@ -19239,6 +23766,10 @@ class $$GoalsTableTableManager
                 colorHex: colorHex,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -19252,6 +23783,10 @@ class $$GoalsTableTableManager
                 Value<String?> colorHex = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GoalsCompanion.insert(
                 id: id,
@@ -19263,6 +23798,10 @@ class $$GoalsTableTableManager
                 colorHex: colorHex,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -19339,6 +23878,10 @@ typedef $$JournalEntriesTableCreateCompanionBuilder =
       Value<String?> mood,
       required DateTime createdAt,
       required DateTime updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 typedef $$JournalEntriesTableUpdateCompanionBuilder =
@@ -19350,6 +23893,10 @@ typedef $$JournalEntriesTableUpdateCompanionBuilder =
       Value<String?> mood,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
+      Value<DateTime?> deletedAt,
+      Value<DateTime> clientModifiedAt,
+      Value<String> modifiedDeviceId,
+      Value<int> syncVersion,
       Value<int> rowid,
     });
 
@@ -19428,6 +23975,26 @@ class $$JournalEntriesTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -19512,6 +24079,26 @@ class $$JournalEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$WorkspacesTableOrderingComposer get workspaceId {
     final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -19584,6 +24171,24 @@ class $$JournalEntriesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get clientModifiedAt => $composableBuilder(
+    column: $table.clientModifiedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get modifiedDeviceId => $composableBuilder(
+    column: $table.modifiedDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get syncVersion => $composableBuilder(
+    column: $table.syncVersion,
+    builder: (column) => column,
+  );
 
   $$WorkspacesTableAnnotationComposer get workspaceId {
     final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
@@ -19669,6 +24274,10 @@ class $$JournalEntriesTableTableManager
                 Value<String?> mood = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => JournalEntriesCompanion(
                 id: id,
@@ -19678,6 +24287,10 @@ class $$JournalEntriesTableTableManager
                 mood: mood,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -19689,6 +24302,10 @@ class $$JournalEntriesTableTableManager
                 Value<String?> mood = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
+                Value<DateTime?> deletedAt = const Value.absent(),
+                Value<DateTime> clientModifiedAt = const Value.absent(),
+                Value<String> modifiedDeviceId = const Value.absent(),
+                Value<int> syncVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => JournalEntriesCompanion.insert(
                 id: id,
@@ -19698,6 +24315,10 @@ class $$JournalEntriesTableTableManager
                 mood: mood,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                clientModifiedAt: clientModifiedAt,
+                modifiedDeviceId: modifiedDeviceId,
+                syncVersion: syncVersion,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -19776,6 +24397,303 @@ typedef $$JournalEntriesTableProcessedTableManager =
       JournalEntryData,
       PrefetchHooks Function({bool workspaceId, bool nodeId})
     >;
+typedef $$SyncHistoryTableCreateCompanionBuilder =
+    SyncHistoryCompanion Function({
+      required String id,
+      required DateTime syncStartedAt,
+      Value<DateTime?> syncCompletedAt,
+      required String syncType,
+      required String status,
+      Value<int> recordsExported,
+      Value<int> recordsImported,
+      Value<int> blobsTransferred,
+      Value<String?> errorMessage,
+      Value<int> rowid,
+    });
+typedef $$SyncHistoryTableUpdateCompanionBuilder =
+    SyncHistoryCompanion Function({
+      Value<String> id,
+      Value<DateTime> syncStartedAt,
+      Value<DateTime?> syncCompletedAt,
+      Value<String> syncType,
+      Value<String> status,
+      Value<int> recordsExported,
+      Value<int> recordsImported,
+      Value<int> blobsTransferred,
+      Value<String?> errorMessage,
+      Value<int> rowid,
+    });
+
+class $$SyncHistoryTableFilterComposer
+    extends Composer<_$AppDatabase, $SyncHistoryTable> {
+  $$SyncHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get syncStartedAt => $composableBuilder(
+    column: $table.syncStartedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get syncCompletedAt => $composableBuilder(
+    column: $table.syncCompletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncType => $composableBuilder(
+    column: $table.syncType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get recordsExported => $composableBuilder(
+    column: $table.recordsExported,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get recordsImported => $composableBuilder(
+    column: $table.recordsImported,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get blobsTransferred => $composableBuilder(
+    column: $table.blobsTransferred,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SyncHistoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $SyncHistoryTable> {
+  $$SyncHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get syncStartedAt => $composableBuilder(
+    column: $table.syncStartedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get syncCompletedAt => $composableBuilder(
+    column: $table.syncCompletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncType => $composableBuilder(
+    column: $table.syncType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get recordsExported => $composableBuilder(
+    column: $table.recordsExported,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get recordsImported => $composableBuilder(
+    column: $table.recordsImported,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get blobsTransferred => $composableBuilder(
+    column: $table.blobsTransferred,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SyncHistoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SyncHistoryTable> {
+  $$SyncHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get syncStartedAt => $composableBuilder(
+    column: $table.syncStartedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get syncCompletedAt => $composableBuilder(
+    column: $table.syncCompletedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get syncType =>
+      $composableBuilder(column: $table.syncType, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get recordsExported => $composableBuilder(
+    column: $table.recordsExported,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get recordsImported => $composableBuilder(
+    column: $table.recordsImported,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get blobsTransferred => $composableBuilder(
+    column: $table.blobsTransferred,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get errorMessage => $composableBuilder(
+    column: $table.errorMessage,
+    builder: (column) => column,
+  );
+}
+
+class $$SyncHistoryTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SyncHistoryTable,
+          SyncHistoryEntry,
+          $$SyncHistoryTableFilterComposer,
+          $$SyncHistoryTableOrderingComposer,
+          $$SyncHistoryTableAnnotationComposer,
+          $$SyncHistoryTableCreateCompanionBuilder,
+          $$SyncHistoryTableUpdateCompanionBuilder,
+          (
+            SyncHistoryEntry,
+            BaseReferences<_$AppDatabase, $SyncHistoryTable, SyncHistoryEntry>,
+          ),
+          SyncHistoryEntry,
+          PrefetchHooks Function()
+        > {
+  $$SyncHistoryTableTableManager(_$AppDatabase db, $SyncHistoryTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SyncHistoryTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SyncHistoryTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SyncHistoryTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<DateTime> syncStartedAt = const Value.absent(),
+                Value<DateTime?> syncCompletedAt = const Value.absent(),
+                Value<String> syncType = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> recordsExported = const Value.absent(),
+                Value<int> recordsImported = const Value.absent(),
+                Value<int> blobsTransferred = const Value.absent(),
+                Value<String?> errorMessage = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncHistoryCompanion(
+                id: id,
+                syncStartedAt: syncStartedAt,
+                syncCompletedAt: syncCompletedAt,
+                syncType: syncType,
+                status: status,
+                recordsExported: recordsExported,
+                recordsImported: recordsImported,
+                blobsTransferred: blobsTransferred,
+                errorMessage: errorMessage,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required DateTime syncStartedAt,
+                Value<DateTime?> syncCompletedAt = const Value.absent(),
+                required String syncType,
+                required String status,
+                Value<int> recordsExported = const Value.absent(),
+                Value<int> recordsImported = const Value.absent(),
+                Value<int> blobsTransferred = const Value.absent(),
+                Value<String?> errorMessage = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncHistoryCompanion.insert(
+                id: id,
+                syncStartedAt: syncStartedAt,
+                syncCompletedAt: syncCompletedAt,
+                syncType: syncType,
+                status: status,
+                recordsExported: recordsExported,
+                recordsImported: recordsImported,
+                blobsTransferred: blobsTransferred,
+                errorMessage: errorMessage,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SyncHistoryTable, SyncHistoryEntry>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SyncHistoryTable,
+                    SyncHistoryEntry
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SyncHistoryTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SyncHistoryTable,
+      SyncHistoryEntry,
+      $$SyncHistoryTableFilterComposer,
+      $$SyncHistoryTableOrderingComposer,
+      $$SyncHistoryTableAnnotationComposer,
+      $$SyncHistoryTableCreateCompanionBuilder,
+      $$SyncHistoryTableUpdateCompanionBuilder,
+      (
+        SyncHistoryEntry,
+        BaseReferences<_$AppDatabase, $SyncHistoryTable, SyncHistoryEntry>,
+      ),
+      SyncHistoryEntry,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -19813,4 +24731,6 @@ class $AppDatabaseManager {
       $$GoalsTableTableManager(_db, _db.goals);
   $$JournalEntriesTableTableManager get journalEntries =>
       $$JournalEntriesTableTableManager(_db, _db.journalEntries);
+  $$SyncHistoryTableTableManager get syncHistory =>
+      $$SyncHistoryTableTableManager(_db, _db.syncHistory);
 }

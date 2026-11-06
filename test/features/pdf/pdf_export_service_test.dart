@@ -53,6 +53,9 @@ void main() {
           backgroundColor: 0xFFFFFFFF,
           createdAt: now,
           updatedAt: now,
+          clientModifiedAt: now,
+          modifiedDeviceId: 'test-device',
+          syncVersion: 1,
         );
 
         final inkDoc = AtlasInkDocument.empty(

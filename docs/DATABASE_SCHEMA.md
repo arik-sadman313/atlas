@@ -641,3 +641,54 @@ CREATE INDEX idx_journal_entries_node ON journal_entries(node_id);
 - [`JournalRepository`](../lib/features/journal/data/repositories/journal_repository.dart):
   - Scaffolds date-linked document nodes in CAS with structured default reflection sections (`## Daily Focus`, `## Key Wins`, `## Reflections`) and manages journal entry metadata.
 
+---
+
+## 11. Milestone 8: Schema Version 7 & Sync Infrastructure
+
+### 11.1 Synchronization Metadata Columns
+In Schema Version 7, four synchronization metadata columns were added across all 14 domain and relational tables:
+1. `workspaces`
+2. `nodes`
+3. `node_links`
+4. `tags`
+5. `node_tags`
+6. `ink_pages`
+7. `pdf_documents`
+8. `projects`
+9. `tasks`
+10. `calendar_events`
+11. `habits`
+12. `habit_logs`
+13. `goals`
+14. `journal_entries`
+
+Each table incorporates:
+```sql
+ALTER TABLE [table] ADD COLUMN deleted_at INTEGER;           -- Nullable UTC timestamp marking soft deletion
+ALTER TABLE [table] ADD COLUMN client_modified_at INTEGER;   -- UTC timestamp of last local mutation for LWW resolution
+ALTER TABLE [table] ADD COLUMN modified_device_id TEXT;      -- Client instance UUID that performed the mutation
+ALTER TABLE [table] ADD COLUMN sync_version INTEGER;         -- Monotonically increasing sync sequence counter
+```
+
+### 11.2 `sync_history` Table
+Tracks local-first folder synchronizations and vault backup/restore operations.
+
+```sql
+CREATE TABLE sync_history (
+    id TEXT PRIMARY KEY NOT NULL,             -- UUIDv4 sync run identifier
+    sync_started_at INTEGER NOT NULL,         -- UTC start timestamp
+    sync_completed_at INTEGER,                -- UTC completion timestamp
+    sync_type TEXT NOT NULL,                  -- 'folder_sync' | 'vault_export' | 'vault_import'
+    status TEXT NOT NULL,                     -- 'in_progress' | 'completed' | 'failed'
+    records_exported INTEGER NOT NULL DEFAULT 0,
+    records_imported INTEGER NOT NULL DEFAULT 0,
+    blobs_transferred INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT
+);
+CREATE INDEX idx_sync_history_started ON sync_history(sync_started_at);
+```
+
+### 11.3 Soft Deletion & Query Semantics
+All DAOs now enforce soft-deletion filtering via `deletedAt.isNull()`. When an entity is soft-deleted, `deleted_at` and `client_modified_at` are set to UTC `now()`. SQLite foreign-key cascading and `SET NULL` actions are preserved non-destructively through DAO coordination. Remote ingest verifies `client_modified_at` to resolve mutations via Last-Write-Wins (LWW) and flags deletions across devices without losing tombstones.
+
+

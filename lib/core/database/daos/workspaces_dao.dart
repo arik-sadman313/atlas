@@ -12,7 +12,7 @@ class WorkspacesDao extends DatabaseAccessor<AppDatabase>
 
   Stream<List<WorkspaceEntry>> watchAllWorkspaces() {
     return (select(workspaces)
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) =>
                 OrderingTerm(expression: tbl.createdAt, mode: OrderingMode.asc),
@@ -22,7 +22,7 @@ class WorkspacesDao extends DatabaseAccessor<AppDatabase>
 
   Future<List<WorkspaceEntry>> getAllWorkspaces() {
     return (select(workspaces)
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) =>
                 OrderingTerm(expression: tbl.createdAt, mode: OrderingMode.asc),
@@ -48,10 +48,13 @@ class WorkspacesDao extends DatabaseAccessor<AppDatabase>
     if (hardDelete) {
       return (delete(workspaces)..where((tbl) => tbl.id.equals(id))).go();
     } else {
+      final now = DateTime.now().toUtc();
       return (update(workspaces)..where((tbl) => tbl.id.equals(id))).write(
         WorkspacesCompanion(
           isDeleted: const Value(true),
-          updatedAt: Value(DateTime.now()),
+          deletedAt: Value(now),
+          clientModifiedAt: Value(now),
+          updatedAt: Value(now),
         ),
       );
     }

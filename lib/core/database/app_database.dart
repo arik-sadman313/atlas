@@ -9,6 +9,7 @@ import 'daos/ink_dao.dart';
 import 'daos/journal_dao.dart';
 import 'daos/links_dao.dart';
 import 'daos/nodes_dao.dart';
+import 'daos/sync_dao.dart';
 import 'daos/tasks_dao.dart';
 import 'daos/workspaces_dao.dart';
 import 'tables/attachments_table.dart';
@@ -24,6 +25,7 @@ import 'tables/node_links_table.dart';
 import 'tables/nodes_table.dart';
 import 'tables/pdf_documents_table.dart';
 import 'tables/projects_table.dart';
+import 'tables/sync_history_table.dart';
 import 'tables/tags_table.dart';
 import 'tables/tasks_table.dart';
 import 'tables/workspaces_table.dart';
@@ -49,6 +51,7 @@ part 'app_database.g.dart';
     HabitLogs,
     Goals,
     JournalEntries,
+    SyncHistory,
   ],
   daos: [
     WorkspacesDao,
@@ -59,6 +62,7 @@ part 'app_database.g.dart';
     CalendarDao,
     HabitsDao,
     JournalDao,
+    SyncDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -71,7 +75,16 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withFile(File file) : super(impl.connect(overrideFile: file));
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
+
+  /// Flushes in-flight WAL journal to the main SQLite database file.
+  Future<void> walCheckpoint() async {
+    try {
+      await customStatement('PRAGMA wal_checkpoint(FULL);');
+    } catch (_) {
+      // Gracefully handle in-memory or unsupported checkpointing
+    }
+  }
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -104,6 +117,34 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(habitLogs);
         await m.createTable(goals);
         await m.createTable(journalEntries);
+      }
+      if (from < 7) {
+        await m.createTable(syncHistory);
+
+        // Add sync metadata columns to all 14 tables
+        final List<TableInfo> tablesWithSync = [
+          workspaces,
+          nodes,
+          nodeLinks,
+          tags,
+          nodeTags,
+          inkPages,
+          pdfDocuments,
+          projects,
+          tasks,
+          calendarEvents,
+          habits,
+          habitLogs,
+          goals,
+          journalEntries,
+        ];
+
+        for (final table in tablesWithSync) {
+          await m.addColumn(table, table.columnsByName['deleted_at']!);
+          await m.addColumn(table, table.columnsByName['client_modified_at']!);
+          await m.addColumn(table, table.columnsByName['modified_device_id']!);
+          await m.addColumn(table, table.columnsByName['sync_version']!);
+        }
       }
     },
     beforeOpen: (details) async {

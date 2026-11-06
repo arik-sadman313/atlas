@@ -23,7 +23,8 @@ class JournalDao extends DatabaseAccessor<AppDatabase> with _$JournalDaoMixin {
     return (select(journalEntries)..where(
           (tbl) =>
               tbl.workspaceId.equals(workspaceId) &
-              tbl.journalDate.equals(journalDate),
+              tbl.journalDate.equals(journalDate) &
+              tbl.deletedAt.isNull(),
         ))
         .getSingleOrNull();
   }
@@ -35,21 +36,22 @@ class JournalDao extends DatabaseAccessor<AppDatabase> with _$JournalDaoMixin {
     return (select(journalEntries)..where(
           (tbl) =>
               tbl.workspaceId.equals(workspaceId) &
-              tbl.journalDate.equals(journalDate),
+              tbl.journalDate.equals(journalDate) &
+              tbl.deletedAt.isNull(),
         ))
         .watchSingleOrNull();
   }
 
   Future<JournalEntryData?> findEntryByNodeId(String nodeId) {
-    return (select(
-      journalEntries,
-    )..where((tbl) => tbl.nodeId.equals(nodeId))).getSingleOrNull();
+    return (select(journalEntries)
+          ..where((tbl) => tbl.nodeId.equals(nodeId) & tbl.deletedAt.isNull()))
+        .getSingleOrNull();
   }
 
   Stream<JournalEntryData?> watchEntryByNodeId(String nodeId) {
-    return (select(
-      journalEntries,
-    )..where((tbl) => tbl.nodeId.equals(nodeId))).watchSingleOrNull();
+    return (select(journalEntries)
+          ..where((tbl) => tbl.nodeId.equals(nodeId) & tbl.deletedAt.isNull()))
+        .watchSingleOrNull();
   }
 
   Stream<List<JournalEntryData>> watchRecentJournalEntries(
@@ -57,7 +59,9 @@ class JournalDao extends DatabaseAccessor<AppDatabase> with _$JournalDaoMixin {
     int limit = 7,
   }) {
     final query = select(journalEntries)
-      ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+      ..where(
+        (tbl) => tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull(),
+      )
       ..orderBy([
         (tbl) =>
             OrderingTerm(expression: tbl.journalDate, mode: OrderingMode.desc),
@@ -72,7 +76,9 @@ class JournalDao extends DatabaseAccessor<AppDatabase> with _$JournalDaoMixin {
     int limit = 7,
   }) {
     final query = select(journalEntries)
-      ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+      ..where(
+        (tbl) => tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull(),
+      )
       ..orderBy([
         (tbl) =>
             OrderingTerm(expression: tbl.journalDate, mode: OrderingMode.desc),

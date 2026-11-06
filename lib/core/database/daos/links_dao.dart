@@ -106,8 +106,11 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
         select(
             nodeLinks,
           ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId))])
-          ..where(nodeLinks.targetNodeId.equals(targetNodeId))
-          ..where(nodes.isDeleted.equals(false))
+          ..where(
+            nodeLinks.targetNodeId.equals(targetNodeId) &
+                nodeLinks.deletedAt.isNull(),
+          )
+          ..where(nodes.isDeleted.equals(false) & nodes.deletedAt.isNull())
           ..orderBy([
             OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
           ]);
@@ -135,8 +138,11 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
         select(
             nodeLinks,
           ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId))])
-          ..where(nodeLinks.targetNodeId.equals(targetNodeId))
-          ..where(nodes.isDeleted.equals(false))
+          ..where(
+            nodeLinks.targetNodeId.equals(targetNodeId) &
+                nodeLinks.deletedAt.isNull(),
+          )
+          ..where(nodes.isDeleted.equals(false) & nodes.deletedAt.isNull())
           ..orderBy([
             OrderingTerm(expression: nodes.updatedAt, mode: OrderingMode.desc),
           ]);
@@ -166,8 +172,11 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
         select(
             nodeLinks,
           ).join([innerJoin(nodes, nodes.id.equalsExp(nodeLinks.targetNodeId))])
-          ..where(nodeLinks.sourceNodeId.equals(sourceNodeId))
-          ..where(nodes.isDeleted.equals(false));
+          ..where(
+            nodeLinks.sourceNodeId.equals(sourceNodeId) &
+                nodeLinks.deletedAt.isNull(),
+          )
+          ..where(nodes.isDeleted.equals(false) & nodes.deletedAt.isNull());
 
     return query.watch().map((rows) {
       return rows.map((row) {
@@ -207,9 +216,14 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
   );
 
   Stream<List<TagEntry>> watchTagsForNode(String nodeId) {
-    final query = select(tags).join([
-      innerJoin(nodeTags, nodeTags.tagId.equalsExp(tags.id)),
-    ])..where(nodeTags.nodeId.equals(nodeId));
+    final query =
+        select(tags)
+            .join([innerJoin(nodeTags, nodeTags.tagId.equalsExp(tags.id))])
+          ..where(
+            nodeTags.nodeId.equals(nodeId) &
+                nodeTags.deletedAt.isNull() &
+                tags.deletedAt.isNull(),
+          );
 
     return query.watch().map(
       (rows) => rows.map((r) => r.readTable(tags)).toList(),
@@ -221,7 +235,10 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
         select(nodeLinks).join([
           innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId)),
         ])..where(
-          nodes.workspaceId.equals(workspaceId) & nodes.isDeleted.equals(false),
+          nodes.workspaceId.equals(workspaceId) &
+              nodes.isDeleted.equals(false) &
+              nodes.deletedAt.isNull() &
+              nodeLinks.deletedAt.isNull(),
         );
 
     return query.get().then(
@@ -234,7 +251,10 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
         select(nodeLinks).join([
           innerJoin(nodes, nodes.id.equalsExp(nodeLinks.sourceNodeId)),
         ])..where(
-          nodes.workspaceId.equals(workspaceId) & nodes.isDeleted.equals(false),
+          nodes.workspaceId.equals(workspaceId) &
+              nodes.isDeleted.equals(false) &
+              nodes.deletedAt.isNull() &
+              nodeLinks.deletedAt.isNull(),
         );
 
     return query.watch().map(
@@ -243,18 +263,22 @@ class LinksDao extends DatabaseAccessor<AppDatabase> with _$LinksDaoMixin {
   }
 
   Future<List<TagEntry>> getAllTagsForWorkspace(String workspaceId) {
-    return (select(
-      tags,
-    )..where((tbl) => tbl.workspaceId.equals(workspaceId))).get();
+    return (select(tags)..where(
+          (tbl) => tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull(),
+        ))
+        .get();
   }
 
   Future<List<NodeTagEntry>> getAllNodeTagsForWorkspace(String workspaceId) {
     final query =
-        select(
-          nodeTags,
-        ).join([innerJoin(nodes, nodes.id.equalsExp(nodeTags.nodeId))])..where(
-          nodes.workspaceId.equals(workspaceId) & nodes.isDeleted.equals(false),
-        );
+        select(nodeTags)
+            .join([innerJoin(nodes, nodes.id.equalsExp(nodeTags.nodeId))])
+          ..where(
+            nodes.workspaceId.equals(workspaceId) &
+                nodes.isDeleted.equals(false) &
+                nodes.deletedAt.isNull() &
+                nodeTags.deletedAt.isNull(),
+          );
 
     return query.get().then(
       (rows) => rows.map((r) => r.readTable(nodeTags)).toList(),

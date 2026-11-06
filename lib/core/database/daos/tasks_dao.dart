@@ -22,7 +22,8 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }) {
     final query = select(tasks)
       ..where((tbl) {
-        Expression<bool> predicate = tbl.workspaceId.equals(workspaceId);
+        Expression<bool> predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
 
         if (isCompleted != null) {
           predicate &= tbl.isCompleted.equals(isCompleted);
@@ -62,7 +63,8 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }) {
     final query = select(tasks)
       ..where((tbl) {
-        Expression<bool> predicate = tbl.workspaceId.equals(workspaceId);
+        Expression<bool> predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
 
         if (isCompleted != null) {
           predicate &= tbl.isCompleted.equals(isCompleted);
@@ -127,7 +129,10 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
 
   Stream<List<TaskEntry>> watchSubtasks(String parentTaskId) {
     return (select(tasks)
-          ..where((tbl) => tbl.parentTaskId.equals(parentTaskId))
+          ..where(
+            (tbl) =>
+                tbl.parentTaskId.equals(parentTaskId) & tbl.deletedAt.isNull(),
+          )
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.isCompleted,
@@ -143,7 +148,10 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
 
   Future<List<TaskEntry>> getSubtasks(String parentTaskId) {
     return (select(tasks)
-          ..where((tbl) => tbl.parentTaskId.equals(parentTaskId))
+          ..where(
+            (tbl) =>
+                tbl.parentTaskId.equals(parentTaskId) & tbl.deletedAt.isNull(),
+          )
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.isCompleted,
@@ -158,13 +166,15 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }
 
   Future<TaskEntry?> getTask(String id) {
-    return (select(tasks)..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
+    return (select(tasks)
+          ..where((tbl) => tbl.id.equals(id) & tbl.deletedAt.isNull()))
+        .getSingleOrNull();
   }
 
   Stream<TaskEntry?> watchTask(String id) {
-    return (select(
-      tasks,
-    )..where((tbl) => tbl.id.equals(id))).watchSingleOrNull();
+    return (select(tasks)
+          ..where((tbl) => tbl.id.equals(id) & tbl.deletedAt.isNull()))
+        .watchSingleOrNull();
   }
 
   // --- Task Mutations ---
@@ -192,8 +202,25 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
     );
   }
 
-  Future<int> deleteTask(String id) {
-    return (delete(tasks)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deleteTask(String id, {bool hardDelete = false}) async {
+    if (hardDelete) {
+      return (delete(tasks)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    await (update(tasks)..where((tbl) => tbl.parentTaskId.equals(id))).write(
+      TasksCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+    return (update(tasks)..where((tbl) => tbl.id.equals(id))).write(
+      TasksCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 
   Future<void> batchReorderTasks(List<String> taskIds) async {
@@ -214,7 +241,8 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }) {
     return (select(projects)
           ..where((tbl) {
-            Expression<bool> predicate = tbl.workspaceId.equals(workspaceId);
+            Expression<bool> predicate =
+                tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
             if (!includeArchived) {
               predicate &= tbl.isArchived.equals(false);
             }
@@ -234,7 +262,8 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }) {
     return (select(projects)
           ..where((tbl) {
-            Expression<bool> predicate = tbl.workspaceId.equals(workspaceId);
+            Expression<bool> predicate =
+                tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
             if (!includeArchived) {
               predicate &= tbl.isArchived.equals(false);
             }
@@ -249,9 +278,9 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
   }
 
   Future<ProjectEntry?> getProject(String id) {
-    return (select(
-      projects,
-    )..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
+    return (select(projects)
+          ..where((tbl) => tbl.id.equals(id) & tbl.deletedAt.isNull()))
+        .getSingleOrNull();
   }
 
   Future<void> createProject(ProjectsCompanion project) {
@@ -262,7 +291,24 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
     return update(projects).replace(project);
   }
 
-  Future<int> deleteProject(String id) {
-    return (delete(projects)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deleteProject(String id, {bool hardDelete = false}) async {
+    if (hardDelete) {
+      return (delete(projects)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    await (update(tasks)..where((tbl) => tbl.projectId.equals(id))).write(
+      TasksCompanion(
+        projectId: const Value(null),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+    return (update(projects)..where((tbl) => tbl.id.equals(id))).write(
+      ProjectsCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 }

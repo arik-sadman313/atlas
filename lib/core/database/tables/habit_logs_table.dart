@@ -11,6 +11,12 @@ class HabitLogs extends Table {
   IntColumn get completedCount => integer().withDefault(const Constant(1))();
   BoolColumn get isCompleted => boolean().withDefault(const Constant(true))();
   DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  DateTimeColumn get clientModifiedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  TextColumn get modifiedDeviceId =>
+      text().withDefault(const Constant('local'))();
+  IntColumn get syncVersion => integer().withDefault(const Constant(1))();
 
   @override
   Set<Column> get primaryKey => {id};

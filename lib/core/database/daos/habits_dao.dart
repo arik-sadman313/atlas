@@ -41,7 +41,8 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
   }) {
     final query = select(habits)
       ..where((tbl) {
-        var predicate = tbl.workspaceId.equals(workspaceId);
+        var predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
         if (!includeArchived) {
           predicate &= tbl.isArchived.equals(false);
         }
@@ -63,7 +64,8 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
   }) {
     final query = select(habits)
       ..where((tbl) {
-        var predicate = tbl.workspaceId.equals(workspaceId);
+        var predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
         if (!includeArchived) {
           predicate &= tbl.isArchived.equals(false);
         }
@@ -90,7 +92,9 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
         select(habits).join([
             leftOuterJoin(habitLogs, habitLogs.habitId.equalsExp(habits.id)),
           ])
-          ..where(habits.workspaceId.equals(workspaceId))
+          ..where(
+            habits.workspaceId.equals(workspaceId) & habits.deletedAt.isNull(),
+          )
           ..orderBy([
             OrderingTerm(expression: habits.sortOrder, mode: OrderingMode.asc),
             OrderingTerm(expression: habits.createdAt, mode: OrderingMode.asc),
@@ -276,8 +280,18 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
     return count > 0;
   }
 
-  Future<int> deleteHabit(String id) {
-    return (delete(habits)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deleteHabit(String id, {bool hardDelete = false}) {
+    if (hardDelete) {
+      return (delete(habits)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    return (update(habits)..where((tbl) => tbl.id.equals(id))).write(
+      HabitsCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 
   /// Toggles habit completion for a specific date (YYYY-MM-DD).
@@ -355,7 +369,8 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
   }) {
     final query = select(goals)
       ..where((tbl) {
-        var predicate = tbl.workspaceId.equals(workspaceId);
+        var predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
         if (status != null) {
           predicate &= tbl.status.equals(status);
         }
@@ -377,7 +392,8 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
   }) {
     final query = select(goals)
       ..where((tbl) {
-        var predicate = tbl.workspaceId.equals(workspaceId);
+        var predicate =
+            tbl.workspaceId.equals(workspaceId) & tbl.deletedAt.isNull();
         if (status != null) {
           predicate &= tbl.status.equals(status);
         }
@@ -415,7 +431,17 @@ class HabitsDao extends DatabaseAccessor<AppDatabase> with _$HabitsDaoMixin {
     return count > 0;
   }
 
-  Future<int> deleteGoal(String id) {
-    return (delete(goals)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deleteGoal(String id, {bool hardDelete = false}) {
+    if (hardDelete) {
+      return (delete(goals)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    return (update(goals)..where((tbl) => tbl.id.equals(id))).write(
+      GoalsCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 }

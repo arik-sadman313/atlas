@@ -11,6 +11,12 @@ class Tags extends Table {
   TextColumn get name => text().withLength(min: 1, max: 255)();
   IntColumn get color => integer().nullable()();
   DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  DateTimeColumn get clientModifiedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  TextColumn get modifiedDeviceId =>
+      text().withDefault(const Constant('local'))();
+  IntColumn get syncVersion => integer().withDefault(const Constant(1))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -27,6 +33,12 @@ class NodeTags extends Table {
       text().references(Nodes, #id, onDelete: KeyAction.cascade)();
   TextColumn get tagId =>
       text().references(Tags, #id, onDelete: KeyAction.cascade)();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  DateTimeColumn get clientModifiedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  TextColumn get modifiedDeviceId =>
+      text().withDefault(const Constant('local'))();
+  IntColumn get syncVersion => integer().withDefault(const Constant(1))();
 
   @override
   Set<Column> get primaryKey => {nodeId, tagId};

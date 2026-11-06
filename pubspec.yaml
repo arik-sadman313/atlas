@@ -7,6 +7,7 @@ environment:
   sdk: ^3.13.7
 
 dependencies:
+  archive: ^4.0.2
   crypto: ^3.0.8
   drift: ^2.35.3
   file_picker: ^13.3.2
@@ -27,6 +28,7 @@ dependencies:
   perfect_freehand: ^2.5.2+1
   riverpod_annotation: ^4.0.7
   rxdart: ^0.28.0
+  shared_preferences: ^2.5.4
   sqlite3_flutter_libs: ^0.6.0+eol
   table_calendar: ^3.3.0
   timezone: ^0.11.2

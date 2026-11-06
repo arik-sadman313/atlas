@@ -12,6 +12,12 @@ class PdfDocuments extends Table {
   IntColumn get fileSizeBytes => integer()();
   IntColumn get pageCount => integer()();
   DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  DateTimeColumn get clientModifiedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  TextColumn get modifiedDeviceId =>
+      text().withDefault(const Constant('local'))();
+  IntColumn get syncVersion => integer().withDefault(const Constant(1))();
 
   @override
   Set<Column> get primaryKey => {id};

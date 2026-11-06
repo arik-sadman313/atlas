@@ -358,6 +358,45 @@
   - (+) Sub-millisecond multi-entity query latency directly from SQLite indexes and CAS storage.
   - (+) Full offline-first independence without third-party graph layout bugs or AGPL licensing risks.
 
+---
+
+### ADR-022: Local-First Synchronization, Vault Portability & Archive Engine
+
+- **Date:** 2026-11-07
+- **Status:** Accepted
+- **Context:** Milestone 8 requires local-first, peer-to-peer / folder-based multi-device synchronization across Linux desktop, iPadOS, and Android companion without central proprietary cloud lock-in. It requires:
+  1. Complete portable vault backup and restore (`.atlas_vault` container format) containing the SQLite database snapshot, CAS content blobs, and a cryptographically verified SHA-256 manifest.
+  2. Incremental folder-based synchronization over shared folders (Syncthing, Nextcloud, network drive, USB).
+  3. Last-Write-Wins (LWW) resolution and non-destructive forking on concurrent edits within 5 minutes.
+  4. Universal bulk export to Markdown (with YAML frontmatter, Obsidian `[[WikiLinks]]`, and assets) and PDF.
+  5. License audit: strict zero-AGPL policy, permissive licenses only.
+- **Evaluation & Decisions:**
+  - **Archive & Compression:**
+    - Selected `archive: ^4.0.2` (Apache-2.0, zero AGPL transitive dependencies).
+    - Pure Dart implementation supporting `ZipEncoder`, `ZipDecoder`, `GZipEncoder`, `GZipDecoder`.
+    - Selected for streaming `.atlas_vault` packaging, `.atlas_changeset` compression, and ZIP bulk export.
+  - **Device Identity & Storage:**
+    - Selected `shared_preferences: ^2.5.4` (BSD-3-Clause license) to persist UUID v4 client instance identity (`deviceId`), user-configured device name (`deviceName`), and designated sync folder path (`syncDirectoryPath`).
+  - **Database Migration (Schema Version 7):**
+    - Added 4 sync metadata columns (`deletedAt`, `clientModifiedAt`, `modifiedDeviceId`, `syncVersion`) across all 14 tables (`workspaces`, `nodes`, `node_links`, `tags`, `node_tags`, `ink_pages`, `pdf_documents`, `projects`, `tasks`, `calendar_events`, `habits`, `habit_logs`, `goals`, `journal_entries`).
+    - Added `sync_history` table for tracking audit logs and sync metrics.
+    - Updated all DAOs to filter out soft-deleted records (`deletedAt.isNull()`) while maintaining cascading and `SET NULL` actions.
+  - **Conflict Resolution (LWW & Non-Destructive Forking):**
+    - Standard edits resolve via Last-Write-Wins based on UTC `clientModifiedAt`.
+    - Concurrent edits on the same document or notebook within a 5-minute window fork non-destructively into `[Title] (Sync Conflict [Date])`, guaranteeing zero silent data loss.
+  - **Vault Archive Engine (`.atlas_vault`):**
+    - FLushes in-flight WAL logs with `PRAGMA wal_checkpoint(FULL);`.
+    - Generates `manifest.json` recording format version (`1.0`), node count, database SHA-256, and all CAS blob hashes.
+    - Restoration validates cryptographic checksums and maintains a pre-import rollback copy, aborting on corruption.
+  - **Universal Bulk Exporters:**
+    - Markdown: exports documents with YAML frontmatter, Obsidian `[[WikiLinks]]`, and referenced CAS images in `assets/`, packaged into a ZIP archive.
+    - PDF: bulk-flattens multi-page handwritten notebooks and annotated PDFs into vector/raster composite standard PDFs, packaged into a ZIP archive.
+- **Consequences:**
+  - (+) 100% offline-ready, verifiable integrity, zero proprietary cloud vendor dependency.
+  - (+) Universal portability to Obsidian, Logseq, and standard PDF readers.
+  - (+) Strict adherence to zero-AGPL policy.
+
+
 
 
 

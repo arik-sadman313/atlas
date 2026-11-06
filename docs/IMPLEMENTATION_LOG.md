@@ -698,6 +698,116 @@
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (24.0s).
 
+---
+
+# ATLAS — Milestone 8 Implementation Log
+
+**Date:** 2026-11-07  
+**Milestone:** Milestone 8 — Local-First Synchronization, Vault Portability & Backup  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Executive Summary
+
+Milestone 8 achieves complete local-first, peer-to-peer / folder-based multi-device synchronization and full vault data portability for ATLAS across Linux desktop, iPadOS, and Android companion devices without relying on any central proprietary cloud servers.
+
+Key architectural pillars implemented:
+1. **Reuse Directive & Package Audit (ADR-022):**
+   - Adopted `archive: ^4.0.2` (Apache-2.0, zero AGPL transitive dependencies) for pure Dart streaming ZIP and GZip packaging.
+   - Adopted `shared_preferences: ^2.5.4` (BSD-3-Clause) for persistent device UUID and sync folder paths.
+2. **Database Migration to Schema Version 7:**
+   - Appended 4 sync metadata columns (`deletedAt`, `clientModifiedAt`, `modifiedDeviceId`, `syncVersion`) across all 14 tables.
+   - Created `sync_history` table for tracking audit logs and sync performance metrics.
+   - Updated all existing DAOs to filter out soft-deleted records (`deletedAt.isNull()`) while preserving referential integrity and cascading/SET NULL operations.
+   - Built `SyncDao` with mutation querying, Last-Write-Wins (LWW) upserts, and sync run status management.
+3. **Vault Archive Engine (`.atlas_vault`):**
+   - Implemented `VaultExportService` to flush WAL journal (`PRAGMA wal_checkpoint(FULL);`), compute SHA-256 checksums, and package `manifest.json`, `database.sqlite`, and `cas/` content blobs into a standard portable `.atlas_vault` container.
+   - Implemented `VaultImportService` to inspect archive versions, verify SHA-256 integrity, create safety rollback backups, and execute atomic restorations.
+4. **Folder-Based Local-First Sync Engine (`FolderSyncEngine`):**
+   - Standardized folder layout: `[SyncDir]/clients/[deviceId]/info.json`, `[SyncDir]/clients/[deviceId]/changes/[ts]_[seq].atlas_changeset`, and `[SyncDir]/blobs/[prefix]/[sha256]`.
+   - Mutation scanning and compressed changeset generation with automatic blob replication.
+   - Remote changeset ingestion with Last-Write-Wins (LWW) per-entity reconciliation.
+   - 5-minute concurrent edit non-destructive conflict forking (`[Title] (Sync Conflict [Date])`).
+5. **Universal Portability & Bulk Export:**
+   - Implemented `MarkdownExportService`: converts documents to `.md` files with YAML frontmatter, Obsidian `[[WikiLinks]]`, and extracted CAS images in `assets/`, packaged into a ZIP archive.
+   - Implemented `NotebookBulkPdfExportService`: bulk-flattens handwritten notebooks and annotated PDFs into composite vector/raster `.pdf` files packaged into a ZIP archive.
+6. **Settings & Sync Management UI (`SettingsScreen`):**
+   - Added Device Identity section with editable device name and client ID badge.
+   - Added Local-First Synchronization section with directory picker, manual sync action, and live sync history.
+   - Added Vault Archive section with full backup export and confirmation-guarded restore.
+   - Added Data Portability section with bulk Markdown and PDF export actions.
+   - Added Storage Breakdown & Metrics card showing SQLite file size, CAS blob cache breakdown, and tracked attachments.
+
+---
+
+## 2. Implemented Subsystems & File Inventory
+
+### 2.1 Storage & Sync Infrastructure
+- [`SyncHistoryTable`](../lib/core/database/tables/sync_history_table.dart):
+  - Drift schema definition for sync tracking (`id`, `syncStartedAt`, `syncCompletedAt`, `syncType`, `status`, `recordsExported`, `recordsImported`, `blobsTransferred`, `errorMessage`).
+- [`WorkspacesTable`, `NodesTable`, `NodeLinksTable`, `TagsTable`, `NodeTagsTable`, `InkPagesTable`, `PdfDocumentsTable`, `ProjectsTable`, `TasksTable`, `CalendarEventsTable`, `HabitsTable`, `HabitLogsTable`, `GoalsTable`, `JournalEntriesTable`](../lib/core/database/tables/):
+  - Updated with `deletedAt`, `clientModifiedAt`, `modifiedDeviceId`, `syncVersion`.
+- [`SyncDao`](../lib/core/database/daos/sync_dao.dart):
+  - Implements `startSync`, `completeSync`, `failSync`, `getMutationsSince`, `upsertRemote*`, and soft-delete propagation.
+- [`DeviceIdentityService`](../lib/core/sync/device/device_identity_service.dart):
+  - Manages client instance UUID v4 generation, device name, and sync directory persistence via `shared_preferences`.
+
+### 2.2 Vault Archive Subsystem
+- [`VaultManifest`](../lib/core/sync/vault/vault_manifest.dart):
+  - Cryptographic manifest model recording format version (`1.0`), timestamps, node counts, database SHA-256 checksum, and relative CAS blob map.
+- [`VaultExportService`](../lib/core/sync/vault/vault_export_service.dart):
+  - WAL checkpointing, CAS SHA-256 scanning, and streaming `.atlas_vault` packaging.
+- [`VaultImportService`](../lib/core/sync/vault/vault_import_service.dart):
+  - Manifest validation, checksum integrity verification, safety rollback preservation, and atomic database replacement.
+
+### 2.3 Folder-Based Synchronization Subsystem
+- [`AtlasChangeset`](../lib/core/sync/folder/changeset_model.dart):
+  - GZip-compressed changeset serialization model supporting all 14 entity types and referenced blob hashes.
+- [`ClientInfo`](../lib/core/sync/folder/client_info_model.dart):
+  - Client metadata descriptor for multi-device sync discovery.
+- [`FolderSyncEngine`](../lib/core/sync/folder/folder_sync_engine.dart):
+  - Mutation scanner, blob replicator, changeset exporter, chronological remote ingest, LWW resolver, and 5-minute non-destructive conflict forker.
+
+### 2.4 Universal Bulk Exporters & Presentation
+- [`MarkdownExportService`](../lib/features/settings/data/markdown_export_service.dart):
+  - Delta-to-Markdown parser with line prefixing, inline bold/italic/code formatting, YAML frontmatter, `[[WikiLinks]]`, and `assets/` CAS image packaging into ZIP.
+- [`NotebookBulkPdfExportService`](../lib/features/settings/data/notebook_bulk_pdf_export_service.dart):
+  - Batch exporter compiling all notebooks into vector/raster composite PDFs packaged into ZIP.
+- [`SettingsScreen`](../lib/features/settings/presentation/settings_screen.dart):
+  - Full settings interface incorporating Device Identity, Local-First Sync, Vault Archive (.atlas_vault), Data Portability (Markdown & PDF), Storage Breakdown, Active Workspace, and Platform & Architecture diagnostics.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints across all 181 files).
+
+2. **Code Formatting:**
+   - `dart format .`
+   - **Result:** 100% formatted cleanly.
+
+3. **Automated Test Suite (152 tests across all modules):**
+   - `test/core/database/schema_migration_v7_test.dart` (4 tests)
+   - `test/core/sync/vault_archive_test.dart` (4 tests)
+   - `test/core/sync/folder_sync_engine_test.dart` (3 tests)
+   - `test/features/settings/markdown_export_test.dart` (1 test)
+   - `test/features/settings/settings_sync_screen_test.dart` (1 test)
+   - All 139 existing regression tests passing.
+   - **Result:** `✓ All 152 tests passed!` (100% pass rate).
+
+4. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+5. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (82.8s).
+
+
 
 
 

@@ -538,6 +538,70 @@ flowchart TD
   - `GraphRepository.extractNeighborhood` extracts a localized 1-hop subgraph around the current node.
   - Supports quick contextual visual discovery of interconnected ideas directly from the active note editor.
 
+---
+
+## 12. Local-First Synchronization, Vault Portability & Backup (Milestone 8)
+
+### 12.1 Synchronization Architecture & Scope Boundaries
+ATLAS is strictly **local-first and offline-first**. It eliminates central proprietary cloud vendor lock-in by using standard filesystem folders (e.g. Syncthing, Nextcloud, network drive, USB storage, or shared directories).
+
+```mermaid
+flowchart TD
+    subgraph LocalDeviceA [Client Instance A (Linux Desktop)]
+        AppA[ATLAS Engine A]
+        SqliteA[(SQLite database.sqlite)]
+        CasA[CAS Blobs Tree]
+        IdA[Device ID A]
+        AppA --> SqliteA
+        AppA --> CasA
+    end
+
+    subgraph SyncFolder [Shared Sync Directory (Syncthing / Folder)]
+        ClientsDir[clients/]
+        BlobsDir["blobs/ [prefix]/ [sha256]"]
+        ClientAChanges["clients/DeviceA/changes/*.atlas_changeset"]
+        ClientBChanges["clients/DeviceB/changes/*.atlas_changeset"]
+        ClientsDir --> ClientAChanges
+        ClientsDir --> ClientBChanges
+    end
+
+    subgraph LocalDeviceB [Client Instance B (iPadOS / Android)]
+        AppB[ATLAS Engine B]
+        SqliteB[(SQLite database.sqlite)]
+        CasB[CAS Blobs Tree]
+        IdB[Device ID B]
+        AppB --> SqliteB
+        AppB --> CasB
+    end
+
+    AppA -- "Export Changeset & Copy Blobs" --> SyncFolder
+    SyncFolder -- "Ingest Changesets & Missing Blobs" --> AppB
+    AppB -- "Export Changeset & Copy Blobs" --> SyncFolder
+    SyncFolder -- "Ingest Changesets & Missing Blobs" --> AppA
+```
+
+- **Device Identity:** Persistent UUID v4 (`atlas-client-[uuid]`) created on first launch in `shared_preferences`.
+- **Folder Sync Layout:**
+  - `[SyncDirectory]/clients/[deviceId]/info.json`: Client metadata (device name, OS, last sync timestamp).
+  - `[SyncDirectory]/clients/[deviceId]/changes/[timestamp]_[seq].atlas_changeset`: GZip-compressed JSON changesets containing mutated entities across all 14 tables.
+  - `[SyncDirectory]/blobs/[prefix]/[sha256]`: Content-addressable binary blob store shared across devices.
+- **Conflict Resolution (LWW & Non-Destructive Forking):**
+  - **Last-Write-Wins (LWW):** Remote mutations compare `clientModifiedAt`. Later edits supersede earlier edits on a per-entity basis.
+  - **Non-Destructive Concurrent Forking:** If two clients edit the same document or notebook concurrently within a 5-minute window with conflicting content hashes, the later edit retains the primary node ID while the earlier edit is saved as a new node titled `[Title] (Sync Conflict [Date])`. No edits are silently destroyed.
+
+### 12.2 Portable Vault Archive (`.atlas_vault`)
+ATLAS defines the `.atlas_vault` container format (v1.0) for full offline backup and restoration:
+- **Format:** Standard ZIP archive containing:
+  - `manifest.json`: JSON header documenting format version (`1.0`), app version, creation timestamp, device identifier, total node count, database SHA-256 checksum, and a full relative-path-to-SHA-256 map of all CAS blobs.
+  - `database.sqlite`: Complete snapshot of SQLite database flushed via `PRAGMA wal_checkpoint(FULL);`.
+  - `cas/[prefix]/[sha256]`: Content-addressable binary files.
+- **Atomic Rollback Guarantee:** On restoration, `VaultImportService` verifies cryptographic SHA-256 checksums before overwriting local state and creates a `.rollback` copy. If any file is corrupted or tampered with, the import aborts and automatically restores the rollback copy.
+
+### 12.3 Universal Data Portability & Bulk Export
+- **Markdown Export:** Bulk exports all document nodes to `.md` files formatted with YAML frontmatter (`id`, `title`, `created`, `updated`, `type`, `tags`), standard Obsidian/Roam `[[WikiLinks]]`, and extracts referenced CAS images into a companion `assets/` directory, packaged into a single ZIP archive.
+- **PDF Export:** Flattens all multi-page handwritten notebooks and annotated PDFs into standard vector/raster composite `.pdf` files packaged into a single ZIP archive.
+
+
 
 
 

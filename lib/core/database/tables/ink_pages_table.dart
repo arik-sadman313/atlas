@@ -29,6 +29,12 @@ class InkPages extends Table {
   TextColumn get ocrText => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+  DateTimeColumn get clientModifiedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+  TextColumn get modifiedDeviceId =>
+      text().withDefault(const Constant('local'))();
+  IntColumn get syncVersion => integer().withDefault(const Constant(1))();
 
   @override
   Set<Column> get primaryKey => {id};

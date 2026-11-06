@@ -17,7 +17,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
   }) {
     final query = select(nodes)
       ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-      ..where((tbl) => tbl.isDeleted.equals(false));
+      ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull());
 
     if (type != null) {
       query.where((tbl) => tbl.type.equals(type));
@@ -42,7 +42,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
   }) {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.updatedAt,
@@ -56,7 +56,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
   Future<List<NodeEntry>> getRecentNodes(String workspaceId, {int limit = 10}) {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.updatedAt,
@@ -71,7 +71,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
           ..where((tbl) => tbl.isFavorite.equals(true))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.updatedAt,
@@ -101,10 +101,13 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
     if (hardDelete) {
       return (delete(nodes)..where((tbl) => tbl.id.equals(id))).go();
     } else {
+      final now = DateTime.now().toUtc();
       return (update(nodes)..where((tbl) => tbl.id.equals(id))).write(
         NodesCompanion(
           isDeleted: const Value(true),
-          updatedAt: Value(DateTime.now()),
+          deletedAt: Value(now),
+          clientModifiedAt: Value(now),
+          updatedAt: Value(now),
         ),
       );
     }
@@ -115,7 +118,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
     if (trimmed.isEmpty) return Future.value([]);
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..where((tbl) => tbl.title.like('%$trimmed%'))
           ..orderBy([
             (tbl) => OrderingTerm(
@@ -131,17 +134,19 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
     if (trimmed.isEmpty) return Future.value(null);
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..where((tbl) => tbl.title.collate(Collate.noCase).equals(trimmed))
           ..limit(1))
         .getSingleOrNull();
   }
 
   Future<int> updateContentHash(String nodeId, String? contentHash) {
+    final now = DateTime.now().toUtc();
     return (update(nodes)..where((tbl) => tbl.id.equals(nodeId))).write(
       NodesCompanion(
         contentHash: Value(contentHash),
-        updatedAt: Value(DateTime.now()),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
       ),
     );
   }
@@ -171,7 +176,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
   Future<List<NodeEntry>> getAllNodes(String workspaceId) {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.updatedAt,
@@ -184,7 +189,7 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
   Stream<List<NodeEntry>> watchAllNodes(String workspaceId) {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
-          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.isDeleted.equals(false) & tbl.deletedAt.isNull())
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.updatedAt,

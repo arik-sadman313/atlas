@@ -39,7 +39,9 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
 
   Stream<List<InkPageEntry>> watchPagesForDocument(String documentId) {
     return (select(inkPages)
-          ..where((tbl) => tbl.documentId.equals(documentId))
+          ..where(
+            (tbl) => tbl.documentId.equals(documentId) & tbl.deletedAt.isNull(),
+          )
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.pageNumber,
@@ -51,7 +53,9 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
 
   Future<List<InkPageEntry>> getPagesForDocument(String documentId) {
     return (select(inkPages)
-          ..where((tbl) => tbl.documentId.equals(documentId))
+          ..where(
+            (tbl) => tbl.documentId.equals(documentId) & tbl.deletedAt.isNull(),
+          )
           ..orderBy([
             (tbl) => OrderingTerm(
               expression: tbl.pageNumber,
@@ -75,8 +79,18 @@ class InkDao extends DatabaseAccessor<AppDatabase> with _$InkDaoMixin {
     return update(inkPages).replace(page);
   }
 
-  Future<int> deletePage(String id) {
-    return (delete(inkPages)..where((tbl) => tbl.id.equals(id))).go();
+  Future<int> deletePage(String id, {bool hardDelete = false}) {
+    if (hardDelete) {
+      return (delete(inkPages)..where((tbl) => tbl.id.equals(id))).go();
+    }
+    final now = DateTime.now().toUtc();
+    return (update(inkPages)..where((tbl) => tbl.id.equals(id))).write(
+      InkPagesCompanion(
+        deletedAt: Value(now),
+        clientModifiedAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
   }
 
   /// Batch updates page order for a given document.
