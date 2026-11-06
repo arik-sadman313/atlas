@@ -12,6 +12,8 @@
 - [ADR-008: Clean-Room Policy for GPL/AGPL Candidate Projects](#adr-008-clean-room-policy-for-gplagpl-candidate-projects)
 - [ADR-009: Hybrid Logical Clocks (HLC) for Sync Architecture Readiness](#adr-009-hybrid-logical-clocks-hlc-for-sync-architecture-readiness)
 - [ADR-010: Adoption of pdfrx (PDFium) for High-Performance PDF Rendering](#adr-010-adoption-of-pdfrx-pdfium-for-high-performance-pdf-rendering)
+- [ADR-011: Staging of SQLite FTS5 with Custom SQLite Bundling for Milestone 3](#adr-011-staging-of-sqlite-fts5-with-custom-sqlite-bundling-for-milestone-3)
+- [ADR-012: Adoption of Riverpod 3.x Notifier Pattern over Legacy StateNotifier](#adr-012-adoption-of-riverpod-3x-notifier-pattern-over-legacy-statenotifier)
 
 ---
 
@@ -149,3 +151,27 @@
 - **Consequences:**
   - (+) Native C++ PDFium performance on Linux, Android, and iOS.
   - (+) Supports pinch-to-zoom, page virtualization, and custom coordinate mapping.
+
+---
+
+### ADR-011: Staging of SQLite FTS5 with Custom SQLite Bundling for Milestone 3
+
+- **Status:** Accepted
+- **Context:** During Milestone 1 inspection, it was verified that the host distribution (Fedora Linux 44) defaults to a system `/lib64/libsqlite3.so.0` build where the FTS5 extension is not compiled into the default binary (`no such module: fts5`). Attempting to initialize FTS5 virtual tables directly against system SQLite would crash runtime desktop execution.
+- **Decision:** Implement Milestone 1 with pure relational schema tables (Workspaces, Nodes, NodeBlocks, Attachments) and live SQL LIKE indexing. Defer FTS5 virtual tables to Milestone 3 (Search & Document Engine), where a custom bundled SQLite binary with FTS5 compiled in or dynamic extension loading will be integrated across platforms.
+- **Consequences:**
+  - (+) Zero crash risk or distribution mismatch on Linux desktop distributions.
+  - (+) Clean relational schema established without fake or unverified FTS5 functionality.
+  - (-) Full-text BM25 ranking is deferred to Milestone 3.
+
+---
+
+### ADR-012: Adoption of Riverpod 3.x Notifier Pattern over Legacy StateNotifier
+
+- **Status:** Accepted
+- **Context:** `flutter_riverpod` version 3.x deprecates `StateNotifier` and `StateProvider` in favor of the unified `Notifier` and `AsyncNotifier` API.
+- **Decision:** Build all state management notifiers in ATLAS using modern Riverpod 3 `Notifier<T>` and `NotifierProvider<Notifier<T>, T>`.
+- **Consequences:**
+  - (+) Eliminates technical debt from using deprecated state primitives.
+  - (+) Future-proof code compatible with Riverpod code generation and testing.
+
