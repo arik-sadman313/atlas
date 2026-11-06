@@ -251,4 +251,26 @@
   - (+) Document bodies are stored as immutable Delta JSON snapshots in CAS, with only the SHA-256 hash stored in SQLite `nodes.content_hash`.
   - (+) Rapid rendering and smooth keyboard shortcuts on desktop.
 
+---
+
+### ADR-018: Selection of `pdfrx`, `pdf`, and `file_picker` for PDF Rendering, Annotation, and Export
+- **Date:** 2026-11-06
+- **Status:** Accepted
+- **Context:** Milestone 4 requires local PDF rendering, dual-layer handwriting annotation, multi-page page management, native file import, and PDF export across Linux desktop, iPadOS, and Android companion.
+  - Candidate A (`pdfrx: ^2.12.0`, MIT license): Uses native Google PDFium on Linux desktop and Android, and Apple PDFKit on iPadOS/iOS. Exposes point-based dimensions ($1/72\text{ in}$), high-resolution offscreen rendering, zoom/pan controllers, and page caching.
+  - Candidate B (`pdfx: ^2.6.0`, Apache-2.0): Relies on pdfx/pdf_render bindings, exhibits sporadic build issues on recent Flutter desktop channels.
+  - Candidate C (`flutter_pdfview: ^1.3.2`, Apache-2.0): Mobile-only Android/iOS platform views, lacks Linux desktop support.
+  - PDF Generation (`pdf: ^3.13.1`, Apache-2.0): Mature vector and raster PDF document generator with zero platform dependencies.
+  - File Selection (`file_picker: ^13.3.2`, MIT): Mature desktop and mobile cross-platform file chooser.
+- **Decision:**
+  - Adopt `pdfrx: ^2.12.0` encapsulated behind `PdfRenderingService` / `PdfrxRenderingService`.
+  - Adopt `pdf: ^3.13.1` behind `PdfExportService` for merging background PDF/stationery and vector ink strokes into exportable PDFs.
+  - Adopt `file_picker: ^13.3.2` for importing PDFs from local storage into Content-Addressable Storage (CAS).
+- **Consequences:**
+  - (+) Zero AGPL contamination; `pdfrx` is MIT, `pdf` is Apache-2.0, `file_picker` is MIT.
+  - (+) 1:1 point coordinate mapping: PDF point coordinates match the Atlas ink canvas coordinates ($1.0\text{ canvas unit} = 1.0\text{ PDF point}$).
+  - (+) Supports both interactive drawing on desktop/iPadOS and read-only viewing on Android companion.
+  - (+) Clean multi-page PDF generation without external native command-line dependencies.
+
+
 

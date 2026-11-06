@@ -8,6 +8,9 @@ import '../core/database/daos/workspaces_dao.dart';
 import '../core/storage/blob_storage_service.dart';
 import '../features/documents/data/repositories/link_repository.dart';
 import '../features/handwriting/data/repositories/ink_repository.dart';
+import '../features/pdf/data/repositories/pdf_repository.dart';
+import '../features/pdf/data/services/pdf_export_service.dart';
+import '../features/pdf/data/services/pdf_rendering_service.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -47,6 +50,36 @@ final linkRepositoryProvider = Provider<LinkRepository>((ref) {
   final linksDao = ref.watch(linksDaoProvider);
   final nodesDao = ref.watch(nodesDaoProvider);
   return LinkRepository(linksDao: linksDao, nodesDao: nodesDao);
+});
+
+final pdfRenderingServiceProvider = Provider<PdfRenderingService>((ref) {
+  return PdfrxRenderingService();
+});
+
+final pdfRepositoryProvider = Provider<PdfRepository>((ref) {
+  final inkDao = ref.watch(inkDaoProvider);
+  final nodesDao = ref.watch(nodesDaoProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+  final pdfRenderingService = ref.watch(pdfRenderingServiceProvider);
+  return PdfRepository(
+    inkDao: inkDao,
+    nodesDao: nodesDao,
+    blobStorage: blobStorage,
+    pdfRenderingService: pdfRenderingService,
+  );
+});
+
+final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
+  final inkDao = ref.watch(inkDaoProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+  final pdfRenderingService = ref.watch(pdfRenderingServiceProvider);
+  final inkRepo = ref.watch(inkRepositoryProvider);
+  return PdfExportService(
+    inkDao: inkDao,
+    blobStorage: blobStorage,
+    pdfRenderingService: pdfRenderingService,
+    inkRepo: inkRepo,
+  );
 });
 
 class CurrentWorkspaceIdNotifier extends Notifier<String> {

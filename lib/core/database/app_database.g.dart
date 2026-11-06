@@ -2881,6 +2881,477 @@ class InkDocumentsCompanion extends UpdateCompanion<InkDocumentEntry> {
   }
 }
 
+class $PdfDocumentsTable extends PdfDocuments
+    with TableInfo<$PdfDocumentsTable, PdfDocumentEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PdfDocumentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nodeIdMeta = const VerificationMeta('nodeId');
+  @override
+  late final GeneratedColumn<String> nodeId = GeneratedColumn<String>(
+    'node_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES nodes (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _casHashMeta = const VerificationMeta(
+    'casHash',
+  );
+  @override
+  late final GeneratedColumn<String> casHash = GeneratedColumn<String>(
+    'cas_hash',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileNameMeta = const VerificationMeta(
+    'fileName',
+  );
+  @override
+  late final GeneratedColumn<String> fileName = GeneratedColumn<String>(
+    'file_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileSizeBytesMeta = const VerificationMeta(
+    'fileSizeBytes',
+  );
+  @override
+  late final GeneratedColumn<int> fileSizeBytes = GeneratedColumn<int>(
+    'file_size_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _pageCountMeta = const VerificationMeta(
+    'pageCount',
+  );
+  @override
+  late final GeneratedColumn<int> pageCount = GeneratedColumn<int>(
+    'page_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    nodeId,
+    casHash,
+    fileName,
+    fileSizeBytes,
+    pageCount,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'pdf_documents';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PdfDocumentEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('node_id')) {
+      context.handle(
+        _nodeIdMeta,
+        nodeId.isAcceptableOrUnknown(data['node_id']!, _nodeIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nodeIdMeta);
+    }
+    if (data.containsKey('cas_hash')) {
+      context.handle(
+        _casHashMeta,
+        casHash.isAcceptableOrUnknown(data['cas_hash']!, _casHashMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_casHashMeta);
+    }
+    if (data.containsKey('file_name')) {
+      context.handle(
+        _fileNameMeta,
+        fileName.isAcceptableOrUnknown(data['file_name']!, _fileNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileNameMeta);
+    }
+    if (data.containsKey('file_size_bytes')) {
+      context.handle(
+        _fileSizeBytesMeta,
+        fileSizeBytes.isAcceptableOrUnknown(
+          data['file_size_bytes']!,
+          _fileSizeBytesMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_fileSizeBytesMeta);
+    }
+    if (data.containsKey('page_count')) {
+      context.handle(
+        _pageCountMeta,
+        pageCount.isAcceptableOrUnknown(data['page_count']!, _pageCountMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pageCountMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PdfDocumentEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PdfDocumentEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      nodeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}node_id'],
+      )!,
+      casHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cas_hash'],
+      )!,
+      fileName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_name'],
+      )!,
+      fileSizeBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}file_size_bytes'],
+      )!,
+      pageCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_count'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PdfDocumentsTable createAlias(String alias) {
+    return $PdfDocumentsTable(attachedDatabase, alias);
+  }
+}
+
+class PdfDocumentEntry extends DataClass
+    implements Insertable<PdfDocumentEntry> {
+  final String id;
+  final String nodeId;
+  final String casHash;
+  final String fileName;
+  final int fileSizeBytes;
+  final int pageCount;
+  final DateTime createdAt;
+  const PdfDocumentEntry({
+    required this.id,
+    required this.nodeId,
+    required this.casHash,
+    required this.fileName,
+    required this.fileSizeBytes,
+    required this.pageCount,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['node_id'] = Variable<String>(nodeId);
+    map['cas_hash'] = Variable<String>(casHash);
+    map['file_name'] = Variable<String>(fileName);
+    map['file_size_bytes'] = Variable<int>(fileSizeBytes);
+    map['page_count'] = Variable<int>(pageCount);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  PdfDocumentsCompanion toCompanion(bool nullToAbsent) {
+    return PdfDocumentsCompanion(
+      id: Value(id),
+      nodeId: Value(nodeId),
+      casHash: Value(casHash),
+      fileName: Value(fileName),
+      fileSizeBytes: Value(fileSizeBytes),
+      pageCount: Value(pageCount),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory PdfDocumentEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PdfDocumentEntry(
+      id: serializer.fromJson<String>(json['id']),
+      nodeId: serializer.fromJson<String>(json['nodeId']),
+      casHash: serializer.fromJson<String>(json['casHash']),
+      fileName: serializer.fromJson<String>(json['fileName']),
+      fileSizeBytes: serializer.fromJson<int>(json['fileSizeBytes']),
+      pageCount: serializer.fromJson<int>(json['pageCount']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'nodeId': serializer.toJson<String>(nodeId),
+      'casHash': serializer.toJson<String>(casHash),
+      'fileName': serializer.toJson<String>(fileName),
+      'fileSizeBytes': serializer.toJson<int>(fileSizeBytes),
+      'pageCount': serializer.toJson<int>(pageCount),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  PdfDocumentEntry copyWith({
+    String? id,
+    String? nodeId,
+    String? casHash,
+    String? fileName,
+    int? fileSizeBytes,
+    int? pageCount,
+    DateTime? createdAt,
+  }) => PdfDocumentEntry(
+    id: id ?? this.id,
+    nodeId: nodeId ?? this.nodeId,
+    casHash: casHash ?? this.casHash,
+    fileName: fileName ?? this.fileName,
+    fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+    pageCount: pageCount ?? this.pageCount,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  PdfDocumentEntry copyWithCompanion(PdfDocumentsCompanion data) {
+    return PdfDocumentEntry(
+      id: data.id.present ? data.id.value : this.id,
+      nodeId: data.nodeId.present ? data.nodeId.value : this.nodeId,
+      casHash: data.casHash.present ? data.casHash.value : this.casHash,
+      fileName: data.fileName.present ? data.fileName.value : this.fileName,
+      fileSizeBytes: data.fileSizeBytes.present
+          ? data.fileSizeBytes.value
+          : this.fileSizeBytes,
+      pageCount: data.pageCount.present ? data.pageCount.value : this.pageCount,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PdfDocumentEntry(')
+          ..write('id: $id, ')
+          ..write('nodeId: $nodeId, ')
+          ..write('casHash: $casHash, ')
+          ..write('fileName: $fileName, ')
+          ..write('fileSizeBytes: $fileSizeBytes, ')
+          ..write('pageCount: $pageCount, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    nodeId,
+    casHash,
+    fileName,
+    fileSizeBytes,
+    pageCount,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PdfDocumentEntry &&
+          other.id == this.id &&
+          other.nodeId == this.nodeId &&
+          other.casHash == this.casHash &&
+          other.fileName == this.fileName &&
+          other.fileSizeBytes == this.fileSizeBytes &&
+          other.pageCount == this.pageCount &&
+          other.createdAt == this.createdAt);
+}
+
+class PdfDocumentsCompanion extends UpdateCompanion<PdfDocumentEntry> {
+  final Value<String> id;
+  final Value<String> nodeId;
+  final Value<String> casHash;
+  final Value<String> fileName;
+  final Value<int> fileSizeBytes;
+  final Value<int> pageCount;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const PdfDocumentsCompanion({
+    this.id = const Value.absent(),
+    this.nodeId = const Value.absent(),
+    this.casHash = const Value.absent(),
+    this.fileName = const Value.absent(),
+    this.fileSizeBytes = const Value.absent(),
+    this.pageCount = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PdfDocumentsCompanion.insert({
+    required String id,
+    required String nodeId,
+    required String casHash,
+    required String fileName,
+    required int fileSizeBytes,
+    required int pageCount,
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       nodeId = Value(nodeId),
+       casHash = Value(casHash),
+       fileName = Value(fileName),
+       fileSizeBytes = Value(fileSizeBytes),
+       pageCount = Value(pageCount),
+       createdAt = Value(createdAt);
+  static Insertable<PdfDocumentEntry> custom({
+    Expression<String>? id,
+    Expression<String>? nodeId,
+    Expression<String>? casHash,
+    Expression<String>? fileName,
+    Expression<int>? fileSizeBytes,
+    Expression<int>? pageCount,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (nodeId != null) 'node_id': nodeId,
+      if (casHash != null) 'cas_hash': casHash,
+      if (fileName != null) 'file_name': fileName,
+      if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
+      if (pageCount != null) 'page_count': pageCount,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PdfDocumentsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? nodeId,
+    Value<String>? casHash,
+    Value<String>? fileName,
+    Value<int>? fileSizeBytes,
+    Value<int>? pageCount,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return PdfDocumentsCompanion(
+      id: id ?? this.id,
+      nodeId: nodeId ?? this.nodeId,
+      casHash: casHash ?? this.casHash,
+      fileName: fileName ?? this.fileName,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+      pageCount: pageCount ?? this.pageCount,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (nodeId.present) {
+      map['node_id'] = Variable<String>(nodeId.value);
+    }
+    if (casHash.present) {
+      map['cas_hash'] = Variable<String>(casHash.value);
+    }
+    if (fileName.present) {
+      map['file_name'] = Variable<String>(fileName.value);
+    }
+    if (fileSizeBytes.present) {
+      map['file_size_bytes'] = Variable<int>(fileSizeBytes.value);
+    }
+    if (pageCount.present) {
+      map['page_count'] = Variable<int>(pageCount.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PdfDocumentsCompanion(')
+          ..write('id: $id, ')
+          ..write('nodeId: $nodeId, ')
+          ..write('casHash: $casHash, ')
+          ..write('fileName: $fileName, ')
+          ..write('fileSizeBytes: $fileSizeBytes, ')
+          ..write('pageCount: $pageCount, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $InkPagesTable extends InkPages
     with TableInfo<$InkPagesTable, InkPageEntry> {
   @override
@@ -2953,6 +3424,18 @@ class $InkPagesTable extends InkPages
     requiredDuringInsert: false,
     defaultValue: const Constant('dot_grid_5mm'),
   );
+  static const VerificationMeta _templateSpacingMeta = const VerificationMeta(
+    'templateSpacing',
+  );
+  @override
+  late final GeneratedColumn<double> templateSpacing = GeneratedColumn<double>(
+    'template_spacing',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(28.35),
+  );
   static const VerificationMeta _backgroundColorMeta = const VerificationMeta(
     'backgroundColor',
   );
@@ -2964,6 +3447,20 @@ class $InkPagesTable extends InkPages
     type: DriftSqlType.int,
     requiredDuringInsert: false,
     defaultValue: const Constant(4294967295),
+  );
+  static const VerificationMeta _pdfDocumentIdMeta = const VerificationMeta(
+    'pdfDocumentId',
+  );
+  @override
+  late final GeneratedColumn<String> pdfDocumentId = GeneratedColumn<String>(
+    'pdf_document_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES pdf_documents (id) ON DELETE SET NULL',
+    ),
   );
   static const VerificationMeta _pdfSourceHashMeta = const VerificationMeta(
     'pdfSourceHash',
@@ -3061,7 +3558,9 @@ class $InkPagesTable extends InkPages
     width,
     height,
     templateType,
+    templateSpacing,
     backgroundColor,
+    pdfDocumentId,
     pdfSourceHash,
     pdfPageIndex,
     rawPencilkitHash,
@@ -3125,12 +3624,30 @@ class $InkPagesTable extends InkPages
         ),
       );
     }
+    if (data.containsKey('template_spacing')) {
+      context.handle(
+        _templateSpacingMeta,
+        templateSpacing.isAcceptableOrUnknown(
+          data['template_spacing']!,
+          _templateSpacingMeta,
+        ),
+      );
+    }
     if (data.containsKey('background_color')) {
       context.handle(
         _backgroundColorMeta,
         backgroundColor.isAcceptableOrUnknown(
           data['background_color']!,
           _backgroundColorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('pdf_document_id')) {
+      context.handle(
+        _pdfDocumentIdMeta,
+        pdfDocumentId.isAcceptableOrUnknown(
+          data['pdf_document_id']!,
+          _pdfDocumentIdMeta,
         ),
       );
     }
@@ -3234,10 +3751,18 @@ class $InkPagesTable extends InkPages
         DriftSqlType.string,
         data['${effectivePrefix}template_type'],
       )!,
+      templateSpacing: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}template_spacing'],
+      )!,
       backgroundColor: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}background_color'],
       )!,
+      pdfDocumentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pdf_document_id'],
+      ),
       pdfSourceHash: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}pdf_source_hash'],
@@ -3286,7 +3811,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
   final double width;
   final double height;
   final String templateType;
+  final double templateSpacing;
   final int backgroundColor;
+  final String? pdfDocumentId;
   final String? pdfSourceHash;
   final int? pdfPageIndex;
   final String? rawPencilkitHash;
@@ -3302,7 +3829,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     required this.width,
     required this.height,
     required this.templateType,
+    required this.templateSpacing,
     required this.backgroundColor,
+    this.pdfDocumentId,
     this.pdfSourceHash,
     this.pdfPageIndex,
     this.rawPencilkitHash,
@@ -3321,7 +3850,11 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     map['width'] = Variable<double>(width);
     map['height'] = Variable<double>(height);
     map['template_type'] = Variable<String>(templateType);
+    map['template_spacing'] = Variable<double>(templateSpacing);
     map['background_color'] = Variable<int>(backgroundColor);
+    if (!nullToAbsent || pdfDocumentId != null) {
+      map['pdf_document_id'] = Variable<String>(pdfDocumentId);
+    }
     if (!nullToAbsent || pdfSourceHash != null) {
       map['pdf_source_hash'] = Variable<String>(pdfSourceHash);
     }
@@ -3353,7 +3886,11 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       width: Value(width),
       height: Value(height),
       templateType: Value(templateType),
+      templateSpacing: Value(templateSpacing),
       backgroundColor: Value(backgroundColor),
+      pdfDocumentId: pdfDocumentId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pdfDocumentId),
       pdfSourceHash: pdfSourceHash == null && nullToAbsent
           ? const Value.absent()
           : Value(pdfSourceHash),
@@ -3389,7 +3926,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       width: serializer.fromJson<double>(json['width']),
       height: serializer.fromJson<double>(json['height']),
       templateType: serializer.fromJson<String>(json['templateType']),
+      templateSpacing: serializer.fromJson<double>(json['templateSpacing']),
       backgroundColor: serializer.fromJson<int>(json['backgroundColor']),
+      pdfDocumentId: serializer.fromJson<String?>(json['pdfDocumentId']),
       pdfSourceHash: serializer.fromJson<String?>(json['pdfSourceHash']),
       pdfPageIndex: serializer.fromJson<int?>(json['pdfPageIndex']),
       rawPencilkitHash: serializer.fromJson<String?>(json['rawPencilkitHash']),
@@ -3410,7 +3949,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       'width': serializer.toJson<double>(width),
       'height': serializer.toJson<double>(height),
       'templateType': serializer.toJson<String>(templateType),
+      'templateSpacing': serializer.toJson<double>(templateSpacing),
       'backgroundColor': serializer.toJson<int>(backgroundColor),
+      'pdfDocumentId': serializer.toJson<String?>(pdfDocumentId),
       'pdfSourceHash': serializer.toJson<String?>(pdfSourceHash),
       'pdfPageIndex': serializer.toJson<int?>(pdfPageIndex),
       'rawPencilkitHash': serializer.toJson<String?>(rawPencilkitHash),
@@ -3429,7 +3970,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     double? width,
     double? height,
     String? templateType,
+    double? templateSpacing,
     int? backgroundColor,
+    Value<String?> pdfDocumentId = const Value.absent(),
     Value<String?> pdfSourceHash = const Value.absent(),
     Value<int?> pdfPageIndex = const Value.absent(),
     Value<String?> rawPencilkitHash = const Value.absent(),
@@ -3445,7 +3988,11 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     width: width ?? this.width,
     height: height ?? this.height,
     templateType: templateType ?? this.templateType,
+    templateSpacing: templateSpacing ?? this.templateSpacing,
     backgroundColor: backgroundColor ?? this.backgroundColor,
+    pdfDocumentId: pdfDocumentId.present
+        ? pdfDocumentId.value
+        : this.pdfDocumentId,
     pdfSourceHash: pdfSourceHash.present
         ? pdfSourceHash.value
         : this.pdfSourceHash,
@@ -3477,9 +4024,15 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
       templateType: data.templateType.present
           ? data.templateType.value
           : this.templateType,
+      templateSpacing: data.templateSpacing.present
+          ? data.templateSpacing.value
+          : this.templateSpacing,
       backgroundColor: data.backgroundColor.present
           ? data.backgroundColor.value
           : this.backgroundColor,
+      pdfDocumentId: data.pdfDocumentId.present
+          ? data.pdfDocumentId.value
+          : this.pdfDocumentId,
       pdfSourceHash: data.pdfSourceHash.present
           ? data.pdfSourceHash.value
           : this.pdfSourceHash,
@@ -3510,7 +4063,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
           ..write('width: $width, ')
           ..write('height: $height, ')
           ..write('templateType: $templateType, ')
+          ..write('templateSpacing: $templateSpacing, ')
           ..write('backgroundColor: $backgroundColor, ')
+          ..write('pdfDocumentId: $pdfDocumentId, ')
           ..write('pdfSourceHash: $pdfSourceHash, ')
           ..write('pdfPageIndex: $pdfPageIndex, ')
           ..write('rawPencilkitHash: $rawPencilkitHash, ')
@@ -3531,7 +4086,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
     width,
     height,
     templateType,
+    templateSpacing,
     backgroundColor,
+    pdfDocumentId,
     pdfSourceHash,
     pdfPageIndex,
     rawPencilkitHash,
@@ -3551,7 +4108,9 @@ class InkPageEntry extends DataClass implements Insertable<InkPageEntry> {
           other.width == this.width &&
           other.height == this.height &&
           other.templateType == this.templateType &&
+          other.templateSpacing == this.templateSpacing &&
           other.backgroundColor == this.backgroundColor &&
+          other.pdfDocumentId == this.pdfDocumentId &&
           other.pdfSourceHash == this.pdfSourceHash &&
           other.pdfPageIndex == this.pdfPageIndex &&
           other.rawPencilkitHash == this.rawPencilkitHash &&
@@ -3569,7 +4128,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
   final Value<double> width;
   final Value<double> height;
   final Value<String> templateType;
+  final Value<double> templateSpacing;
   final Value<int> backgroundColor;
+  final Value<String?> pdfDocumentId;
   final Value<String?> pdfSourceHash;
   final Value<int?> pdfPageIndex;
   final Value<String?> rawPencilkitHash;
@@ -3586,7 +4147,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     this.width = const Value.absent(),
     this.height = const Value.absent(),
     this.templateType = const Value.absent(),
+    this.templateSpacing = const Value.absent(),
     this.backgroundColor = const Value.absent(),
+    this.pdfDocumentId = const Value.absent(),
     this.pdfSourceHash = const Value.absent(),
     this.pdfPageIndex = const Value.absent(),
     this.rawPencilkitHash = const Value.absent(),
@@ -3604,7 +4167,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     this.width = const Value.absent(),
     this.height = const Value.absent(),
     this.templateType = const Value.absent(),
+    this.templateSpacing = const Value.absent(),
     this.backgroundColor = const Value.absent(),
+    this.pdfDocumentId = const Value.absent(),
     this.pdfSourceHash = const Value.absent(),
     this.pdfPageIndex = const Value.absent(),
     this.rawPencilkitHash = const Value.absent(),
@@ -3626,7 +4191,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     Expression<double>? width,
     Expression<double>? height,
     Expression<String>? templateType,
+    Expression<double>? templateSpacing,
     Expression<int>? backgroundColor,
+    Expression<String>? pdfDocumentId,
     Expression<String>? pdfSourceHash,
     Expression<int>? pdfPageIndex,
     Expression<String>? rawPencilkitHash,
@@ -3644,7 +4211,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
       if (width != null) 'width': width,
       if (height != null) 'height': height,
       if (templateType != null) 'template_type': templateType,
+      if (templateSpacing != null) 'template_spacing': templateSpacing,
       if (backgroundColor != null) 'background_color': backgroundColor,
+      if (pdfDocumentId != null) 'pdf_document_id': pdfDocumentId,
       if (pdfSourceHash != null) 'pdf_source_hash': pdfSourceHash,
       if (pdfPageIndex != null) 'pdf_page_index': pdfPageIndex,
       if (rawPencilkitHash != null) 'raw_pencilkit_hash': rawPencilkitHash,
@@ -3664,7 +4233,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     Value<double>? width,
     Value<double>? height,
     Value<String>? templateType,
+    Value<double>? templateSpacing,
     Value<int>? backgroundColor,
+    Value<String?>? pdfDocumentId,
     Value<String?>? pdfSourceHash,
     Value<int?>? pdfPageIndex,
     Value<String?>? rawPencilkitHash,
@@ -3682,7 +4253,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
       width: width ?? this.width,
       height: height ?? this.height,
       templateType: templateType ?? this.templateType,
+      templateSpacing: templateSpacing ?? this.templateSpacing,
       backgroundColor: backgroundColor ?? this.backgroundColor,
+      pdfDocumentId: pdfDocumentId ?? this.pdfDocumentId,
       pdfSourceHash: pdfSourceHash ?? this.pdfSourceHash,
       pdfPageIndex: pdfPageIndex ?? this.pdfPageIndex,
       rawPencilkitHash: rawPencilkitHash ?? this.rawPencilkitHash,
@@ -3716,8 +4289,14 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
     if (templateType.present) {
       map['template_type'] = Variable<String>(templateType.value);
     }
+    if (templateSpacing.present) {
+      map['template_spacing'] = Variable<double>(templateSpacing.value);
+    }
     if (backgroundColor.present) {
       map['background_color'] = Variable<int>(backgroundColor.value);
+    }
+    if (pdfDocumentId.present) {
+      map['pdf_document_id'] = Variable<String>(pdfDocumentId.value);
     }
     if (pdfSourceHash.present) {
       map['pdf_source_hash'] = Variable<String>(pdfSourceHash.value);
@@ -3758,7 +4337,9 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
           ..write('width: $width, ')
           ..write('height: $height, ')
           ..write('templateType: $templateType, ')
+          ..write('templateSpacing: $templateSpacing, ')
           ..write('backgroundColor: $backgroundColor, ')
+          ..write('pdfDocumentId: $pdfDocumentId, ')
           ..write('pdfSourceHash: $pdfSourceHash, ')
           ..write('pdfPageIndex: $pdfPageIndex, ')
           ..write('rawPencilkitHash: $rawPencilkitHash, ')
@@ -4749,6 +5330,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $NodeBlocksTable nodeBlocks = $NodeBlocksTable(this);
   late final $AttachmentsTable attachments = $AttachmentsTable(this);
   late final $InkDocumentsTable inkDocuments = $InkDocumentsTable(this);
+  late final $PdfDocumentsTable pdfDocuments = $PdfDocumentsTable(this);
   late final $InkPagesTable inkPages = $InkPagesTable(this);
   late final $NodeLinksTable nodeLinks = $NodeLinksTable(this);
   late final $TagsTable tags = $TagsTable(this);
@@ -4775,6 +5357,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     nodeBlocks,
     attachments,
     inkDocuments,
+    pdfDocuments,
     inkPages,
     nodeLinks,
     tags,
@@ -4821,10 +5404,24 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
+        'nodes',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('pdf_documents', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
         'ink_documents',
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('ink_pages', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'pdf_documents',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('ink_pages', kind: UpdateKind.update)],
     ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
@@ -5402,6 +5999,24 @@ final class $$NodesTableReferences
     );
   }
 
+  static MultiTypedResultKey<$PdfDocumentsTable, List<PdfDocumentEntry>>
+  _pdfDocumentsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.pdfDocuments,
+    aliasName: 'nodes__id__pdf_documents__node_id',
+  );
+
+  $$PdfDocumentsTableProcessedTableManager get pdfDocumentsRefs {
+    final manager = $$PdfDocumentsTableTableManager(
+      $_db,
+      $_db.pdfDocuments,
+    ).filter((f) => f.nodeId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_pdfDocumentsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
   static MultiTypedResultKey<$NodeLinksTable, List<NodeLinkEntry>>
   _outgoingLinksTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
     db.nodeLinks,
@@ -5622,6 +6237,31 @@ class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
           }) => $$InkDocumentsTableFilterComposer(
             $db: $db,
             $table: $db.inkDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> pdfDocumentsRefs(
+    Expression<bool> Function($$PdfDocumentsTableFilterComposer f) f,
+  ) {
+    final $$PdfDocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.pdfDocuments,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PdfDocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.pdfDocuments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -5990,6 +6630,31 @@ class $$NodesTableAnnotationComposer
     return f(composer);
   }
 
+  Expression<T> pdfDocumentsRefs<T extends Object>(
+    Expression<T> Function($$PdfDocumentsTableAnnotationComposer a) f,
+  ) {
+    final $$PdfDocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.pdfDocuments,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PdfDocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.pdfDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
   Expression<T> outgoingLinks<T extends Object>(
     Expression<T> Function($$NodeLinksTableAnnotationComposer a) f,
   ) {
@@ -6084,6 +6749,7 @@ class $$NodesTableTableManager
             bool parentId,
             bool nodeBlocksRefs,
             bool inkDocumentsRefs,
+            bool pdfDocumentsRefs,
             bool outgoingLinks,
             bool incomingLinks,
             bool nodeTagsRefs,
@@ -6190,6 +6856,7 @@ class $$NodesTableTableManager
                 parentId = false,
                 nodeBlocksRefs = false,
                 inkDocumentsRefs = false,
+                pdfDocumentsRefs = false,
                 outgoingLinks = false,
                 incomingLinks = false,
                 nodeTagsRefs = false,
@@ -6199,6 +6866,7 @@ class $$NodesTableTableManager
                   explicitlyWatchedTables: [
                     if (nodeBlocksRefs) db.nodeBlocks,
                     if (inkDocumentsRefs) db.inkDocuments,
+                    if (pdfDocumentsRefs) db.pdfDocuments,
                     if (outgoingLinks) db.nodeLinks,
                     if (incomingLinks) db.nodeLinks,
                     if (nodeTagsRefs) db.nodeTags,
@@ -6282,6 +6950,26 @@ class $$NodesTableTableManager
                                 table,
                                 p0,
                               ).inkDocumentsRefs,
+                          currentColumn: 'id',
+                          referencedColumn: 'node_id',
+                          typedResults: items,
+                        ),
+                      if (pdfDocumentsRefs)
+                        await $_getPrefetchedDataByColumns<
+                          NodeEntry,
+                          $NodesTable,
+                          PdfDocumentEntry,
+                          $PdfDocumentsTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$NodesTableReferences
+                              ._pdfDocumentsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$NodesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).pdfDocumentsRefs,
                           currentColumn: 'id',
                           referencedColumn: 'node_id',
                           typedResults: items,
@@ -6371,6 +7059,7 @@ typedef $$NodesTableProcessedTableManager =
         bool parentId,
         bool nodeBlocksRefs,
         bool inkDocumentsRefs,
+        bool pdfDocumentsRefs,
         bool outgoingLinks,
         bool incomingLinks,
         bool nodeTagsRefs,
@@ -7534,6 +8223,451 @@ typedef $$InkDocumentsTableProcessedTableManager =
       InkDocumentEntry,
       PrefetchHooks Function({bool nodeId, bool inkPagesRefs})
     >;
+typedef $$PdfDocumentsTableCreateCompanionBuilder =
+    PdfDocumentsCompanion Function({
+      required String id,
+      required String nodeId,
+      required String casHash,
+      required String fileName,
+      required int fileSizeBytes,
+      required int pageCount,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$PdfDocumentsTableUpdateCompanionBuilder =
+    PdfDocumentsCompanion Function({
+      Value<String> id,
+      Value<String> nodeId,
+      Value<String> casHash,
+      Value<String> fileName,
+      Value<int> fileSizeBytes,
+      Value<int> pageCount,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+final class $$PdfDocumentsTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $PdfDocumentsTable, PdfDocumentEntry> {
+  $$PdfDocumentsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $NodesTable _nodeIdTable(_$AppDatabase db) =>
+      db.nodes.createAlias('pdf_documents__node_id__nodes__id');
+
+  $$NodesTableProcessedTableManager get nodeId {
+    final $_column = $_itemColumn<String>('node_id')!;
+
+    final manager = $$NodesTableTableManager(
+      $_db,
+      $_db.nodes,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_nodeIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static MultiTypedResultKey<$InkPagesTable, List<InkPageEntry>>
+  _inkPagesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.inkPages,
+    aliasName: 'pdf_documents__id__ink_pages__pdf_document_id',
+  );
+
+  $$InkPagesTableProcessedTableManager get inkPagesRefs {
+    final manager = $$InkPagesTableTableManager(
+      $_db,
+      $_db.inkPages,
+    ).filter((f) => f.pdfDocumentId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_inkPagesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$PdfDocumentsTableFilterComposer
+    extends Composer<_$AppDatabase, $PdfDocumentsTable> {
+  $$PdfDocumentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get casHash => $composableBuilder(
+    column: $table.casHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fileSizeBytes => $composableBuilder(
+    column: $table.fileSizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageCount => $composableBuilder(
+    column: $table.pageCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$NodesTableFilterComposer get nodeId {
+    final $$NodesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableFilterComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<bool> inkPagesRefs(
+    Expression<bool> Function($$InkPagesTableFilterComposer f) f,
+  ) {
+    final $$InkPagesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkPages,
+      getReferencedColumn: (t) => t.pdfDocumentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkPagesTableFilterComposer(
+            $db: $db,
+            $table: $db.inkPages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$PdfDocumentsTableOrderingComposer
+    extends Composer<_$AppDatabase, $PdfDocumentsTable> {
+  $$PdfDocumentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get casHash => $composableBuilder(
+    column: $table.casHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fileSizeBytes => $composableBuilder(
+    column: $table.fileSizeBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pageCount => $composableBuilder(
+    column: $table.pageCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$NodesTableOrderingComposer get nodeId {
+    final $$NodesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableOrderingComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PdfDocumentsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PdfDocumentsTable> {
+  $$PdfDocumentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get casHash =>
+      $composableBuilder(column: $table.casHash, builder: (column) => column);
+
+  GeneratedColumn<String> get fileName =>
+      $composableBuilder(column: $table.fileName, builder: (column) => column);
+
+  GeneratedColumn<int> get fileSizeBytes => $composableBuilder(
+    column: $table.fileSizeBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get pageCount =>
+      $composableBuilder(column: $table.pageCount, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$NodesTableAnnotationComposer get nodeId {
+    final $$NodesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<T> inkPagesRefs<T extends Object>(
+    Expression<T> Function($$InkPagesTableAnnotationComposer a) f,
+  ) {
+    final $$InkPagesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inkPages,
+      getReferencedColumn: (t) => t.pdfDocumentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InkPagesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inkPages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$PdfDocumentsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PdfDocumentsTable,
+          PdfDocumentEntry,
+          $$PdfDocumentsTableFilterComposer,
+          $$PdfDocumentsTableOrderingComposer,
+          $$PdfDocumentsTableAnnotationComposer,
+          $$PdfDocumentsTableCreateCompanionBuilder,
+          $$PdfDocumentsTableUpdateCompanionBuilder,
+          (PdfDocumentEntry, $$PdfDocumentsTableReferences),
+          PdfDocumentEntry,
+          PrefetchHooks Function({bool nodeId, bool inkPagesRefs})
+        > {
+  $$PdfDocumentsTableTableManager(_$AppDatabase db, $PdfDocumentsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PdfDocumentsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PdfDocumentsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PdfDocumentsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> nodeId = const Value.absent(),
+                Value<String> casHash = const Value.absent(),
+                Value<String> fileName = const Value.absent(),
+                Value<int> fileSizeBytes = const Value.absent(),
+                Value<int> pageCount = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PdfDocumentsCompanion(
+                id: id,
+                nodeId: nodeId,
+                casHash: casHash,
+                fileName: fileName,
+                fileSizeBytes: fileSizeBytes,
+                pageCount: pageCount,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String nodeId,
+                required String casHash,
+                required String fileName,
+                required int fileSizeBytes,
+                required int pageCount,
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => PdfDocumentsCompanion.insert(
+                id: id,
+                nodeId: nodeId,
+                casHash: casHash,
+                fileName: fileName,
+                fileSizeBytes: fileSizeBytes,
+                pageCount: pageCount,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$PdfDocumentsTable, PdfDocumentEntry>(table),
+                  $$PdfDocumentsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({nodeId = false, inkPagesRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (inkPagesRefs) db.inkPages],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (nodeId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.nodeId,
+                        referencedTable: $$PdfDocumentsTableReferences
+                            ._nodeIdTable(db),
+                        referencedColumn: $$PdfDocumentsTableReferences
+                            ._nodeIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (inkPagesRefs)
+                    await $_getPrefetchedDataByColumns<
+                      PdfDocumentEntry,
+                      $PdfDocumentsTable,
+                      InkPageEntry,
+                      $InkPagesTable
+                    >(
+                      currentTable: table,
+                      referencedTable: $$PdfDocumentsTableReferences
+                          ._inkPagesRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$PdfDocumentsTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).inkPagesRefs,
+                      currentColumn: 'id',
+                      referencedColumn: 'pdf_document_id',
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$PdfDocumentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PdfDocumentsTable,
+      PdfDocumentEntry,
+      $$PdfDocumentsTableFilterComposer,
+      $$PdfDocumentsTableOrderingComposer,
+      $$PdfDocumentsTableAnnotationComposer,
+      $$PdfDocumentsTableCreateCompanionBuilder,
+      $$PdfDocumentsTableUpdateCompanionBuilder,
+      (PdfDocumentEntry, $$PdfDocumentsTableReferences),
+      PdfDocumentEntry,
+      PrefetchHooks Function({bool nodeId, bool inkPagesRefs})
+    >;
 typedef $$InkPagesTableCreateCompanionBuilder = InkPagesCompanion Function({
   required String id,
   required String documentId,
@@ -7541,7 +8675,9 @@ typedef $$InkPagesTableCreateCompanionBuilder = InkPagesCompanion Function({
   Value<double> width,
   Value<double> height,
   Value<String> templateType,
+  Value<double> templateSpacing,
   Value<int> backgroundColor,
+  Value<String?> pdfDocumentId,
   Value<String?> pdfSourceHash,
   Value<int?> pdfPageIndex,
   Value<String?> rawPencilkitHash,
@@ -7559,7 +8695,9 @@ typedef $$InkPagesTableUpdateCompanionBuilder = InkPagesCompanion Function({
   Value<double> width,
   Value<double> height,
   Value<String> templateType,
+  Value<double> templateSpacing,
   Value<int> backgroundColor,
+  Value<String?> pdfDocumentId,
   Value<String?> pdfSourceHash,
   Value<int?> pdfPageIndex,
   Value<String?> rawPencilkitHash,
@@ -7586,6 +8724,24 @@ final class $$InkPagesTableReferences
       $_db.inkDocuments,
     ).filter((f) => f.id.sqlEquals($_column));
     final item = $_typedResult.readTableOrNull(_documentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $PdfDocumentsTable _pdfDocumentIdTable(_$AppDatabase db) => db
+      .pdfDocuments
+      .createAlias('ink_pages__pdf_document_id__pdf_documents__id');
+
+  $$PdfDocumentsTableProcessedTableManager? get pdfDocumentId {
+    final $_column = $_itemColumn<String>('pdf_document_id');
+    if ($_column == null) return null;
+    final manager = $$PdfDocumentsTableTableManager(
+      $_db,
+      $_db.pdfDocuments,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_pdfDocumentIdTable($_db));
     if (item == null) return manager;
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: [item]),
@@ -7624,6 +8780,11 @@ class $$InkPagesTableFilterComposer
 
   ColumnFilters<String> get templateType => $composableBuilder(
     column: $table.templateType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get templateSpacing => $composableBuilder(
+    column: $table.templateSpacing,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7694,6 +8855,29 @@ class $$InkPagesTableFilterComposer
     );
     return composer;
   }
+
+  $$PdfDocumentsTableFilterComposer get pdfDocumentId {
+    final $$PdfDocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.pdfDocumentId,
+      referencedTable: $db.pdfDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PdfDocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.pdfDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$InkPagesTableOrderingComposer
@@ -7727,6 +8911,11 @@ class $$InkPagesTableOrderingComposer
 
   ColumnOrderings<String> get templateType => $composableBuilder(
     column: $table.templateType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get templateSpacing => $composableBuilder(
+    column: $table.templateSpacing,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -7797,6 +8986,29 @@ class $$InkPagesTableOrderingComposer
     );
     return composer;
   }
+
+  $$PdfDocumentsTableOrderingComposer get pdfDocumentId {
+    final $$PdfDocumentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.pdfDocumentId,
+      referencedTable: $db.pdfDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PdfDocumentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.pdfDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$InkPagesTableAnnotationComposer
@@ -7824,6 +9036,11 @@ class $$InkPagesTableAnnotationComposer
 
   GeneratedColumn<String> get templateType => $composableBuilder(
     column: $table.templateType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get templateSpacing => $composableBuilder(
+    column: $table.templateSpacing,
     builder: (column) => column,
   );
 
@@ -7888,6 +9105,29 @@ class $$InkPagesTableAnnotationComposer
     );
     return composer;
   }
+
+  $$PdfDocumentsTableAnnotationComposer get pdfDocumentId {
+    final $$PdfDocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.pdfDocumentId,
+      referencedTable: $db.pdfDocuments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PdfDocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.pdfDocuments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$InkPagesTableTableManager
@@ -7903,7 +9143,7 @@ class $$InkPagesTableTableManager
           $$InkPagesTableUpdateCompanionBuilder,
           (InkPageEntry, $$InkPagesTableReferences),
           InkPageEntry,
-          PrefetchHooks Function({bool documentId})
+          PrefetchHooks Function({bool documentId, bool pdfDocumentId})
         > {
   $$InkPagesTableTableManager(_$AppDatabase db, $InkPagesTable table)
     : super(
@@ -7924,7 +9164,9 @@ class $$InkPagesTableTableManager
                 Value<double> width = const Value.absent(),
                 Value<double> height = const Value.absent(),
                 Value<String> templateType = const Value.absent(),
+                Value<double> templateSpacing = const Value.absent(),
                 Value<int> backgroundColor = const Value.absent(),
+                Value<String?> pdfDocumentId = const Value.absent(),
                 Value<String?> pdfSourceHash = const Value.absent(),
                 Value<int?> pdfPageIndex = const Value.absent(),
                 Value<String?> rawPencilkitHash = const Value.absent(),
@@ -7941,7 +9183,9 @@ class $$InkPagesTableTableManager
                 width: width,
                 height: height,
                 templateType: templateType,
+                templateSpacing: templateSpacing,
                 backgroundColor: backgroundColor,
+                pdfDocumentId: pdfDocumentId,
                 pdfSourceHash: pdfSourceHash,
                 pdfPageIndex: pdfPageIndex,
                 rawPencilkitHash: rawPencilkitHash,
@@ -7960,7 +9204,9 @@ class $$InkPagesTableTableManager
                 Value<double> width = const Value.absent(),
                 Value<double> height = const Value.absent(),
                 Value<String> templateType = const Value.absent(),
+                Value<double> templateSpacing = const Value.absent(),
                 Value<int> backgroundColor = const Value.absent(),
+                Value<String?> pdfDocumentId = const Value.absent(),
                 Value<String?> pdfSourceHash = const Value.absent(),
                 Value<int?> pdfPageIndex = const Value.absent(),
                 Value<String?> rawPencilkitHash = const Value.absent(),
@@ -7977,7 +9223,9 @@ class $$InkPagesTableTableManager
                 width: width,
                 height: height,
                 templateType: templateType,
+                templateSpacing: templateSpacing,
                 backgroundColor: backgroundColor,
+                pdfDocumentId: pdfDocumentId,
                 pdfSourceHash: pdfSourceHash,
                 pdfPageIndex: pdfPageIndex,
                 rawPencilkitHash: rawPencilkitHash,
@@ -7996,7 +9244,7 @@ class $$InkPagesTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({documentId = false}) {
+          prefetchHooksCallback: ({documentId = false, pdfDocumentId = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [],
@@ -8027,6 +9275,17 @@ class $$InkPagesTableTableManager
                             .id,
                       ) as T;
                     }
+                    if (pdfDocumentId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.pdfDocumentId,
+                        referencedTable: $$InkPagesTableReferences
+                            ._pdfDocumentIdTable(db),
+                        referencedColumn: $$InkPagesTableReferences
+                            ._pdfDocumentIdTable(db)
+                            .id,
+                      ) as T;
+                    }
 
                     return state;
                   },
@@ -8051,7 +9310,7 @@ typedef $$InkPagesTableProcessedTableManager =
       $$InkPagesTableUpdateCompanionBuilder,
       (InkPageEntry, $$InkPagesTableReferences),
       InkPageEntry,
-      PrefetchHooks Function({bool documentId})
+      PrefetchHooks Function({bool documentId, bool pdfDocumentId})
     >;
 typedef $$NodeLinksTableCreateCompanionBuilder = NodeLinksCompanion Function({
   required String id,
@@ -9199,6 +10458,8 @@ class $AppDatabaseManager {
       $$AttachmentsTableTableManager(_db, _db.attachments);
   $$InkDocumentsTableTableManager get inkDocuments =>
       $$InkDocumentsTableTableManager(_db, _db.inkDocuments);
+  $$PdfDocumentsTableTableManager get pdfDocuments =>
+      $$PdfDocumentsTableTableManager(_db, _db.pdfDocuments);
   $$InkPagesTableTableManager get inkPages =>
       $$InkPagesTableTableManager(_db, _db.inkPages);
   $$NodeLinksTableTableManager get nodeLinks =>

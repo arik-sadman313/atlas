@@ -1,7 +1,11 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
@@ -90,6 +94,68 @@ class NotebooksScreen extends ConsumerWidget {
     }
   }
 
+  Future<void> _importPdf(BuildContext context, WidgetRef ref) async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+      if (result.isEmpty) return;
+      final pickedPath = result.first.path;
+      if (pickedPath == null) return;
+
+      final workspaceId = ref.read(currentWorkspaceIdProvider);
+      final pdfRepo = ref.read(pdfRepositoryProvider);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('Importing PDF and scaffolding notebook pages...'),
+              ],
+            ),
+            duration: Duration(seconds: 15),
+          ),
+        );
+      }
+
+      final file = File(pickedPath);
+      final fileName = p.basename(pickedPath);
+      final title = p.basenameWithoutExtension(fileName);
+
+      final nodeId = await pdfRepo.importPdf(
+        workspaceId: workspaceId,
+        filePath: file.path,
+        customTitle: title,
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        context.go('${AtlasRoutes.notebooks}/$nodeId');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to import PDF: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -132,11 +198,21 @@ class NotebooksScreen extends ConsumerWidget {
                             ),
                           ],
                         ),
-                        AtlasButton.primary(
-                          label: 'New Notebook',
-                          icon: Icons.add,
-                          onPressed: () =>
-                              _showCreateNotebookDialog(context, ref),
+                        Row(
+                          children: [
+                            AtlasButton.secondary(
+                              label: 'Import PDF',
+                              icon: Icons.picture_as_pdf_outlined,
+                              onPressed: () => _importPdf(context, ref),
+                            ),
+                            const SizedBox(width: AtlasSpacing.sm),
+                            AtlasButton.primary(
+                              label: 'New Notebook',
+                              icon: Icons.add,
+                              onPressed: () =>
+                                  _showCreateNotebookDialog(context, ref),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -148,7 +224,8 @@ class NotebooksScreen extends ConsumerWidget {
                     child: AtlasEmptyState(
                       icon: Icons.menu_book_outlined,
                       title: 'No notebooks found',
-                      description: 'Organize your sketches, study material, and handwritten notes into dedicated notebooks.',
+                      description:
+                          'Organize your sketches, study material, and handwritten notes or import PDFs to annotate.',
                       actionLabel: 'Create Notebook',
                       onAction: () => _showCreateNotebookDialog(context, ref),
                     ),

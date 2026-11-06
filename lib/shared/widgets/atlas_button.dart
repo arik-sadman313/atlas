@@ -32,6 +32,15 @@ class AtlasButton extends StatelessWidget {
     this.width,
   }) : variant = AtlasButtonVariant.primary;
 
+  const AtlasButton.secondary({
+    super.key,
+    required this.label,
+    this.icon,
+    this.onPressed,
+    this.isLoading = false,
+    this.width,
+  }) : variant = AtlasButtonVariant.secondary;
+
   const AtlasButton.ghost({
     super.key,
     required this.label,

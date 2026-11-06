@@ -11,6 +11,7 @@ class AtlasInkDocument {
   final double height;
   final double dpi;
   final String backgroundTemplate;
+  final double templateSpacing;
   final int backgroundColor;
   final List<InkLayer> layers;
   final Map<String, dynamic> metadata;
@@ -23,6 +24,7 @@ class AtlasInkDocument {
     this.height = 2200.0,
     this.dpi = 264.0,
     this.backgroundTemplate = 'dot_grid_5mm',
+    this.templateSpacing = 28.35,
     this.backgroundColor = 4294967295, // 0xFFFFFFFF
     required this.layers,
     this.metadata = const {},
@@ -34,6 +36,7 @@ class AtlasInkDocument {
     double width = 1600.0,
     double height = 2200.0,
     String backgroundTemplate = 'dot_grid_5mm',
+    double templateSpacing = 28.35,
     int backgroundColor = 4294967295,
   }) {
     return AtlasInkDocument(
@@ -42,6 +45,7 @@ class AtlasInkDocument {
       width: width,
       height: height,
       backgroundTemplate: backgroundTemplate,
+      templateSpacing: templateSpacing,
       backgroundColor: backgroundColor,
       layers: const [
         InkLayer(
@@ -76,6 +80,7 @@ class AtlasInkDocument {
     double? height,
     double? dpi,
     String? backgroundTemplate,
+    double? templateSpacing,
     int? backgroundColor,
     List<InkLayer>? layers,
     Map<String, dynamic>? metadata,
@@ -88,6 +93,7 @@ class AtlasInkDocument {
       height: height ?? this.height,
       dpi: dpi ?? this.dpi,
       backgroundTemplate: backgroundTemplate ?? this.backgroundTemplate,
+      templateSpacing: templateSpacing ?? this.templateSpacing,
       backgroundColor: backgroundColor ?? this.backgroundColor,
       layers: layers ?? this.layers,
       metadata: metadata ?? this.metadata,
@@ -99,7 +105,11 @@ class AtlasInkDocument {
     'documentId': documentId,
     'pageNumber': pageNumber,
     'dimensions': {'width': width, 'height': height, 'dpi': dpi},
-    'background': {'template': backgroundTemplate, 'color': backgroundColor},
+    'background': {
+      'template': backgroundTemplate,
+      'spacing': templateSpacing,
+      'color': backgroundColor,
+    },
     'layers': layers.map((l) => l.toJson()).toList(),
     'metadata': metadata,
   };
@@ -116,6 +126,7 @@ class AtlasInkDocument {
       height: (dims?['height'] as num?)?.toDouble() ?? 2200.0,
       dpi: (dims?['dpi'] as num?)?.toDouble() ?? 264.0,
       backgroundTemplate: (bg?['template'] as String?) ?? 'dot_grid_5mm',
+      templateSpacing: (bg?['spacing'] as num?)?.toDouble() ?? 28.35,
       backgroundColor: (bg?['color'] as num?)?.toInt() ?? 4294967295,
       layers:
           (json['layers'] as List<dynamic>?)

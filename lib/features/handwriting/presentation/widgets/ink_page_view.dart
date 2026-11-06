@@ -17,6 +17,7 @@ import 'ink_document_painter.dart';
 class InkPageView extends StatefulWidget {
   final AtlasInkDocument document;
   final Uint8List? previewPngBytes;
+  final Widget? backgroundWidget;
   final bool showCompanionBadge;
   final TransformationController? transformationController;
 
@@ -24,6 +25,7 @@ class InkPageView extends StatefulWidget {
     super.key,
     required this.document,
     this.previewPngBytes,
+    this.backgroundWidget,
     this.showCompanionBadge = true,
     this.transformationController,
   });
@@ -90,15 +92,22 @@ class _InkPageViewState extends State<InkPageView> {
                 child: SizedBox(
                   width: widget.document.width,
                   height: widget.document.height,
-                  child:
-                      widget.document.isEmpty && widget.previewPngBytes != null
-                      ? Image.memory(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (widget.backgroundWidget != null)
+                        widget.backgroundWidget!,
+                      if (widget.document.isEmpty &&
+                          widget.previewPngBytes != null &&
+                          widget.backgroundWidget == null)
+                        Image.memory(
                           widget.previewPngBytes!,
                           fit: BoxFit.contain,
                           width: widget.document.width,
                           height: widget.document.height,
                         )
-                      : CustomPaint(
+                      else
+                        CustomPaint(
                           size: Size(
                             widget.document.width,
                             widget.document.height,
@@ -106,8 +115,11 @@ class _InkPageViewState extends State<InkPageView> {
                           painter: InkDocumentPainter(
                             document: widget.document,
                             isDrawing: false,
+                            drawBackground: widget.backgroundWidget == null,
                           ),
                         ),
+                    ],
+                  ),
                 ),
               ),
             ),

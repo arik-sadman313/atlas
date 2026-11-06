@@ -12,6 +12,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/atlas_colors.dart';
 import '../../../../core/theme/atlas_spacing.dart';
 import '../../../documents/presentation/widgets/backlinks_panel.dart';
+import '../../../pdf/presentation/widgets/pdf_page_background.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
@@ -20,6 +21,7 @@ import '../widgets/ink_canvas.dart';
 import '../widgets/ink_document_painter.dart';
 import '../widgets/ink_page_view.dart';
 import '../widgets/ink_tool_palette.dart';
+import '../widgets/notebook_page_drawer.dart';
 
 /// Full-featured Notebook Editor integrating the Atlas Ink Engine.
 ///
@@ -394,28 +396,239 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     await _switchPage(_pages.length - 1);
   }
 
-  Future<void> _changeTemplate(String newTemplate) async {
-    if (_canvasController == null || _pages.isEmpty) return;
+  Future<void> _movePage(int fromIndex, int toIndex) async {
+    if (_documentEntry == null || fromIndex == toIndex) return;
+    if (fromIndex < 0 ||
+        fromIndex >= _pages.length ||
+        toIndex < 0 ||
+        toIndex >= _pages.length) {
+      return;
+    }
 
-    final updatedDoc = _canvasController!.document.copyWith(
-      backgroundTemplate: newTemplate,
-    );
-    _canvasController!.loadDocument(updatedDoc);
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
+
+    final reordered = List<InkPageEntry>.from(_pages);
+    final movedPage = reordered.removeAt(fromIndex);
+    reordered.insert(toIndex, movedPage);
 
     final inkDao = ref.read(inkDaoProvider);
-    final currentPage = _pages[_currentPageIndex];
-    await inkDao.updatePage(
-      currentPage
-          .toCompanion(true)
-          .copyWith(
-            templateType: drift.Value(newTemplate),
-            updatedAt: drift.Value(DateTime.now()),
-          ),
+    final pageIds = reordered.map((p) => p.id).toList();
+    await inkDao.batchReorderPages(_documentEntry!.id, pageIds);
+
+    final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
+    int newCurrent = _currentPageIndex;
+    if (_currentPageIndex == fromIndex) {
+      newCurrent = toIndex;
+    } else if (fromIndex < _currentPageIndex && toIndex >= _currentPageIndex) {
+      newCurrent--;
+    } else if (fromIndex > _currentPageIndex && toIndex <= _currentPageIndex) {
+      newCurrent++;
+    }
+
+    setState(() {
+      _pages = updatedPages;
+      _currentPageIndex = newCurrent;
+    });
+  }
+
+  Future<void> _insertPageBelow(int index) async {
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
+    if (_documentEntry == null) return;
+
+    final inkDao = ref.read(inkDaoProvider);
+    final defaultTemplate = _documentEntry?.defaultTemplate ?? 'ruled';
+    final targetPageNumber = index + 2;
+    final newPageId =
+        'page_${_documentEntry!.id}_${DateTime.now().millisecondsSinceEpoch}';
+    final now = DateTime.now();
+
+    await inkDao.insertPageAt(
+      _documentEntry!.id,
+      targetPageNumber,
+      InkPagesCompanion.insert(
+        id: newPageId,
+        documentId: _documentEntry!.id,
+        pageNumber: targetPageNumber,
+        templateType: drift.Value(defaultTemplate),
+        createdAt: now,
+        updatedAt: now,
+      ),
     );
 
-    _hasUnsavedChanges = true;
-    _scheduleAutosave();
-    setState(() {});
+    final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
+    setState(() {
+      _pages = updatedPages;
+    });
+
+    await _switchPage(index + 1);
+  }
+
+  Future<void> _duplicatePage(int index) async {
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
+    if (_documentEntry == null || index < 0 || index >= _pages.length) return;
+
+    final inkDao = ref.read(inkDaoProvider);
+    final sourcePage = _pages[index];
+    final newPageId =
+        'page_${_documentEntry!.id}_${DateTime.now().millisecondsSinceEpoch}';
+    await inkDao.duplicatePage(sourcePage.id, newPageId);
+
+    final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
+    setState(() {
+      _pages = updatedPages;
+    });
+
+    await _switchPage(index + 1);
+  }
+
+  Future<void> _deletePage(int index) async {
+    if (_pages.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot delete the only page in a notebook.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Page?'),
+        content: Text(
+          'Are you sure you want to delete Page ${index + 1}? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
+    if (_documentEntry == null) return;
+
+    final inkDao = ref.read(inkDaoProvider);
+    final targetPage = _pages[index];
+    await inkDao.deletePageAndReorder(targetPage.id);
+
+    final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
+    int nextIndex = _currentPageIndex;
+    if (_currentPageIndex >= updatedPages.length) {
+      nextIndex = updatedPages.length - 1;
+    } else if (_currentPageIndex > index) {
+      nextIndex = _currentPageIndex - 1;
+    }
+
+    setState(() {
+      _pages = updatedPages;
+      _currentPageIndex = nextIndex;
+    });
+
+    await _switchPage(nextIndex);
+  }
+
+  Future<void> _changeTemplate(String newTemplate) async {
+    await _changePageTemplate(_currentPageIndex, newTemplate);
+  }
+
+  Future<void> _changePageTemplate(int index, String newTemplate) async {
+    if (index < 0 || index >= _pages.length) return;
+    final page = _pages[index];
+    final inkDao = ref.read(inkDaoProvider);
+    await inkDao.updatePageTemplate(
+      page.id,
+      newTemplate,
+      page.templateSpacing,
+    );
+
+    final updatedPages = await inkDao.getPagesForDocument(_documentEntry!.id);
+    setState(() {
+      _pages = updatedPages;
+    });
+
+    if (index == _currentPageIndex && _canvasController != null) {
+      final updatedDoc = _canvasController!.document.copyWith(
+        backgroundTemplate: newTemplate,
+      );
+      _canvasController!.loadDocument(updatedDoc);
+      _hasUnsavedChanges = true;
+      _scheduleAutosave();
+    }
+  }
+
+  Future<void> _exportNotebookToPdf() async {
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
+    if (_documentEntry == null) return;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Generating PDF document...'),
+            ],
+          ),
+          duration: Duration(seconds: 15),
+        ),
+      );
+    }
+
+    try {
+      final pdfExportService = ref.read(pdfExportServiceProvider);
+      final file = await pdfExportService.exportNotebookToPdf(
+        documentId: _documentEntry!.id,
+        title: _title,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF exported successfully: ${file.path}'),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to export PDF: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    }
   }
 
   void _popSafely() {
@@ -446,6 +659,38 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
       child: Scaffold(
         backgroundColor: isDark ? AtlasColors.darkBg : const Color(0xFFE4E4E7),
         appBar: _buildHeader(theme, isDark, isAndroid),
+        endDrawer: _pages.isNotEmpty
+            ? NotebookPageDrawer(
+                pages: _pages,
+                currentPageIndex: _currentPageIndex,
+                onPageSelected: (index) async {
+                  Navigator.of(context).pop();
+                  await _switchPage(index);
+                },
+                onAddPage: () {
+                  Navigator.of(context).pop();
+                  _addNewPage();
+                },
+                onInsertPageBelow: (index) async {
+                  Navigator.of(context).pop();
+                  await _insertPageBelow(index);
+                },
+                onDuplicatePage: (index) async {
+                  Navigator.of(context).pop();
+                  await _duplicatePage(index);
+                },
+                onDeletePage: (index) async {
+                  Navigator.of(context).pop();
+                  await _deletePage(index);
+                },
+                onMovePage: (fromIndex, toIndex) async {
+                  await _movePage(fromIndex, toIndex);
+                },
+                onChangeTemplate: (index, newTemplate) async {
+                  await _changePageTemplate(index, newTemplate);
+                },
+              )
+            : null,
         body: _isLoading || _canvasController == null
             ? const Center(child: CircularProgressIndicator())
             : Stack(
@@ -456,6 +701,17 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                         ? InkPageView(
                             document: _canvasController!.document,
                             showCompanionBadge: true,
+                            backgroundWidget: _pages.isNotEmpty &&
+                                    _pages[_currentPageIndex].pdfSourceHash != null
+                                ? PdfPageBackground(
+                                    pdfSourceHash:
+                                        _pages[_currentPageIndex].pdfSourceHash,
+                                    pdfPageIndex:
+                                        _pages[_currentPageIndex].pdfPageIndex,
+                                    width: _canvasController!.document.width,
+                                    height: _canvasController!.document.height,
+                                  )
+                                : null,
                           )
                         : isIOS
                         ? _buildIosPencilKitCanvas(isDark)
@@ -584,6 +840,20 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           tooltip: 'Add Page',
           onPressed: _addNewPage,
         ),
+        // Export PDF
+        IconButton(
+          icon: const Icon(Icons.picture_as_pdf_outlined),
+          tooltip: 'Export PDF',
+          onPressed: _exportNotebookToPdf,
+        ),
+        // Page Manager Drawer
+        Builder(
+          builder: (scaffoldCtx) => IconButton(
+            icon: const Icon(Icons.auto_stories_outlined),
+            tooltip: 'Page Manager',
+            onPressed: () => Scaffold.of(scaffoldCtx).openEndDrawer(),
+          ),
+        ),
         // Backlinks Button
         IconButton(
           icon: const Icon(Icons.link_rounded),
@@ -602,7 +872,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      backgroundColor:
+          isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -624,7 +895,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+                    color: isDark
+                        ? AtlasColors.darkBorder
+                        : AtlasColors.lightBorder,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -660,6 +933,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
 
   Widget _buildDesktopCanvas(bool isDark) {
     final doc = _canvasController!.document;
+    final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
+    final isPdf = currentPage?.pdfSourceHash != null &&
+        currentPage?.pdfPageIndex != null;
 
     return Center(
       child: SingleChildScrollView(
@@ -683,6 +959,15 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
               controller: _canvasController!,
               width: doc.width,
               height: doc.height,
+              drawBackground: !isPdf,
+              backgroundWidget: isPdf
+                  ? PdfPageBackground(
+                      pdfSourceHash: currentPage!.pdfSourceHash,
+                      pdfPageIndex: currentPage.pdfPageIndex,
+                      width: doc.width,
+                      height: doc.height,
+                    )
+                  : null,
             ),
           ),
         ),
@@ -693,6 +978,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   Widget _buildIosPencilKitCanvas(bool isDark) {
     final doc = _canvasController!.document;
     final bgColor = Color(doc.backgroundColor);
+    final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
+    final isPdf = currentPage?.pdfSourceHash != null &&
+        currentPage?.pdfPageIndex != null;
 
     return Center(
       child: SingleChildScrollView(
@@ -714,12 +1002,20 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: CustomPaint(
-                  painter: PaperPatternPainter(
-                    template: doc.backgroundTemplate,
-                    backgroundColor: bgColor,
-                  ),
-                ),
+                child: isPdf
+                    ? PdfPageBackground(
+                        pdfSourceHash: currentPage!.pdfSourceHash,
+                        pdfPageIndex: currentPage.pdfPageIndex,
+                        width: doc.width,
+                        height: doc.height,
+                      )
+                    : CustomPaint(
+                        painter: PaperPatternPainter(
+                          template: doc.backgroundTemplate,
+                          backgroundColor: bgColor,
+                          spacing: doc.templateSpacing,
+                        ),
+                      ),
               ),
               Positioned.fill(
                 child: PencilKit(

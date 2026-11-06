@@ -266,3 +266,54 @@ flowchart LR
 - **Reactive Backlinks Stream:** `LinksDao.watchBacklinksForTarget(nodeId)` joins `node_links` with `nodes` to provide a real-time stream of incoming references sorted by update timestamp.
 - **Cross-Feature Interoperability:** Embedded in both `DocumentEditorScreen` and `NotebookEditorScreen` (via bottom sheet on iPadOS/Linux/Android).
 
+---
+
+## 8. Notebook & PDF System Architecture (Milestone 4)
+
+### 8.1 PDF Engine & Coordinate System
+- **Engine Selection:** `pdfrx: ^2.12.0` (MIT license, no AGPL dependencies). Backed by Google's native **PDFium** on Linux desktop, Android, and Windows, and Apple's native **PDFKit** on iPadOS/iOS.
+- **Coordinate System Alignment:**
+  - Standard PDF dimensions are expressed in PDF points ($1/72\text{ inch}$).
+  - Standard A4 is $595.28 \times 841.89\text{ pt}$, US Letter is $612.0 \times 792.0\text{ pt}$.
+  - The ATLAS Ink Engine operates at a $1.0\text{ canvas unit} = 1.0\text{ PDF point}$ ratio, providing zero-distortion 1:1 overlay precision.
+
+```mermaid
+flowchart TD
+    subgraph UI["Dual-Layer Annotation Surface"]
+        direction TB
+        TopLayer["Drawing Layer (InkCanvas / PencilKit / InkPageView)"]
+        BottomLayer["Background Layer (PdfPageBackground / PaperPatternPainter)"]
+    end
+    TopLayer -->|Transparent Background| BottomLayer
+    BottomLayer -->|Streams Blob| CAS["CAS Storage Service (SHA-256)"]
+    BottomLayer -->|Renders via PDFium/PDFKit| Engine["PdfRenderingService (pdfrx)"]
+```
+
+### 8.2 PDF Import & Scaffolding Pipeline
+1. **User Action:** Selects local `.pdf` file via `file_picker`.
+2. **CAS Ingestion:** `PdfRepository` hashes and writes the raw PDF binary into CAS blob storage.
+3. **Structure Inspection:** `PdfRenderingService.openBytes(pdfBytes)` extracts page count and exact bounding dimensions for each page.
+4. **Notebook Scaffolding:**
+   - Creates parent `notebook` record in `nodes`.
+   - Creates metadata entry in `pdf_documents`.
+   - Creates container in `ink_documents`.
+   - Inserts individual `ink_pages` matching the exact width and height of each PDF page with `pdfDocumentId`, `pdfSourceHash`, and `pdfPageIndex`.
+
+### 8.3 Multi-Page Notebook Architecture
+- **Page Manager Drawer (`NotebookPageDrawer`):**
+  - Displays cached raster thumbnail previews for every page.
+  - Supports dynamic page navigation, reordering, arbitrary page insertion below, page duplication, and page deletion.
+  - Stationery template picker (ruled, grid, dot grid, blank) with customizable millimeter/point spacing.
+- **Contiguous 1-Based Page Indexing:**
+  - Database operations (`batchReorderPages`, `insertPageAt`, `deletePageAndReorder`) maintain strict contiguous 1-based page numbering to eliminate numbering gaps.
+
+### 8.4 PDF Export Pipeline (`PdfExportService`)
+- Uses the `pdf: ^3.13.1` (Apache-2.0) package to composite background stationery/PDF page rasters and vector ink strokes into standard PDF documents.
+- Offscreen rasterizer (`renderCompositePageImage`) scales to $2.0\times$ device resolution for publication-quality output.
+- Outputs `.pdf` to local filesystem with instant user notification.
+
+### 8.5 Platform Boundary Integrity
+- **Linux Desktop:** Full interactive vector handwriting canvas (`InkCanvas` + `InkToolPalette`) stacked over `PdfPageBackground`.
+- **iPadOS:** Full hardware-accelerated Apple Pencil support (`PencilKit`) stacked over `PdfPageBackground`.
+- **Android Companion:** Strictly read-only viewer (`InkPageView` with pinch-to-zoom and pan) stacked over `PdfPageBackground`. Zero editing or stroke capture capabilities.
+

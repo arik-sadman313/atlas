@@ -9,6 +9,7 @@ environment:
 dependencies:
   crypto: ^3.0.8
   drift: ^2.35.3
+  file_picker: ^13.3.2
   flutter:
     sdk: flutter
   flutter_localizations:
@@ -19,6 +20,8 @@ dependencies:
   intl: ^0.20.3
   path: ^1.9.1
   path_provider: ^2.1.6
+  pdf: ^3.13.1
+  pdfrx: ^2.12.0
   pencil_kit: ^2.1.1
   perfect_freehand: ^2.5.2+1
   riverpod_annotation: ^4.0.7

@@ -13,6 +13,7 @@ import 'tables/ink_pages_table.dart';
 import 'tables/node_blocks_table.dart';
 import 'tables/node_links_table.dart';
 import 'tables/nodes_table.dart';
+import 'tables/pdf_documents_table.dart';
 import 'tables/tags_table.dart';
 import 'tables/workspaces_table.dart';
 
@@ -26,6 +27,7 @@ part 'app_database.g.dart';
     Attachments,
     InkDocuments,
     InkPages,
+    PdfDocuments,
     NodeLinks,
     Tags,
     NodeTags,
@@ -42,7 +44,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withFile(File file) : super(impl.connect(overrideFile: file));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -59,6 +61,11 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(nodeLinks);
         await m.createTable(tags);
         await m.createTable(nodeTags);
+      }
+      if (from < 4) {
+        await m.createTable(pdfDocuments);
+        await m.addColumn(inkPages, inkPages.pdfDocumentId);
+        await m.addColumn(inkPages, inkPages.templateSpacing);
       }
     },
     beforeOpen: (details) async {

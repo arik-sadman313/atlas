@@ -14,18 +14,22 @@ class InkDocumentPainter extends CustomPainter {
   final List<InkPoint> activePoints;
   final InkToolConfig? activeTool;
   final bool isDrawing;
+  final bool drawBackground;
 
   InkDocumentPainter({
     required this.document,
     this.activePoints = const [],
     this.activeTool,
     this.isDrawing = false,
+    this.drawBackground = true,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     // 1. Draw Paper Background & Grid Template
-    _drawPaperBackground(canvas, size);
+    if (drawBackground) {
+      _drawPaperBackground(canvas, size);
+    }
 
     // 2. Draw Highlighter Layers (Multi-pass Multiply Compositing)
     final highlighterLayers = document.layers.where(
@@ -99,6 +103,7 @@ class InkDocumentPainter extends CustomPainter {
       size,
       document.backgroundTemplate,
       Color(document.backgroundColor),
+      spacing: document.templateSpacing,
     );
   }
 
@@ -112,62 +117,71 @@ class InkDocumentPainter extends CustomPainter {
 }
 
 /// Standalone paper pattern painter rendering standard stationery guidelines
-/// (ruled, dotted, square grid, or blank) with subtle DPI-scaled aesthetics.
+/// (ruled, dotted, square grid, or blank) with subtle DPI-scaled aesthetics
+/// adapting cleanly to light and dark backgrounds.
 class PaperPatternPainter extends CustomPainter {
   final String template;
   final Color backgroundColor;
+  final double spacing;
 
   const PaperPatternPainter({
     required this.template,
     this.backgroundColor = const Color(0xFFFFFFFF),
+    this.spacing = 28.35,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    paintPattern(canvas, size, template, backgroundColor);
+    paintPattern(canvas, size, template, backgroundColor, spacing: spacing);
   }
 
   static void paintPattern(
     Canvas canvas,
     Size size,
     String template,
-    Color backgroundColor,
-  ) {
+    Color backgroundColor, {
+    double spacing = 28.35,
+  }) {
     // Base paper background
     final bgPaint = Paint()..color = backgroundColor;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
-    if (template == 'blank') return;
+    final normalized = template.toLowerCase();
+    if (normalized == 'blank') return;
+
+    final isDark = backgroundColor.computeLuminance() < 0.5;
+    final guideColor =
+        isDark ? const Color(0x2EFFFFFF) : const Color(0x1F000000);
+    final dotColor =
+        isDark ? const Color(0x44FFFFFF) : const Color(0x33000000);
 
     final gridPaint = Paint()
-      ..color =
-          const Color(0x1F000000) // 12% black subtle guide
+      ..color = guideColor
       ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
-    const double spacing = 28.35; // ~5mm at 144 DPI standard
+    final s = spacing > 0 ? spacing : 28.35;
 
-    if (template.contains('dot')) {
+    if (normalized.contains('dot')) {
       final dotPaint = Paint()
-        ..color =
-            const Color(0x33000000) // 20% black
+        ..color = dotColor
         ..style = PaintingStyle.fill;
 
-      for (double y = spacing; y < size.height; y += spacing) {
-        for (double x = spacing; x < size.width; x += spacing) {
+      for (double y = s; y < size.height; y += s) {
+        for (double x = s; x < size.width; x += s) {
           canvas.drawCircle(Offset(x, y), 1.2, dotPaint);
         }
       }
-    } else if (template.contains('grid')) {
-      for (double x = spacing; x < size.width; x += spacing) {
+    } else if (normalized.contains('grid') || normalized.contains('graph')) {
+      for (double x = s; x < size.width; x += s) {
         canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
       }
-      for (double y = spacing; y < size.height; y += spacing) {
+      for (double y = s; y < size.height; y += s) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
       }
     } else {
       // Default: ruled / lined
-      for (double y = spacing * 1.5; y < size.height; y += spacing) {
+      for (double y = s * 1.5; y < size.height; y += s) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
       }
     }
@@ -176,6 +190,7 @@ class PaperPatternPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant PaperPatternPainter oldDelegate) {
     return oldDelegate.template != template ||
-        oldDelegate.backgroundColor != backgroundColor;
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.spacing != spacing;
   }
 }

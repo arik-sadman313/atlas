@@ -22,6 +22,7 @@ class InkRepository {
         width: page.width,
         height: page.height,
         backgroundTemplate: page.templateType,
+        templateSpacing: page.templateSpacing,
         backgroundColor: page.backgroundColor,
       );
     }
@@ -46,6 +47,7 @@ class InkRepository {
         width: page.width,
         height: page.height,
         backgroundTemplate: page.templateType,
+        templateSpacing: page.templateSpacing,
         backgroundColor: page.backgroundColor,
       );
     }

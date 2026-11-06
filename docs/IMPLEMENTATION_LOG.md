@@ -319,3 +319,87 @@
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk`.
 
+---
+
+# ATLAS — Milestone 4 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 4 — Notebook & PDF System  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Engineering Directives & Reuse Verification
+- **PDF Engine Audit:** Conducted independent audit across candidates (`pdfrx`, `pdfx`, `flutter_pdfview`) and recorded findings in `docs/PDF_PACKAGE_AUDIT.md`.
+- **Selected Packages:**
+  - `pdfrx: ^2.12.0` (MIT license, Google PDFium-backed on Linux desktop and Android, Apple PDFKit-backed on iPadOS/iOS).
+  - `pdf: ^3.13.1` (Apache-2.0 license, multi-page vector/raster PDF compositing).
+  - `file_picker: ^13.3.2` (MIT license, native desktop and mobile file picker).
+- **Encapsulation:** All third-party packages are encapsulated behind domain service abstractions (`PdfRenderingService`, `PdfExportService`, `PdfRepository`).
+
+---
+
+## 2. Implemented Subsystems
+
+### 2.1 Database Schema v4 Migration
+- Created table `pdf_documents` tracking imported PDF metadata (`cas_hash`, `file_name`, `file_size_bytes`, `page_count`, `node_id`).
+- Altered table `ink_pages` adding `pdf_document_id` and `template_spacing` (points).
+- Extended `InkDao` with atomic reordering (`batchReorderPages`), insertion (`insertPageAt`), duplication (`duplicatePage`), deletion (`deletePageAndReorder`), template updating (`updatePageTemplate`), and PDF CRUD methods.
+- Upgraded `AppDatabase.schemaVersion` to 4 with automated SQLite table and column migration handlers.
+
+### 2.2 Domain & Services
+- [`PdfDocumentDescriptor`](../lib/features/pdf/domain/models/pdf_document_descriptor.dart): Dimension modeling, aspect ratios, and $1.0\text{ pt} = 1.0\text{ canvas unit}$ point coordinate mapping.
+- [`PdfRenderingService`](../lib/features/pdf/data/services/pdf_rendering_service.dart) & [`PdfrxRenderingService`](../lib/features/pdf/data/services/pdf_rendering_service.dart): Abstract interface and concrete PDFium/PDFKit rendering adapter.
+- [`PdfRepository`](../lib/features/pdf/data/repositories/pdf_repository.dart): Ingests local PDFs into CAS blob storage, inspects page geometry, scaffolds parent notebook nodes, and creates individual `ink_pages`.
+- [`PdfExportService`](../lib/features/pdf/data/services/pdf_export_service.dart): Offscreen canvas rasterization merging background PDF/stationery templates and vector ink strokes into exportable `.pdf` documents.
+
+### 2.3 Presentation & Interaction
+- [`PdfPageBackground`](../lib/features/pdf/presentation/widgets/pdf_page_background.dart): Dual-layer background widget rendering cached high-resolution PDF page rasters beneath ink canvases.
+- [`PaperPatternPainter`](../lib/features/handwriting/presentation/widgets/ink_document_painter.dart): Extended with customizable point/millimeter spacing and light/dark theme adaptation for blank, ruled, square grid, and dot grid stationery.
+- [`NotebookPageDrawer`](../lib/features/handwriting/presentation/widgets/notebook_page_drawer.dart): Multi-page drawer featuring live/cached thumbnails, page jump, reordering, duplicate, insert below, delete, and stationery template customization.
+- [`NotebookEditorScreen`](../lib/features/handwriting/presentation/screens/notebook_editor_screen.dart):
+  - Wired multi-page drawer into scaffold `endDrawer`.
+  - Added AppBar action buttons for PDF Export and Page Manager Drawer.
+  - Multi-platform dual-layer rendering across Linux desktop (`InkCanvas`), iPadOS (`PencilKit`), and Android (`InkPageView`).
+- [`NotebooksScreen`](../lib/features/notebooks/presentation/notebooks_screen.dart): Added "Import PDF" button and file picker flow with automatic notebook generation and navigation.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings).
+
+2. **Automated Test Suite (83 tests across all modules):**
+   - `test/core/database/database_test.dart` (4 tests)
+   - `test/core/database/schema_migration_v3_test.dart` (2 tests)
+   - `test/core/database/schema_migration_v4_test.dart` (6 tests)
+   - `test/core/storage/cas_storage_service_test.dart` (5 tests)
+   - `test/features/app_smoke_test.dart` (24 tests)
+   - `test/features/handwriting/stroke_tessellator_test.dart` (8 tests)
+   - `test/features/handwriting/ink_serialization_test.dart` (4 tests)
+   - `test/features/handwriting/ink_repository_test.dart` (3 tests)
+   - `test/features/handwriting/ink_canvas_widget_test.dart` (4 tests)
+   - `test/features/handwriting/pencil_kit_converter_test.dart` (3 tests)
+   - `test/features/handwriting/notebook_editor_navigation_test.dart` (3 tests)
+   - `test/features/handwriting/paper_pattern_painter_test.dart` (5 tests)
+   - `test/features/handwriting/notebook_page_drawer_test.dart` (4 tests)
+   - `test/features/pdf/pdf_descriptor_test.dart` (2 tests)
+   - `test/features/pdf/pdf_export_service_test.dart` (3 tests)
+   - `test/features/documents/wiki_link_parser_test.dart` (6 tests)
+   - `test/features/documents/link_repository_test.dart` (2 tests)
+   - `test/features/documents/document_content_service_test.dart` (2 tests)
+   - `test/features/documents/document_editor_test.dart` (3 tests)
+   - **Result:** `✓ All 83 tests passed!`.
+
+3. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+4. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (145.8s).
+
+

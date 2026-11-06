@@ -131,7 +131,9 @@ CREATE TABLE ink_pages (
     width REAL NOT NULL,
     height REAL NOT NULL,
     template_type TEXT NOT NULL DEFAULT 'dot_grid_5mm', -- 'blank' | 'ruled' | 'grid' | 'dot' | 'cornell'
+    template_spacing REAL NOT NULL DEFAULT 28.0, -- Grid/line spacing in points (1 pt = 1/72 in)
     background_color INTEGER NOT NULL DEFAULT 4294967295,
+    pdf_document_id TEXT REFERENCES pdf_documents(id) ON DELETE SET NULL, -- References imported PDF
     pdf_source_hash TEXT, -- CAS hash of source PDF if page is an annotation
     pdf_page_index INTEGER, -- 0-based page index in the source PDF
     raw_pencilkit_hash TEXT, -- CAS hash of native iOS PKDrawing binary
@@ -143,6 +145,21 @@ CREATE TABLE ink_pages (
 );
 
 CREATE UNIQUE INDEX idx_ink_pages_doc_num ON ink_pages(document_id, page_number);
+
+-- PDF Documents metadata referencing CAS blob storage
+CREATE TABLE pdf_documents (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    cas_hash TEXT NOT NULL, -- CAS sha256 hash of original PDF binary
+    file_name TEXT NOT NULL,
+    file_size_bytes INTEGER NOT NULL,
+    page_count INTEGER NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_pdf_documents_node ON pdf_documents(node_id);
+CREATE INDEX idx_pdf_documents_cas ON pdf_documents(cas_hash);
 ```
 
 ### 3.4 Tasks, Projects & Habits
@@ -409,6 +426,11 @@ onUpgrade: (m, from, to) async {
     await m.createTable(tags);
     await m.createTable(nodeTags);
   }
+  if (from < 4) {
+    await m.createTable(pdfDocuments);
+    await m.addColumn(inkPages, inkPages.pdfDocumentId);
+    await m.addColumn(inkPages, inkPages.templateSpacing);
+  }
 }
 ```
 Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).
@@ -425,4 +447,22 @@ Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).
 ### 7.2 DAOs
 - [`LinksDao`](../lib/core/database/daos/links_dao.dart): Provides transactional link updates (`syncLinksForSource`), reactive incoming backlinks streams with node metadata joins (`watchBacklinksForTarget`), and forward links queries.
 - [`NodesDao`](../lib/core/database/daos/nodes_dao.dart): Added `findNodeByTitle` and `updateNodePartial` for fine-grained metadata and content updates without overwriting existing fields.
+
+---
+
+## 8. Schema Version 4 Migration (Milestone 4: Notebook & PDF System)
+
+### 8.1 New Columns & Tables
+- **`pdf_documents`**: Dedicated catalog for imported PDF documents storing `cas_hash`, `file_name`, `file_size_bytes`, `page_count`, and parent `node_id`.
+- **`ink_pages.pdf_document_id`**: Foreign key pointing to `pdf_documents.id` for PDF-backed annotation pages.
+- **`ink_pages.template_spacing`**: Floating point column (points, $1.0\text{ pt} = 1/72\text{ in}$) defining stationery line/grid spacing (default: $28.0\text{ pt}$).
+
+### 8.2 DAOs
+- [`InkDao`](../lib/core/database/daos/ink_dao.dart):
+  - `batchReorderPages`: Atomic re-indexing of multi-page sequence.
+  - `insertPageAt`: Shifts subsequent pages and inserts new page at arbitrary index.
+  - `duplicatePage`: Clones page attributes and drawings directly following the source.
+  - `deletePageAndReorder`: Removes page and adjusts subsequent indices to maintain contiguous 1-based page numbering.
+  - `updatePageTemplate`: Fine-grained mutation of paper template type and grid spacing.
+  - `insertPdfDocument`, `getPdfDocument`, `getPdfDocumentForNode`, `deletePdfDocument`: CRUD operations for PDF metadata.
 

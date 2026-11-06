@@ -8,6 +8,8 @@ class InkCanvas extends StatefulWidget {
   final double width;
   final double height;
   final bool readOnly;
+  final Widget? backgroundWidget;
+  final bool drawBackground;
 
   const InkCanvas({
     super.key,
@@ -15,6 +17,8 @@ class InkCanvas extends StatefulWidget {
     required this.width,
     required this.height,
     this.readOnly = false,
+    this.backgroundWidget,
+    this.drawBackground = true,
   });
 
   @override
@@ -81,20 +85,32 @@ class _InkCanvasState extends State<InkCanvas> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: _handlePointerDown,
-      onPointerMove: _handlePointerMove,
-      onPointerUp: _handlePointerUp,
-      onPointerCancel: _handlePointerCancel,
-      behavior: HitTestBehavior.opaque,
-      child: CustomPaint(
-        size: Size(widget.width, widget.height),
-        painter: InkDocumentPainter(
-          document: widget.controller.document,
-          activePoints: widget.controller.activePoints,
-          activeTool: widget.controller.activeTool,
-          isDrawing: widget.controller.isDrawing,
-        ),
+    return SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.backgroundWidget != null) widget.backgroundWidget!,
+          Listener(
+            onPointerDown: _handlePointerDown,
+            onPointerMove: _handlePointerMove,
+            onPointerUp: _handlePointerUp,
+            onPointerCancel: _handlePointerCancel,
+            behavior: HitTestBehavior.opaque,
+            child: CustomPaint(
+              size: Size(widget.width, widget.height),
+              painter: InkDocumentPainter(
+                document: widget.controller.document,
+                activePoints: widget.controller.activePoints,
+                activeTool: widget.controller.activeTool,
+                isDrawing: widget.controller.isDrawing,
+                drawBackground:
+                    widget.drawBackground && widget.backgroundWidget == null,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

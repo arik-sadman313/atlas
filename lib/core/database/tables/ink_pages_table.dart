@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import 'ink_documents_table.dart';
+import 'pdf_documents_table.dart';
 
 @DataClassName('InkPageEntry')
 class InkPages extends Table {
@@ -12,8 +13,12 @@ class InkPages extends Table {
   RealColumn get height => real().withDefault(const Constant(2200.0))();
   TextColumn get templateType =>
       text().withDefault(const Constant('dot_grid_5mm'))();
+  RealColumn get templateSpacing =>
+      real().withDefault(const Constant(28.35))();
   IntColumn get backgroundColor =>
       integer().withDefault(const Constant(4294967295))();
+  TextColumn get pdfDocumentId =>
+      text().nullable().references(PdfDocuments, #id, onDelete: KeyAction.setNull)();
   TextColumn get pdfSourceHash => text().nullable()();
   IntColumn get pdfPageIndex => integer().nullable()();
   TextColumn get rawPencilkitHash => text().nullable()();
