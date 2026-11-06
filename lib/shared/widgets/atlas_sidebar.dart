@@ -327,33 +327,38 @@ class _SidebarItem extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1.0),
-      child: Material(
-        color: bg,
-        borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
-        child: InkWell(
-          onTap: onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: bg,
           borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AtlasSpacing.md,
-              vertical: AtlasSpacing.sm,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  isSelected ? item.selectedIcon : item.icon,
-                  size: 18,
-                  color: fg,
-                ),
-                const SizedBox(width: AtlasSpacing.md),
-                Text(
-                  item.label,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AtlasSpacing.md,
+                vertical: AtlasSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected ? item.selectedIcon : item.icon,
+                    size: 18,
                     color: fg,
                   ),
-                ),
-              ],
+                  const SizedBox(width: AtlasSpacing.md),
+                  Text(
+                    item.label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                      color: fg,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

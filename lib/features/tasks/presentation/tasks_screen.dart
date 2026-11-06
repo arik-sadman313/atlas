@@ -8,7 +8,6 @@ import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
 import '../../../shared/widgets/atlas_button.dart';
 import '../../../shared/widgets/atlas_card.dart';
-import '../../../shared/widgets/atlas_empty_state.dart';
 import '../data/repositories/task_repository.dart';
 import 'widgets/quick_add_task_bar.dart';
 import 'widgets/task_detail_sheet.dart';
@@ -206,6 +205,130 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     return grouped;
   }
 
+  Future<void> _createSuggestedTask(String title) async {
+    final workspaceId = ref.read(currentWorkspaceIdProvider);
+    final taskRepo = ref.read(taskRepositoryProvider);
+    await taskRepo.createTask(
+      workspaceId: workspaceId,
+      title: title,
+      priority: 3,
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, ThemeData theme, bool isDark) {
+    final isCompleted = _currentFilter == TaskFilter.completed;
+    final title = isCompleted
+        ? 'No completed tasks'
+        : (_currentFilter == TaskFilter.inbox
+              ? 'All clear in Inbox'
+              : 'No tasks in ${_currentFilter.name}');
+
+    final subtitle = isCompleted
+        ? 'Completed tasks will appear here for review and tracking.'
+        : 'Everything is caught up. Capture an action item or start planning ahead.';
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 520),
+        margin: const EdgeInsets.symmetric(vertical: 32),
+        padding: const EdgeInsets.all(AtlasSpacing.xl),
+        decoration: BoxDecoration(
+          color: isDark ? AtlasColors.darkCard : AtlasColors.lightSurface,
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
+          border: Border.all(
+            color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+            width: 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AtlasColors.accentSage.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle_outline,
+                size: 28,
+                color: AtlasColors.accentSage,
+              ),
+            ),
+            const SizedBox(height: AtlasSpacing.md),
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AtlasSpacing.xs),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: isDark
+                    ? AtlasColors.darkTextSecondary
+                    : AtlasColors.lightTextSecondary,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (!isCompleted) ...[
+              const SizedBox(height: AtlasSpacing.lg),
+              Divider(
+                height: 1,
+                color: isDark
+                    ? AtlasColors.darkBorder
+                    : AtlasColors.lightBorder,
+              ),
+              const SizedBox(height: AtlasSpacing.md),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Quick Start Suggestions',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AtlasColors.darkTextMuted
+                        : AtlasColors.lightTextMuted,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AtlasSpacing.sm),
+              _SuggestionRow(
+                icon: Icons.school_outlined,
+                label: 'Create a study task',
+                onTap: () => _createSuggestedTask('Create a study task'),
+              ),
+              const SizedBox(height: 6),
+              _SuggestionRow(
+                icon: Icons.calendar_view_week_outlined,
+                label: 'Plan your week',
+                onTap: () => _createSuggestedTask('Plan your week'),
+              ),
+              const SizedBox(height: 6),
+              _SuggestionRow(
+                icon: Icons.flag_outlined,
+                label: 'Review project goals',
+                onTap: () => _createSuggestedTask('Review project goals'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -216,393 +339,457 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     return Scaffold(
       backgroundColor: isDark ? AtlasColors.darkBg : AtlasColors.lightBg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AtlasSpacing.xl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 880),
+            child: Padding(
+              padding: const EdgeInsets.all(AtlasSpacing.xl),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Tasks & Planning',
-                          style: theme.textTheme.displayMedium,
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tasks & Planning',
+                              style: theme.textTheme.displayMedium,
+                            ),
+                            const SizedBox(height: AtlasSpacing.xs),
+                            Text(
+                              'Actionable task management integrated with your knowledge graph',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: isDark
+                                    ? AtlasColors.darkTextSecondary
+                                    : AtlasColors.lightTextSecondary,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: AtlasSpacing.xs),
-                        Text(
-                          'Actionable task management integrated with your knowledge graph',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: isDark
-                                ? AtlasColors.darkTextSecondary
-                                : AtlasColors.lightTextSecondary,
+                      ),
+                      const SizedBox(width: AtlasSpacing.md),
+                      Row(
+                        children: [
+                          // Grouping Menu
+                          PopupMenuButton<TaskGrouping>(
+                            tooltip: 'Group Tasks',
+                            initialValue: _currentGrouping,
+                            onSelected: (g) =>
+                                setState(() => _currentGrouping = g),
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: TaskGrouping.none,
+                                child: Text('No Grouping'),
+                              ),
+                              const PopupMenuItem(
+                                value: TaskGrouping.byProject,
+                                child: Text('Group by Project'),
+                              ),
+                              const PopupMenuItem(
+                                value: TaskGrouping.byDueDate,
+                                child: Text('Group by Due Date'),
+                              ),
+                              const PopupMenuItem(
+                                value: TaskGrouping.byPriority,
+                                child: Text('Group by Priority'),
+                              ),
+                            ],
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? AtlasColors.darkSurface
+                                    : AtlasColors.lightSurface,
+                                borderRadius: BorderRadius.circular(
+                                  AtlasSpacing.radiusSm,
+                                ),
+                                border: Border.all(
+                                  color: isDark
+                                      ? AtlasColors.darkBorder
+                                      : AtlasColors.lightBorder,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.sort, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _currentGrouping == TaskGrouping.none
+                                        ? 'Group'
+                                        : _currentGrouping.name,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
+                          const SizedBox(width: AtlasSpacing.sm),
+                          AtlasButton.secondary(
+                            label: 'New Project',
+                            icon: Icons.create_new_folder_outlined,
+                            onPressed: _showNewProjectDialog,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AtlasSpacing.md),
+
+                  // Filter Chips Row
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.inbox, size: 14),
+                              SizedBox(width: 4),
+                              Text('Inbox'),
+                            ],
+                          ),
+                          selected: _currentFilter == TaskFilter.inbox,
+                          onSelected: (val) {
+                            if (val) {
+                              setState(() {
+                                _currentFilter = TaskFilter.inbox;
+                                _selectedProjectId = null;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AtlasSpacing.sm),
+                        ChoiceChip(
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.today, size: 14),
+                              SizedBox(width: 4),
+                              Text('Today'),
+                            ],
+                          ),
+                          selected: _currentFilter == TaskFilter.today,
+                          onSelected: (val) {
+                            if (val) {
+                              setState(() {
+                                _currentFilter = TaskFilter.today;
+                                _selectedProjectId = null;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AtlasSpacing.sm),
+                        ChoiceChip(
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.upcoming, size: 14),
+                              SizedBox(width: 4),
+                              Text('Upcoming'),
+                            ],
+                          ),
+                          selected: _currentFilter == TaskFilter.upcoming,
+                          onSelected: (val) {
+                            if (val) {
+                              setState(() {
+                                _currentFilter = TaskFilter.upcoming;
+                                _selectedProjectId = null;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AtlasSpacing.sm),
+                        ChoiceChip(
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.folder_outlined, size: 14),
+                              SizedBox(width: 4),
+                              Text('Projects'),
+                            ],
+                          ),
+                          selected: _currentFilter == TaskFilter.projects,
+                          onSelected: (val) {
+                            if (val) {
+                              setState(
+                                () => _currentFilter = TaskFilter.projects,
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AtlasSpacing.sm),
+                        ChoiceChip(
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_outline, size: 14),
+                              SizedBox(width: 4),
+                              Text('Completed'),
+                            ],
+                          ),
+                          selected: _currentFilter == TaskFilter.completed,
+                          onSelected: (val) {
+                            if (val) {
+                              setState(
+                                () => _currentFilter = TaskFilter.completed,
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: AtlasSpacing.md),
-                  Row(
-                    children: [
-                      // Grouping Menu
-                      PopupMenuButton<TaskGrouping>(
-                        tooltip: 'Group Tasks',
-                        initialValue: _currentGrouping,
-                        onSelected: (g) => setState(() => _currentGrouping = g),
-                        itemBuilder: (ctx) => [
-                          const PopupMenuItem(
-                            value: TaskGrouping.none,
-                            child: Text('No Grouping'),
-                          ),
-                          const PopupMenuItem(
-                            value: TaskGrouping.byProject,
-                            child: Text('Group by Project'),
-                          ),
-                          const PopupMenuItem(
-                            value: TaskGrouping.byDueDate,
-                            child: Text('Group by Due Date'),
-                          ),
-                          const PopupMenuItem(
-                            value: TaskGrouping.byPriority,
-                            child: Text('Group by Priority'),
-                          ),
-                        ],
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? AtlasColors.darkSurface
-                                : AtlasColors.lightSurface,
-                            borderRadius: BorderRadius.circular(
-                              AtlasSpacing.radiusSm,
+
+                  // Project Filter Sub-bar (if Projects view selected)
+                  if (_currentFilter == TaskFilter.projects) ...[
+                    const SizedBox(height: 8),
+                    StreamBuilder<List<ProjectEntry>>(
+                      stream: taskRepo.watchProjects(workspaceId),
+                      builder: (context, snapshot) {
+                        final projects = snapshot.data ?? [];
+                        if (projects.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 4),
+                            child: Text(
+                              'No projects yet. Create one with "+ New Project".',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                              ),
                             ),
-                            border: Border.all(
-                              color: isDark
-                                  ? AtlasColors.darkBorder
-                                  : AtlasColors.lightBorder,
-                            ),
-                          ),
+                          );
+                        }
+
+                        return SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
-                              const Icon(Icons.sort, size: 16),
-                              const SizedBox(width: 6),
-                              Text(
-                                _currentGrouping == TaskGrouping.none
-                                    ? 'Group'
-                                    : _currentGrouping.name,
-                                style: const TextStyle(fontSize: 12),
+                              FilterChip(
+                                label: const Text('All Projects'),
+                                selected: _selectedProjectId == null,
+                                onSelected: (_) =>
+                                    setState(() => _selectedProjectId = null),
                               ),
+                              const SizedBox(width: 6),
+                              ...projects.map((p) {
+                                final isSel = _selectedProjectId == p.id;
+                                final color = Color(
+                                  int.parse(
+                                    p.colorHex.replaceFirst('#', '0xFF'),
+                                  ),
+                                );
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: FilterChip(
+                                    avatar: Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: color,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    label: Text(p.name),
+                                    selected: isSel,
+                                    onSelected: (sel) {
+                                      setState(() {
+                                        _selectedProjectId = sel ? p.id : null;
+                                      });
+                                    },
+                                  ),
+                                );
+                              }),
                             ],
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: AtlasSpacing.sm),
-                      AtlasButton.secondary(
-                        label: 'New Project',
-                        icon: Icons.create_new_folder_outlined,
-                        onPressed: _showNewProjectDialog,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: AtlasSpacing.md),
-
-              // Filter Chips Row
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ChoiceChip(
-                      label: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.inbox, size: 14),
-                          SizedBox(width: 4),
-                          Text('Inbox'),
-                        ],
-                      ),
-                      selected: _currentFilter == TaskFilter.inbox,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() {
-                            _currentFilter = TaskFilter.inbox;
-                            _selectedProjectId = null;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(width: AtlasSpacing.sm),
-                    ChoiceChip(
-                      label: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.today, size: 14),
-                          SizedBox(width: 4),
-                          Text('Today'),
-                        ],
-                      ),
-                      selected: _currentFilter == TaskFilter.today,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() {
-                            _currentFilter = TaskFilter.today;
-                            _selectedProjectId = null;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(width: AtlasSpacing.sm),
-                    ChoiceChip(
-                      label: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.upcoming, size: 14),
-                          SizedBox(width: 4),
-                          Text('Upcoming'),
-                        ],
-                      ),
-                      selected: _currentFilter == TaskFilter.upcoming,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() {
-                            _currentFilter = TaskFilter.upcoming;
-                            _selectedProjectId = null;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(width: AtlasSpacing.sm),
-                    ChoiceChip(
-                      label: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.folder_outlined, size: 14),
-                          SizedBox(width: 4),
-                          Text('Projects'),
-                        ],
-                      ),
-                      selected: _currentFilter == TaskFilter.projects,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() => _currentFilter = TaskFilter.projects);
-                        }
-                      },
-                    ),
-                    const SizedBox(width: AtlasSpacing.sm),
-                    ChoiceChip(
-                      label: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check_circle_outline, size: 14),
-                          SizedBox(width: 4),
-                          Text('Completed'),
-                        ],
-                      ),
-                      selected: _currentFilter == TaskFilter.completed,
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() => _currentFilter = TaskFilter.completed);
-                        }
+                        );
                       },
                     ),
                   ],
-                ),
-              ),
 
-              // Project Filter Sub-bar (if Projects view selected)
-              if (_currentFilter == TaskFilter.projects) ...[
-                const SizedBox(height: 8),
-                StreamBuilder<List<ProjectEntry>>(
-                  stream: taskRepo.watchProjects(workspaceId),
-                  builder: (context, snapshot) {
-                    final projects = snapshot.data ?? [];
-                    if (projects.isEmpty) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          'No projects yet. Create one with "+ New Project".',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontStyle: FontStyle.italic,
+                  const SizedBox(height: AtlasSpacing.md),
+
+                  // Quick Add Bar
+                  QuickAddTaskBar(defaultProjectId: _selectedProjectId),
+
+                  const SizedBox(height: AtlasSpacing.md),
+
+                  // Main Task List / Streams
+                  Expanded(
+                    child: StreamBuilder<List<ProjectEntry>>(
+                      stream: taskRepo.watchProjects(workspaceId),
+                      builder: (context, projectSnap) {
+                        final projects = projectSnap.data ?? [];
+
+                        return StreamBuilder<List<TaskEntry>>(
+                          stream: taskRepo.watchTasks(
+                            workspaceId,
+                            filter: _currentFilter,
+                            projectId: _selectedProjectId,
                           ),
-                        ),
-                      );
-                    }
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                    ConnectionState.waiting &&
+                                !snapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
 
-                    return SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          FilterChip(
-                            label: const Text('All Projects'),
-                            selected: _selectedProjectId == null,
-                            onSelected: (_) =>
-                                setState(() => _selectedProjectId = null),
-                          ),
-                          const SizedBox(width: 6),
-                          ...projects.map((p) {
-                            final isSel = _selectedProjectId == p.id;
-                            final color = Color(
-                              int.parse(p.colorHex.replaceFirst('#', '0xFF')),
-                            );
+                            final tasks = snapshot.data ?? [];
 
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: FilterChip(
-                                avatar: Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: color,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                label: Text(p.name),
-                                selected: isSel,
-                                onSelected: (sel) {
-                                  setState(() {
-                                    _selectedProjectId = sel ? p.id : null;
-                                  });
-                                },
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
+                            if (tasks.isEmpty) {
+                              return _buildEmptyState(context, theme, isDark);
+                            }
 
-              const SizedBox(height: AtlasSpacing.md),
+                            final grouped = _groupTasks(tasks, projects);
 
-              // Quick Add Bar
-              QuickAddTaskBar(defaultProjectId: _selectedProjectId),
+                            return ListView.builder(
+                              itemCount: grouped.keys.length,
+                              itemBuilder: (context, index) {
+                                final groupTitle = grouped.keys.elementAt(
+                                  index,
+                                );
+                                final groupItems = grouped[groupTitle]!;
 
-              const SizedBox(height: AtlasSpacing.md),
-
-              // Main Task List / Streams
-              Expanded(
-                child: StreamBuilder<List<ProjectEntry>>(
-                  stream: taskRepo.watchProjects(workspaceId),
-                  builder: (context, projectSnap) {
-                    final projects = projectSnap.data ?? [];
-
-                    return StreamBuilder<List<TaskEntry>>(
-                      stream: taskRepo.watchTasks(
-                        workspaceId,
-                        filter: _currentFilter,
-                        projectId: _selectedProjectId,
-                      ),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                                ConnectionState.waiting &&
-                            !snapshot.hasData) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-
-                        final tasks = snapshot.data ?? [];
-
-                        if (tasks.isEmpty) {
-                          return AtlasEmptyState(
-                            icon: Icons.check_circle_outline,
-                            title: _currentFilter == TaskFilter.completed
-                                ? 'No completed tasks'
-                                : 'No tasks in ${_currentFilter.name}',
-                            description: _currentFilter == TaskFilter.completed
-                                ? 'Completed tasks will appear here for review and tracking.'
-                                : 'Add a task using the bar above or attach tasks directly from documents.',
-                          );
-                        }
-
-                        final grouped = _groupTasks(tasks, projects);
-
-                        return ListView.builder(
-                          itemCount: grouped.keys.length,
-                          itemBuilder: (context, index) {
-                            final groupTitle = grouped.keys.elementAt(index);
-                            final groupItems = grouped[groupTitle]!;
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (_currentGrouping != TaskGrouping.none)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      top: 12,
-                                      bottom: 6,
-                                      left: 8,
-                                    ),
-                                    child: Text(
-                                      '$groupTitle (${groupItems.length})',
-                                      style: theme.textTheme.labelMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: isDark
-                                                ? AtlasColors.darkTextSecondary
-                                                : AtlasColors
-                                                      .lightTextSecondary,
-                                          ),
-                                    ),
-                                  ),
-                                AtlasCard(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      for (
-                                        int i = 0;
-                                        i < groupItems.length;
-                                        i++
-                                      ) ...[
-                                        TaskItemWidget(
-                                          task: groupItems[i],
-                                          onToggle: (completed) {
-                                            taskRepo.toggleTask(
-                                              groupItems[i].id,
-                                              completed,
-                                            );
-                                          },
-                                          onTap: () {
-                                            TaskDetailSheet.show(
-                                              context,
-                                              groupItems[i],
-                                            );
-                                          },
-                                          onDelete: () {
-                                            taskRepo.deleteTask(
-                                              groupItems[i].id,
-                                            );
-                                          },
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_currentGrouping != TaskGrouping.none)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          top: 12,
+                                          bottom: 6,
+                                          left: 8,
                                         ),
-                                        if (i < groupItems.length - 1)
-                                          const Divider(height: 1, indent: 44),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                        child: Text(
+                                          '$groupTitle (${groupItems.length})',
+                                          style: theme.textTheme.labelMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: isDark
+                                                    ? AtlasColors
+                                                          .darkTextSecondary
+                                                    : AtlasColors
+                                                          .lightTextSecondary,
+                                              ),
+                                        ),
+                                      ),
+                                    AtlasCard(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          for (
+                                            int i = 0;
+                                            i < groupItems.length;
+                                            i++
+                                          ) ...[
+                                            TaskItemWidget(
+                                              task: groupItems[i],
+                                              onToggle: (completed) {
+                                                taskRepo.toggleTask(
+                                                  groupItems[i].id,
+                                                  completed,
+                                                );
+                                              },
+                                              onTap: () {
+                                                TaskDetailSheet.show(
+                                                  context,
+                                                  groupItems[i],
+                                                );
+                                              },
+                                              onDelete: () {
+                                                taskRepo.deleteTask(
+                                                  groupItems[i].id,
+                                                );
+                                              },
+                                            ),
+                                            if (i < groupItems.length - 1)
+                                              const Divider(
+                                                height: 1,
+                                                indent: 44,
+                                              ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
                             );
                           },
                         );
                       },
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SuggestionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SuggestionRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: isDark ? AtlasColors.darkElevated : AtlasColors.lightElevated,
+        borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: AtlasColors.accentBlue),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.add,
+                  size: 16,
+                  color: isDark
+                      ? AtlasColors.darkTextSecondary
+                      : AtlasColors.lightTextSecondary,
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -914,3 +914,80 @@ Finalized production readiness, performance tuning, and release packaging for AT
 
 
 
+
+---
+
+# Milestone 10: Surgical UI/UX Polish & Layout Overhaul
+
+**Date:** November 7, 2026  
+**Objective:** Eliminate "dead void" syndrome, full-width horizontal stretching, clashing color palettes, and awkward navigation paradigms by implementing the Craft Docs, Linear, and Notion-inspired "Quiet Craft" design system across ATLAS.
+
+## 1. Palette & Surface Depth Architecture
+- **Obsidian Dark Palette (`AtlasColors`):**
+  - Canvas background: `#0D0E12` (rich obsidian depth).
+  - Surface Level 1 (Sidebar / Structural frames): `#12141A`.
+  - Surface Level 2 (Cards / Bento containers): `#181B24`.
+  - Surface Level 3 (Inputs / Modals / Hover elevation): `#202430`.
+  - Hover highlight surface: `#222634`.
+  - Borders: `Color(0x0FFFFFFF)` (6% white hairline borders replacing flat opaque dividers).
+- **Harmonized Accents:**
+  - Sage Emerald (`#10B981` / `#1A10B981`) replacing harsh neon green buttons.
+  - Indigo Slate (`#6366F1` / `#1A6366F1`) replacing default Google Material blue.
+  - Terracotta P1 priority token (`#E07A5F`).
+- **Interactive Card Elevation (`AtlasCard`):**
+  - Smooth 150ms animated hover transitions from `#181B24` to `#222634`.
+  - Layered desktop box shadows: `BoxShadow(color: Colors.black.withValues(alpha: 0.20), blurRadius: 16, offset: Offset(0, 4))`.
+  - Hover cursor set to `SystemMouseCursors.click` for interactive elements.
+
+## 2. Screen-by-Screen Layout Overhauls
+
+### 2.1 Dashboard (`DashboardScreen`)
+- **Header:** Ambient subtle radial gradient glow behind greeting with refined metadata typography.
+- **Glass Action Pill:** Unified segmented glass pill containing `New Task`, `Today's Journal`, and `New Note` actions with 100px rounded borders.
+- **Daily Reflection Card:** Elevated surface card with mood chips (`Focused`, `Calm`, `Creative`), warm icon badge, and refined tonal action button.
+- **Metric Cards:** Constrained card heights with 10% opacity tinted icon backdrops and clean numerical hierarchy.
+- **Bento Grid:** Strict 16px horizontal and vertical spacing with proportional multi-column layout.
+
+### 2.2 Tasks & Planning (`TasksScreen` & `QuickAddTaskBar`)
+- **Layout Constraint:** Centered within desktop reading column (`maxWidth: 880px`).
+- **Input Bar:** Elevated capsule with inline priority pill picker, inline due-date picker button, smooth focus outline transition (`1.5px` accent blue), and submit button.
+- **Empty State:** Replaced empty void with card container featuring status badge, clear illustration, and 3 clickable quick-start suggestions:
+  - "Create a study task"
+  - "Plan your week"
+  - "Review project goals"
+
+### 2.3 Search Vault (`SearchScreen`)
+- **Layout Constraint:** Centered within desktop reading column (`maxWidth: 800px`).
+- **"Jump Back In" Dashboard:** When query is empty:
+  - 3 recent documents and notebooks preview cards.
+  - Category browse badges with live count counters (`Documents`, `Notebooks`, `Tasks`, `Calendar`).
+  - Monospace keyboard shortcut tip badges (`↑ / ↓ Navigate`, `Enter Open`, `Esc Clear`).
+
+### 2.4 Calendar & Day Planner (`CalendarScreen`)
+- **FAB Removal:** Bottom-right Android FAB removed (`floatingActionButton: null`).
+- **Header Actions:** Consolidated `+ Task` and `+ Event` buttons in top-right header action bar.
+- **TableCalendar Styling:** 100px rounded pill selection shapes, subtle dot event indicators.
+- **Empty Timeline:** Replaced empty void with encouraging Day Summary Card ("Clear Horizon") and time-blocking hour markers (`9:00 AM`, `12:00 PM`, `3:00 PM`, `5:00 PM`).
+
+### 2.5 Notebooks & Documents (`NotebooksScreen` & `DocumentsScreen`)
+- **Starter Screens:** Replaced empty voids with structured onboarding:
+  - "Create Blank Notebook" card and "Import PDF to Annotate" card.
+  - "Choose Paper Stationery" preview cards (`Dot Grid`, `Ruled Lines`, `Graph Grid`) with custom canvas preview painter (`StationeryPreviewPainter`).
+  - "Quick-Start Templates" for documents (`RFC & Architecture Plan`, `Meeting Notes`, `Project Roadmap`).
+- **Grid Tiles:** Rich thumbnail previews with custom pattern rendering, `Vector Ink` tags, modified timestamps, and hover elevation.
+
+### 2.6 Knowledge Graph (`KnowledgeGraphScreen`)
+- **Canvas Depth:** Custom dotted canvas grid background (`DottedGraphCanvasPainter`) rendered across graph canvas.
+- **Contextual Hint:** Floating glass hint card displayed when only 1 node exists ("Connect notes together using [[Note Title]] to build your knowledge network").
+- **Top Glass Capsule:** Consolidated floating control bar with search filter field, type toggle chips (`Docs`, `Notebooks`, `Tags`), orphan nodes toggle, and zoom controls.
+
+### 2.7 Settings (`SettingsScreen`)
+- **Layout Constraint:** Centered within `maxWidth: 840px` column.
+- **Card Surfaces:** Elevated cards with subtle hairline borders grouping settings sections.
+- **Device Identity & Tokens:** Monospace pill badges with 1-click clipboard copy buttons for Client ID and device tokens.
+
+## 3. Verification & Quality Gates
+1. `dart format .`: All 184 files formatted cleanly.
+2. `flutter analyze`: 0 errors, 0 warnings, 0 hints.
+3. `flutter test`: 157 passing tests (100% pass rate).
+4. `flutter build linux --debug`: Linux bundle built successfully (`build/linux/x64/debug/bundle/atlas`).

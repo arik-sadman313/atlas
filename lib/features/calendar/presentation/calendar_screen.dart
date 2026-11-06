@@ -7,7 +7,7 @@ import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
-import '../../../shared/widgets/atlas_empty_state.dart';
+import '../../../shared/widgets/atlas_card.dart';
 import '../../tasks/presentation/widgets/quick_add_task_bar.dart';
 import '../domain/models/calendar_agenda_item.dart';
 import 'widgets/agenda_item_card.dart';
@@ -108,13 +108,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
             );
           },
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () =>
-            EventDetailSheet.show(context, initialDate: _selectedDay),
-        backgroundColor: AtlasColors.accentBlue,
-        tooltip: 'Add Event',
-        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
@@ -276,7 +269,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                 });
               },
             ),
-            if (showFormatButtons)
+            if (showFormatButtons) ...[
               IconButton(
                 icon: Icon(
                   _calendarFormat == CalendarFormat.month
@@ -295,8 +288,49 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                   });
                 },
               ),
-            const SizedBox(width: 4),
+              const SizedBox(width: 4),
+            ],
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                side: BorderSide(
+                  color: isDark
+                      ? AtlasColors.darkBorder
+                      : AtlasColors.lightBorder,
+                ),
+              ),
+              icon: const Icon(Icons.add_task, size: 15),
+              label: const Text('Task'),
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: isDark
+                      ? AtlasColors.darkSurface
+                      : AtlasColors.lightSurface,
+                  builder: (ctx) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                      left: AtlasSpacing.md,
+                      right: AtlasSpacing.md,
+                      top: AtlasSpacing.md,
+                    ),
+                    child: QuickAddTaskBar(defaultDueDate: _selectedDay),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(width: 8),
             FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
               onPressed: () =>
                   EventDetailSheet.show(context, initialDate: _selectedDay),
               icon: const Icon(Icons.add, size: 16),
@@ -335,16 +369,16 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       calendarStyle: CalendarStyle(
         outsideDaysVisible: false,
         todayDecoration: BoxDecoration(
-          color: AtlasColors.accentBlue.withValues(alpha: 0.25),
-          shape: BoxShape.circle,
+          color: AtlasColors.accentBlue.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(100),
         ),
         todayTextStyle: const TextStyle(
           color: AtlasColors.accentBlue,
           fontWeight: FontWeight.bold,
         ),
-        selectedDecoration: const BoxDecoration(
+        selectedDecoration: BoxDecoration(
           color: AtlasColors.accentBlue,
-          shape: BoxShape.circle,
+          borderRadius: BorderRadius.circular(100),
         ),
         selectedTextStyle: const TextStyle(
           color: Colors.white,
@@ -354,8 +388,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           color: AtlasColors.accentBlue,
           shape: BoxShape.circle,
         ),
-        markersMaxCount: 4,
-        markerSize: 5.0,
+        markersMaxCount: 3,
+        markerSize: 4.5,
         markerMargin: const EdgeInsets.symmetric(horizontal: 0.5),
       ),
       headerStyle: HeaderStyle(
@@ -506,14 +540,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         final items = snapshot.data ?? [];
 
         if (items.isEmpty) {
-          return Center(
-            child: AtlasEmptyState(
-              icon: Icons.event_available_outlined,
-              title: 'No events or tasks scheduled',
-              description:
-                  'No items scheduled for ${DateFormat.MMMd().format(_selectedDay)}. Add a meeting or task to plan your day.',
-            ),
-          );
+          return _buildEmptyTimeline(context, Theme.of(context), isDark);
         }
 
         return ListView.builder(
@@ -524,6 +551,122 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           },
         );
       },
+    );
+  }
+
+  Widget _buildEmptyTimeline(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+  ) {
+    final hours = ['9:00 AM', '12:00 PM', '3:00 PM', '5:00 PM'];
+    final dateStr = DateFormat('MMMM d').format(_selectedDay);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Encouraging Day Summary Card
+          AtlasCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AtlasColors.accentSage.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.wb_sunny_outlined,
+                    size: 20,
+                    color: AtlasColors.accentSage,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Clear Horizon for $dateStr',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'No events or tasks scheduled. Great window for uninterrupted deep work.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? AtlasColors.darkTextSecondary
+                              : AtlasColors.lightTextSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    side: BorderSide(
+                      color: isDark
+                          ? AtlasColors.darkBorder
+                          : AtlasColors.lightBorder,
+                    ),
+                  ),
+                  icon: const Icon(Icons.add, size: 14),
+                  label: const Text('Event', style: TextStyle(fontSize: 12)),
+                  onPressed: () =>
+                      EventDetailSheet.show(context, initialDate: _selectedDay),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // Time-Blocking Outline Markers
+          ...hours.map(
+            (time) => Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 68,
+                    child: Text(
+                      time,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: isDark
+                            ? AtlasColors.darkTextMuted
+                            : AtlasColors.lightTextMuted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Container(
+                      height: 1,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AtlasColors.darkBorder
+                            : AtlasColors.lightBorder,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

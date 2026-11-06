@@ -53,6 +53,17 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
       backgroundColor: isDark ? AtlasColors.darkBg : AtlasColors.lightBg,
       body: Stack(
         children: [
+          // 0. Dotted Canvas Grid Background
+          Positioned.fill(
+            child: CustomPaint(
+              painter: DottedGraphCanvasPainter(
+                dotColor: isDark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.07),
+              ),
+            ),
+          ),
+
           // 1. Graph Canvas
           graphAsync.when(
             data: (graphData) {
@@ -87,12 +98,97 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
                 );
               }
 
-              return InteractiveKnowledgeGraph(
-                graph: graphData,
-                onNodeTap: _onNodeTapped,
-                highlightQuery: _searchController.text,
-                showOrphans: _showOrphans,
-                visibleTypes: _visibleTypes,
+              return Stack(
+                children: [
+                  InteractiveKnowledgeGraph(
+                    graph: graphData,
+                    onNodeTap: _onNodeTapped,
+                    highlightQuery: _searchController.text,
+                    showOrphans: _showOrphans,
+                    visibleTypes: _visibleTypes,
+                  ),
+                  // Floating contextual hint card when only 1 node exists
+                  if (graphData.nodes.length == 1)
+                    Positioned(
+                      bottom: AtlasSpacing.xl,
+                      right: AtlasSpacing.xl,
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (isDark
+                                      ? AtlasColors.darkCard
+                                      : AtlasColors.lightSurface)
+                                  .withValues(alpha: 0.94),
+                          borderRadius: BorderRadius.circular(
+                            AtlasSpacing.radiusCard,
+                          ),
+                          border: Border.all(
+                            color: isDark
+                                ? AtlasColors.darkBorder
+                                : AtlasColors.lightBorder,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isDark ? 0.35 : 0.08,
+                              ),
+                              blurRadius: 18,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: AtlasColors.accentBlue.withValues(
+                                  alpha: 0.12,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.hub_outlined,
+                                size: 18,
+                                color: AtlasColors.accentBlue,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Build Your Network',
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Connect notes together using [[Note Title]] to build your knowledge network.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: isDark
+                                          ? AtlasColors.darkTextSecondary
+                                          : AtlasColors.lightTextSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               );
             },
             loading: () =>
@@ -110,14 +206,14 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
                   horizontal: AtlasSpacing.md,
                   vertical: AtlasSpacing.xs,
                 ),
-                constraints: const BoxConstraints(maxWidth: 820),
+                constraints: const BoxConstraints(maxWidth: 860),
                 decoration: BoxDecoration(
                   color:
                       (isDark
                               ? AtlasColors.darkSurface
                               : AtlasColors.lightSurface)
-                          .withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+                          .withValues(alpha: 0.94),
+                  borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
                   border: Border.all(
                     color: isDark
                         ? AtlasColors.darkBorder
@@ -126,9 +222,9 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(
-                        alpha: isDark ? 0.3 : 0.08,
+                        alpha: isDark ? 0.35 : 0.08,
                       ),
-                      blurRadius: 16,
+                      blurRadius: 18,
                       offset: const Offset(0, 4),
                     ),
                   ],
@@ -267,6 +363,31 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
                         ),
                       ),
                     ),
+
+                    const SizedBox(width: AtlasSpacing.sm),
+                    Container(
+                      width: 1,
+                      height: 24,
+                      color: isDark
+                          ? AtlasColors.darkBorder
+                          : AtlasColors.lightBorder,
+                    ),
+                    const SizedBox(width: AtlasSpacing.xs),
+
+                    // Zoom Controls
+                    Tooltip(
+                      message: 'Fit to View',
+                      child: IconButton(
+                        icon: const Icon(Icons.crop_free, size: 16),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        onPressed: () {},
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -276,6 +397,30 @@ class _KnowledgeGraphScreenState extends ConsumerState<KnowledgeGraphScreen> {
       ),
     );
   }
+}
+
+class DottedGraphCanvasPainter extends CustomPainter {
+  final Color dotColor;
+  final double spacing;
+
+  DottedGraphCanvasPainter({required this.dotColor, this.spacing = 28.0});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = dotColor
+      ..style = PaintingStyle.fill;
+
+    for (double x = spacing / 2; x < size.width; x += spacing) {
+      for (double y = spacing / 2; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), 0.85, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DottedGraphCanvasPainter oldDelegate) =>
+      oldDelegate.dotColor != dotColor || oldDelegate.spacing != spacing;
 }
 
 class _TypeToggleChip extends StatelessWidget {

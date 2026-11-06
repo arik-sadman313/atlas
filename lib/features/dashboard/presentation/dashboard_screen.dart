@@ -11,7 +11,6 @@ import '../../../core/database/daos/habits_dao.dart';
 import '../../../core/database/daos/tasks_dao.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
-import '../../../shared/widgets/atlas_button.dart';
 import '../../../shared/widgets/atlas_card.dart';
 import '../../../shared/widgets/atlas_empty_state.dart';
 import '../../habits/presentation/widgets/goals_summary_card.dart';
@@ -296,62 +295,127 @@ class DashboardScreen extends ConsumerWidget {
                   builder: (context, headerConstraints) {
                     final isCompact = headerConstraints.maxWidth < 760;
 
-                    final headerText = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    final headerText = Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        Text(
-                          '$greeting · $formattedDate',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            letterSpacing: 0.5,
-                            color: isDark
-                                ? AtlasColors.darkTextSecondary
-                                : AtlasColors.lightTextSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: AtlasSpacing.xs),
-                        Text(
-                          'Workspace Overview',
-                          style: theme.textTheme.displayMedium,
-                        ),
-                        const SizedBox(height: AtlasSpacing.xs),
-                        workspaceAsync.when(
-                          data: (ws) => Text(
-                            ws?.name ?? 'Personal Workspace',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: isDark
-                                  ? AtlasColors.darkTextSecondary
-                                  : AtlasColors.lightTextSecondary,
+                        Positioned(
+                          top: -24,
+                          left: -16,
+                          child: Container(
+                            width: 280,
+                            height: 90,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  AtlasColors.accentBlue.withValues(
+                                    alpha: isDark ? 0.08 : 0.04,
+                                  ),
+                                  Colors.transparent,
+                                ],
+                              ),
                             ),
                           ),
-                          loading: () => const Text('Personal Workspace'),
-                          error: (_, _) => const Text('Personal Workspace'),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$greeting · $formattedDate',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                letterSpacing: 0.5,
+                                fontWeight: FontWeight.w500,
+                                color: isDark
+                                    ? AtlasColors.darkTextSecondary
+                                    : AtlasColors.lightTextSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: AtlasSpacing.xs),
+                            Text(
+                              'Workspace Overview',
+                              style: theme.textTheme.displayMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: AtlasSpacing.xs),
+                            workspaceAsync.when(
+                              data: (ws) => Text(
+                                ws?.name ?? 'Personal Workspace',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: isDark
+                                      ? AtlasColors.darkTextSecondary
+                                      : AtlasColors.lightTextSecondary,
+                                ),
+                              ),
+                              loading: () => const Text('Personal Workspace'),
+                              error: (_, _) => const Text('Personal Workspace'),
+                            ),
+                          ],
                         ),
                       ],
                     );
 
-                    final actionButtons = Wrap(
-                      spacing: AtlasSpacing.sm,
-                      runSpacing: AtlasSpacing.sm,
-                      alignment: isCompact
-                          ? WrapAlignment.start
-                          : WrapAlignment.end,
-                      children: [
-                        AtlasButton.secondary(
-                          label: 'New Task',
-                          icon: Icons.check_circle_outline,
-                          onPressed: () => _showQuickTaskDialog(context, ref),
+                    final actionButtons = Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AtlasColors.darkCard
+                            : AtlasColors.lightSurface,
+                        borderRadius: BorderRadius.circular(100),
+                        border: Border.all(
+                          color: isDark
+                              ? AtlasColors.darkBorder
+                              : AtlasColors.lightBorder,
+                          width: 1.0,
                         ),
-                        AtlasButton.secondary(
-                          label: "Today's Journal",
-                          icon: Icons.auto_stories_outlined,
-                          onPressed: () => _openTodayJournal(context, ref),
-                        ),
-                        AtlasButton.primary(
-                          label: 'New Note',
-                          icon: Icons.add,
-                          onPressed: () => _showCreateNodeDialog(context, ref),
-                        ),
-                      ],
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: isDark ? 0.25 : 0.04,
+                            ),
+                            blurRadius: 14,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _HeaderPillAction(
+                            icon: Icons.check_circle_outline,
+                            label: 'New Task',
+                            onTap: () => _showQuickTaskDialog(context, ref),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 18,
+                            color: isDark
+                                ? AtlasColors.darkBorder
+                                : AtlasColors.lightBorder,
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                          ),
+                          _HeaderPillAction(
+                            icon: Icons.auto_stories_outlined,
+                            label: "Today's Journal",
+                            onTap: () => _openTodayJournal(context, ref),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 18,
+                            color: isDark
+                                ? AtlasColors.darkBorder
+                                : AtlasColors.lightBorder,
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                          ),
+                          _HeaderPillAction(
+                            icon: Icons.add,
+                            label: 'New Note',
+                            isPrimary: true,
+                            onTap: () => _showCreateNodeDialog(context, ref),
+                          ),
+                        ],
+                      ),
                     );
 
                     if (isCompact) {
@@ -360,7 +424,10 @@ class DashboardScreen extends ConsumerWidget {
                         children: [
                           headerText,
                           const SizedBox(height: AtlasSpacing.md),
-                          actionButtons,
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: actionButtons,
+                          ),
                         ],
                       );
                     }
@@ -608,11 +675,12 @@ class DashboardScreen extends ConsumerWidget {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(AtlasSpacing.xs),
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
                           color: hasJournal
-                              ? AtlasColors.accentSageSubtle
-                              : AtlasColors.accentAmberSubtle,
+                              ? AtlasColors.accentSage.withValues(alpha: 0.14)
+                              : AtlasColors.accentAmber.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(
                             AtlasSpacing.radiusSm,
                           ),
@@ -620,8 +688,8 @@ class DashboardScreen extends ConsumerWidget {
                         child: Icon(
                           hasJournal
                               ? Icons.auto_stories_outlined
-                              : Icons.edit_note_outlined,
-                          size: 18,
+                              : Icons.wb_sunny_outlined,
+                          size: 17,
                           color: hasJournal
                               ? AtlasColors.accentSage
                               : AtlasColors.accentAmber,
@@ -648,17 +716,14 @@ class DashboardScreen extends ConsumerWidget {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? AtlasColors.darkElevated
-                            : AtlasColors.lightElevated,
-                        borderRadius: BorderRadius.circular(
-                          AtlasSpacing.radiusSm,
-                        ),
+                        color: AtlasColors.accentSage.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(100),
                       ),
                       child: Text(
                         'Mood: ${entry.mood!}',
                         style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
+                          color: AtlasColors.accentSage,
                         ),
                       ),
                     ),
@@ -673,18 +738,56 @@ class DashboardScreen extends ConsumerWidget {
                   color: isDark
                       ? AtlasColors.darkTextSecondary
                       : AtlasColors.lightTextSecondary,
+                  height: 1.4,
                 ),
               ),
+              if (!hasJournal) ...[
+                const SizedBox(height: AtlasSpacing.sm),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: const [
+                    _MoodChip(label: 'Focused', icon: Icons.bolt_outlined),
+                    _MoodChip(label: 'Calm', icon: Icons.spa_outlined),
+                    _MoodChip(label: 'Creative', icon: Icons.lightbulb_outline),
+                  ],
+                ),
+              ],
               const SizedBox(height: AtlasSpacing.md),
-              FilledButton.tonalIcon(
-                icon: Icon(
-                  hasJournal ? Icons.arrow_forward : Icons.edit,
-                  size: 16,
+              SizedBox(
+                height: 38,
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isDark
+                        ? AtlasColors.darkElevated
+                        : AtlasColors.lightElevated,
+                    foregroundColor: isDark
+                        ? AtlasColors.darkTextPrimary
+                        : AtlasColors.lightTextPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        AtlasSpacing.radiusCard,
+                      ),
+                      side: BorderSide(
+                        color: isDark
+                            ? AtlasColors.darkBorder
+                            : AtlasColors.lightBorder,
+                      ),
+                    ),
+                  ),
+                  icon: Icon(
+                    hasJournal ? Icons.arrow_forward : Icons.edit_note,
+                    size: 16,
+                    color: AtlasColors.accentSage,
+                  ),
+                  label: Text(
+                    hasJournal
+                        ? "Open Today's Journal"
+                        : "Write Today's Journal",
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onPressed: () => _openTodayJournal(context, ref),
                 ),
-                label: Text(
-                  hasJournal ? "Open Today's Journal" : "Write Today's Journal",
-                ),
-                onPressed: () => _openTodayJournal(context, ref),
               ),
             ],
           );
@@ -1269,28 +1372,147 @@ class _StatCard extends StatelessWidget {
 
     return AtlasCard(
       onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: isDark
-                      ? AtlasColors.darkTextSecondary
-                      : AtlasColors.lightTextSecondary,
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: isDark
+                        ? AtlasColors.darkTextSecondary
+                        : AtlasColors.lightTextSecondary,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.2,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Icon(icon, size: 16, color: accentColor),
+              const SizedBox(width: 4),
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                ),
+                child: Icon(icon, size: 14, color: accentColor),
+              ),
             ],
           ),
-          const SizedBox(height: AtlasSpacing.sm),
+          const SizedBox(height: AtlasSpacing.xs),
           Text(
             value,
-            style: theme.textTheme.headlineLarge?.copyWith(
+            style: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderPillAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isPrimary;
+
+  const _HeaderPillAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isPrimary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: isPrimary ? AtlasColors.accentBlue : Colors.transparent,
+        borderRadius: BorderRadius.circular(100),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(100),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 15,
+                  color: isPrimary
+                      ? Colors.white
+                      : (isDark
+                            ? AtlasColors.darkTextPrimary
+                            : AtlasColors.lightTextPrimary),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isPrimary
+                        ? Colors.white
+                        : (isDark
+                              ? AtlasColors.darkTextPrimary
+                              : AtlasColors.lightTextPrimary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MoodChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+
+  const _MoodChip({required this.label, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? AtlasColors.darkElevated : AtlasColors.lightElevated,
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(
+          color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AtlasColors.accentSage),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: isDark
+                  ? AtlasColors.darkTextSecondary
+                  : AtlasColors.lightTextSecondary,
             ),
           ),
         ],

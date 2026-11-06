@@ -24,14 +24,14 @@ class TaskItemWidget extends ConsumerWidget {
   Color _getPriorityColor(int priority) {
     switch (priority) {
       case 1:
-        return const Color(0xFFEF4444); // P1 - Red
+        return AtlasColors.priorityP1;
       case 2:
-        return const Color(0xFFF59E0B); // P2 - Amber
+        return AtlasColors.priorityP2;
       case 3:
-        return const Color(0xFF3B82F6); // P3 - Blue
+        return AtlasColors.priorityP3;
       case 4:
       default:
-        return const Color(0xFF9CA3AF); // P4 - Gray
+        return AtlasColors.priorityP4;
     }
   }
 

@@ -14,7 +14,6 @@ import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
 import '../../../shared/widgets/atlas_button.dart';
 import '../../../shared/widgets/atlas_card.dart';
-import '../../../shared/widgets/atlas_empty_state.dart';
 
 class NotebooksScreen extends ConsumerWidget {
   const NotebooksScreen({super.key});
@@ -156,6 +155,153 @@ class NotebooksScreen extends ConsumerWidget {
     }
   }
 
+  Future<void> _createStationeryNotebook(
+    BuildContext context,
+    WidgetRef ref,
+    String title,
+    String pattern,
+  ) async {
+    final workspaceId = ref.read(currentWorkspaceIdProvider);
+    final nodesDao = ref.read(nodesDaoProvider);
+    final now = DateTime.now();
+    final newId = 'nb_${DateTime.now().millisecondsSinceEpoch}';
+
+    await nodesDao.createNode(
+      NodesCompanion.insert(
+        id: newId,
+        workspaceId: workspaceId,
+        type: 'notebook',
+        title: title,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    if (context.mounted) {
+      context.go('${AtlasRoutes.notebooks}/$newId');
+    }
+  }
+
+  Widget _buildStarterScreen(
+    BuildContext context,
+    WidgetRef ref,
+    ThemeData theme,
+    bool isDark,
+  ) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AtlasSpacing.xl,
+          vertical: AtlasSpacing.md,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Two Main Starter Cards
+                Row(
+                  children: [
+                    Expanded(
+                      child: _StarterCard(
+                        icon: Icons.edit_note,
+                        accentColor: AtlasColors.accentSage,
+                        title: 'Create Blank Notebook',
+                        subtitle: 'Infinite vector ink canvas with fluid pen, pencil, and highlighter tools.',
+                        actionLabel: 'New Notebook',
+                        onTap: () => _showCreateNotebookDialog(context, ref),
+                      ),
+                    ),
+                    const SizedBox(width: AtlasSpacing.md),
+                    Expanded(
+                      child: _StarterCard(
+                        icon: Icons.picture_as_pdf_outlined,
+                        accentColor: AtlasColors.accentAmber,
+                        title: 'Import PDF to Annotate',
+                        subtitle: 'Import textbooks, slides, or documents with layered vector ink annotations.',
+                        actionLabel: 'Import PDF',
+                        onTap: () => _importPdf(context, ref),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AtlasSpacing.xl),
+
+                // Paper Stationery Section
+                Text(
+                  'Choose Paper Stationery',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AtlasColors.darkTextPrimary
+                        : AtlasColors.lightTextPrimary,
+                  ),
+                ),
+                const SizedBox(height: AtlasSpacing.xs),
+                Text(
+                  'Start immediately with curated paper rulings and grid spacing',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: isDark
+                        ? AtlasColors.darkTextSecondary
+                        : AtlasColors.lightTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: AtlasSpacing.md),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _StationeryCard(
+                        name: 'Dot Grid',
+                        description: '5mm bullet dots for ideation & diagrams',
+                        pattern: 'dot',
+                        onTap: () => _createStationeryNotebook(
+                          context,
+                          ref,
+                          'Dot Grid Notebook',
+                          'dot',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AtlasSpacing.md),
+                    Expanded(
+                      child: _StationeryCard(
+                        name: 'Ruled Lines',
+                        description:
+                            '7mm college ruling for structured writing',
+                        pattern: 'line',
+                        onTap: () => _createStationeryNotebook(
+                          context,
+                          ref,
+                          'Lined Notebook',
+                          'line',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AtlasSpacing.md),
+                    Expanded(
+                      child: _StationeryCard(
+                        name: 'Graph Grid',
+                        description: 'Square grid for technical drawing & math',
+                        pattern: 'grid',
+                        onTap: () => _createStationeryNotebook(
+                          context,
+                          ref,
+                          'Grid Notebook',
+                          'grid',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -219,16 +365,7 @@ class NotebooksScreen extends ConsumerWidget {
                   ),
                 ),
                 if (notebooks.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: AtlasEmptyState(
-                      icon: Icons.menu_book_outlined,
-                      title: 'No notebooks found',
-                      description: 'Organize your sketches, study material, and handwritten notes or import PDFs to annotate.',
-                      actionLabel: 'Create Notebook',
-                      onAction: () => _showCreateNotebookDialog(context, ref),
-                    ),
-                  )
+                  _buildStarterScreen(context, ref, theme, isDark)
                 else
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(
@@ -241,7 +378,7 @@ class NotebooksScreen extends ConsumerWidget {
                             maxCrossAxisExtent: 280,
                             mainAxisSpacing: AtlasSpacing.md,
                             crossAxisSpacing: AtlasSpacing.md,
-                            childAspectRatio: 1.15,
+                            childAspectRatio: 0.95,
                           ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final nb = notebooks[index];
@@ -253,26 +390,89 @@ class NotebooksScreen extends ConsumerWidget {
                           onTap: () {
                             context.go('${AtlasRoutes.notebooks}/${nb.id}');
                           },
+                          padding: const EdgeInsets.all(12),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              // Top Preview Box
+                              Expanded(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? AtlasColors.darkElevated
+                                        : AtlasColors.lightElevated,
+                                    borderRadius: BorderRadius.circular(
+                                      AtlasSpacing.radiusSm,
+                                    ),
+                                    border: Border.all(
+                                      color: isDark
+                                          ? AtlasColors.darkBorder
+                                          : AtlasColors.lightBorder,
+                                    ),
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      Positioned.fill(
+                                        child: CustomPaint(
+                                          painter: StationeryPreviewPainter(
+                                            pattern: 'dot',
+                                            color: isDark
+                                                ? Colors.white12
+                                                : Colors.black12,
+                                          ),
+                                        ),
+                                      ),
+                                      Center(
+                                        child: Icon(
+                                          Icons.menu_book_outlined,
+                                          size: 28,
+                                          color: AtlasColors.accentSage
+                                              .withValues(alpha: 0.8),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: 6,
+                                        left: 6,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AtlasColors.accentSage
+                                                .withValues(alpha: 0.14),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Vector Ink',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w700,
+                                              color: AtlasColors.accentSage,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
                               Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Container(
-                                    width: 32,
-                                    height: 32,
-                                    decoration: BoxDecoration(
-                                      color: AtlasColors.accentSageSubtle,
-                                      borderRadius: BorderRadius.circular(
-                                        AtlasSpacing.radiusSm,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.menu_book_outlined,
-                                      size: 16,
-                                      color: AtlasColors.accentSage,
+                                  Expanded(
+                                    child: Text(
+                                      nb.title,
+                                      style: theme.textTheme.titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                   PopupMenuButton<String>(
@@ -291,19 +491,14 @@ class NotebooksScreen extends ConsumerWidget {
                                   ),
                                 ],
                               ),
-                              const Spacer(),
-                              Text(
-                                nb.title,
-                                style: theme.textTheme.headlineMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: AtlasSpacing.xxs),
+                              const SizedBox(height: 2),
                               Text(
                                 'Modified $formattedDate',
-                                style: theme.textTheme.labelSmall,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: isDark
+                                      ? AtlasColors.darkTextMuted
+                                      : AtlasColors.lightTextMuted,
+                                ),
                               ),
                             ],
                           ),
@@ -318,4 +513,188 @@ class NotebooksScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _StarterCard extends StatelessWidget {
+  final IconData icon;
+  final Color accentColor;
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _StarterCard({
+    required this.icon,
+    required this.accentColor,
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return AtlasCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AtlasSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 22, color: accentColor),
+          ),
+          const SizedBox(height: AtlasSpacing.md),
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AtlasSpacing.xs),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark
+                  ? AtlasColors.darkTextSecondary
+                  : AtlasColors.lightTextSecondary,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: AtlasSpacing.md),
+          Row(
+            children: [
+              Text(
+                actionLabel,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: accentColor,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_forward, size: 14, color: accentColor),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StationeryCard extends StatelessWidget {
+  final String name;
+  final String description;
+  final String pattern;
+  final VoidCallback onTap;
+
+  const _StationeryCard({
+    required this.name,
+    required this.description,
+    required this.pattern,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return AtlasCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AtlasSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 80,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AtlasColors.darkElevated
+                  : AtlasColors.lightElevated,
+              borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+              border: Border.all(
+                color: isDark
+                    ? AtlasColors.darkBorder
+                    : AtlasColors.lightBorder,
+              ),
+            ),
+            child: CustomPaint(
+              painter: StationeryPreviewPainter(
+                pattern: pattern,
+                color: isDark ? Colors.white24 : Colors.black26,
+              ),
+            ),
+          ),
+          const SizedBox(height: AtlasSpacing.sm),
+          Text(
+            name,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            description,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 11,
+              color: isDark
+                  ? AtlasColors.darkTextSecondary
+                  : AtlasColors.lightTextSecondary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class StationeryPreviewPainter extends CustomPainter {
+  final String pattern;
+  final Color color;
+
+  StationeryPreviewPainter({required this.pattern, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.0;
+
+    if (pattern == 'dot') {
+      const spacing = 12.0;
+      for (double y = spacing; y < size.height; y += spacing) {
+        for (double x = spacing; x < size.width; x += spacing) {
+          canvas.drawCircle(Offset(x, y), 0.9, paint);
+        }
+      }
+    } else if (pattern == 'line') {
+      const spacing = 12.0;
+      for (double y = spacing; y < size.height; y += spacing) {
+        canvas.drawLine(Offset(6, y), Offset(size.width - 6, y), paint);
+      }
+    } else if (pattern == 'grid') {
+      const spacing = 12.0;
+      for (double y = spacing; y < size.height; y += spacing) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+      }
+      for (double x = spacing; x < size.width; x += spacing) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

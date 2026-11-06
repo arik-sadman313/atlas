@@ -28,6 +28,7 @@ class QuickAddTaskBar extends ConsumerStatefulWidget {
 class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  bool _isFocused = false;
 
   int _priority = 4;
   DateTime? _dueDate;
@@ -40,6 +41,12 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
     super.initState();
     _selectedProjectId = widget.defaultProjectId;
     _dueDate = widget.defaultDueDate;
+    _focusNode.addListener(() {
+      setState(() {
+        _isFocused = _focusNode.hasFocus;
+        if (_focusNode.hasFocus) _isExpanded = true;
+      });
+    });
   }
 
   @override
@@ -52,13 +59,13 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
   Color _getPriorityColor(int p) {
     switch (p) {
       case 1:
-        return const Color(0xFFEF4444);
+        return AtlasColors.priorityP1;
       case 2:
-        return const Color(0xFFF59E0B);
+        return AtlasColors.priorityP2;
       case 3:
-        return const Color(0xFF3B82F6);
+        return AtlasColors.priorityP3;
       default:
-        return const Color(0xFF9CA3AF);
+        return AtlasColors.priorityP4;
     }
   }
 
@@ -72,10 +79,8 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
     );
 
     if (pickedDate == null) return;
-
     if (!mounted) return;
 
-    // Ask if time is desired
     final pickTime = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -153,37 +158,43 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final workspaceId = ref.watch(currentWorkspaceIdProvider);
     final taskRepo = ref.watch(taskRepositoryProvider);
 
-    return Container(
+    final activeBorderColor = _isFocused
+        ? AtlasColors.accentBlue
+        : (isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
-        color: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
-        borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+        color: isDark ? AtlasColors.darkCard : AtlasColors.lightSurface,
+        borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
         border: Border.all(
-          color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
-          width: 1.0,
+          color: activeBorderColor,
+          width: _isFocused ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(
+              alpha: isDark ? (_isFocused ? 0.35 : 0.20) : 0.05,
+            ),
+            blurRadius: _isFocused ? 18 : 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       padding: const EdgeInsets.symmetric(
         horizontal: AtlasSpacing.md,
-        vertical: AtlasSpacing.xs,
+        vertical: 8,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              // Circle Plus Icon
+              // Circle Plus Icon / Priority dot
               Icon(
                 Icons.add_circle_outline,
                 size: 20,
@@ -199,6 +210,9 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
                   decoration: const InputDecoration(
                     hintText: 'Add a task... (Press Enter to create)',
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(vertical: 8),
                   ),
@@ -211,252 +225,265 @@ class _QuickAddTaskBarState extends ConsumerState<QuickAddTaskBar> {
                 ),
               ),
 
+              // Inline Priority Pill
+              PopupMenuButton<int>(
+                tooltip: 'Set Priority',
+                initialValue: _priority,
+                onSelected: (val) => setState(() => _priority = val),
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 1,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag,
+                          size: 16,
+                          color: AtlasColors.priorityP1,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Priority 1 (Urgent)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 2,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag,
+                          size: 16,
+                          color: AtlasColors.priorityP2,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Priority 2 (High)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 3,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag,
+                          size: 16,
+                          color: AtlasColors.priorityP3,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Priority 3 (Medium)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 4,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag_outlined,
+                          size: 16,
+                          color: AtlasColors.priorityP4,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Priority 4 (Low)'),
+                      ],
+                    ),
+                  ),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _getPriorityColor(_priority).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.flag,
+                        size: 12,
+                        color: _getPriorityColor(_priority),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'P$_priority',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _getPriorityColor(_priority),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 6),
+
+              // Inline Due Date Pill
+              InkWell(
+                onTap: _pickDueDate,
+                borderRadius: BorderRadius.circular(100),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _dueDate != null
+                        ? AtlasColors.accentBlue.withValues(alpha: 0.15)
+                        : (isDark
+                              ? AtlasColors.darkElevated
+                              : AtlasColors.lightElevated),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 12,
+                        color: _dueDate != null
+                            ? AtlasColors.accentBlue
+                            : (isDark
+                                  ? AtlasColors.darkTextSecondary
+                                  : AtlasColors.lightTextSecondary),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _dueDate == null
+                            ? 'Due'
+                            : (_hasTime
+                                  ? DateFormat('MMM d, h:mm a')
+                                        .format(_dueDate!)
+                                  : DateFormat.MMMd().format(_dueDate!)),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _dueDate != null
+                              ? AtlasColors.accentBlue
+                              : (isDark
+                                    ? AtlasColors.darkTextSecondary
+                                    : AtlasColors.lightTextSecondary),
+                        ),
+                      ),
+                      if (_dueDate != null) ...[
+                        const SizedBox(width: 4),
+                        InkWell(
+                          onTap: () => setState(() {
+                            _dueDate = null;
+                            _hasTime = false;
+                          }),
+                          child: const Icon(Icons.close, size: 11),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 6),
+
               // Submit button
               IconButton(
-                icon: const Icon(Icons.arrow_upward_rounded),
+                icon: const Icon(Icons.arrow_upward_rounded, size: 16),
                 tooltip: 'Add Task',
                 onPressed: _submitTask,
                 visualDensity: VisualDensity.compact,
                 style: IconButton.styleFrom(
                   backgroundColor: AtlasColors.accentBlue,
                   foregroundColor: Colors.white,
+                  minimumSize: const Size(32, 32),
+                  padding: EdgeInsets.zero,
                 ),
               ),
             ],
           ),
 
-          // Secondary option bar (expanded when typing or tapped)
-          if (_isExpanded || _dueDate != null || _priority != 4) ...[
+          // Secondary option bar (if project selector or expanded)
+          if (_isExpanded && widget.defaultProjectId == null) ...[
+            const SizedBox(height: 8),
             const Divider(height: 1),
             const SizedBox(height: 6),
             Row(
               children: [
-                // Priority Picker Button
-                PopupMenuButton<int>(
-                  tooltip: 'Set Priority',
-                  initialValue: _priority,
-                  onSelected: (val) => setState(() => _priority = val),
-                  itemBuilder: (ctx) => [
-                    const PopupMenuItem(
-                      value: 1,
-                      child: Row(
-                        children: [
-                          Icon(Icons.flag, size: 16, color: Color(0xFFEF4444)),
-                          SizedBox(width: 8),
-                          Text('Priority 1 (Urgent)'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 2,
-                      child: Row(
-                        children: [
-                          Icon(Icons.flag, size: 16, color: Color(0xFFF59E0B)),
-                          SizedBox(width: 8),
-                          Text('Priority 2 (High)'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 3,
-                      child: Row(
-                        children: [
-                          Icon(Icons.flag, size: 16, color: Color(0xFF3B82F6)),
-                          SizedBox(width: 8),
-                          Text('Priority 3 (Medium)'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 4,
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.flag_outlined,
-                            size: 16,
-                            color: Color(0xFF9CA3AF),
-                          ),
-                          SizedBox(width: 8),
-                          Text('Priority 4 (Low)'),
-                        ],
-                      ),
-                    ),
-                  ],
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _getPriorityColor(_priority)
-                          .withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.flag,
-                          size: 14,
-                          color: _getPriorityColor(_priority),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'P$_priority',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _getPriorityColor(_priority),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
+                StreamBuilder<List<ProjectEntry>>(
+                  stream: taskRepo.watchProjects(workspaceId),
+                  builder: (context, snapshot) {
+                    final projects = snapshot.data ?? [];
+                    if (projects.isEmpty) return const SizedBox.shrink();
 
-                // Due Date Button
-                InkWell(
-                  onTap: _pickDueDate,
-                  borderRadius: BorderRadius.circular(4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _dueDate != null
-                          ? AtlasColors.accentBlueSubtle.withValues(alpha: 0.2)
-                          : (isDark
-                                ? Colors.white10
-                                : Colors.black.withValues(alpha: 0.05)),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.calendar_today_outlined,
-                          size: 13,
-                          color: _dueDate != null
-                              ? AtlasColors.accentBlue
-                              : null,
+                    return PopupMenuButton<String?>(
+                      tooltip: 'Assign Project',
+                      initialValue: _selectedProjectId,
+                      onSelected: (val) =>
+                          setState(() => _selectedProjectId = val),
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem<String?>(
+                          value: null,
+                          child: Text('Inbox (No Project)'),
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _dueDate == null
-                              ? 'Due Date'
-                              : (_hasTime
-                                    ? DateFormat('MMM d, h:mm a')
-                                          .format(_dueDate!)
-                                    : DateFormat.MMMd().format(_dueDate!)),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _dueDate != null
-                                ? AtlasColors.accentBlue
-                                : null,
-                            fontWeight: _dueDate != null
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
-                        if (_dueDate != null) ...[
-                          const SizedBox(width: 4),
-                          InkWell(
-                            onTap: () => setState(() {
-                              _dueDate = null;
-                              _hasTime = false;
-                            }),
-                            child: const Icon(Icons.close, size: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Project Selector (if not defaulting to a specific project)
-                if (widget.defaultProjectId == null)
-                  StreamBuilder<List<ProjectEntry>>(
-                    stream: taskRepo.watchProjects(workspaceId),
-                    builder: (context, snapshot) {
-                      final projects = snapshot.data ?? [];
-                      if (projects.isEmpty) return const SizedBox.shrink();
-
-                      return PopupMenuButton<String?>(
-                        tooltip: 'Assign Project',
-                        initialValue: _selectedProjectId,
-                        onSelected: (val) =>
-                            setState(() => _selectedProjectId = val),
-                        itemBuilder: (ctx) => [
-                          const PopupMenuItem<String?>(
-                            value: null,
-                            child: Text('Inbox (No Project)'),
-                          ),
-                          ...projects.map(
-                            (p) => PopupMenuItem<String?>(
-                              value: p.id,
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Color(
-                                        int.parse(
-                                          p.colorHex.replaceFirst('#', '0xFF'),
-                                        ),
+                        ...projects.map(
+                          (p) => PopupMenuItem<String?>(
+                            value: p.id,
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Color(
+                                      int.parse(
+                                        p.colorHex.replaceFirst('#', '0xFF'),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Text(p.name),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(p.name),
+                              ],
                             ),
                           ),
-                        ],
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white10
-                                : Colors.black.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.folder_outlined, size: 13),
-                              const SizedBox(width: 4),
-                              Text(
-                                _selectedProjectId == null
-                                    ? 'Project'
-                                    : (projects
-                                          .firstWhere(
-                                            (p) => p.id == _selectedProjectId,
-                                            orElse: () => projects.first,
-                                          )
-                                          .name),
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
                         ),
-                      );
-                    },
-                  ),
-
+                      ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AtlasColors.darkElevated
+                              : AtlasColors.lightElevated,
+                          borderRadius: BorderRadius.circular(100),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.folder_outlined, size: 12),
+                            const SizedBox(width: 4),
+                            Text(
+                              _selectedProjectId == null
+                                  ? 'Project: Inbox'
+                                  : (projects
+                                        .firstWhere(
+                                          (p) => p.id == _selectedProjectId,
+                                          orElse: () => projects.first,
+                                        )
+                                        .name),
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 const Spacer(),
-
-                // Collapse option
                 IconButton(
-                  icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                  icon: const Icon(Icons.keyboard_arrow_up, size: 16),
                   tooltip: 'Hide Options',
                   visualDensity: VisualDensity.compact,
                   onPressed: () => setState(() => _isExpanded = false),

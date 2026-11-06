@@ -18,4 +18,6 @@ abstract class AtlasSpacing {
   static const double radiusSm = 4.0;
   static const double radiusMd = 8.0;
   static const double radiusLg = 12.0;
+  static const double radiusCard = 14.0;
+  static const double radiusXl = 16.0;
 }

@@ -29,7 +29,7 @@ abstract class AtlasTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           side: const BorderSide(color: AtlasColors.lightBorder, width: 1.0),
         ),
       ),
@@ -73,25 +73,25 @@ abstract class AtlasTheme {
         fillColor: AtlasColors.lightElevated,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
+          horizontal: 14,
+          vertical: 12,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.lightBorder,
             width: 1.0,
           ),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.lightBorder,
             width: 1.0,
           ),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.accentBlue,
             width: 1.5,
@@ -121,11 +121,11 @@ abstract class AtlasTheme {
       ),
       textTheme: textTheme,
       cardTheme: CardThemeData(
-        color: AtlasColors.darkSurface,
+        color: AtlasColors.darkCard,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           side: const BorderSide(color: AtlasColors.darkBorder, width: 1.0),
         ),
       ),
@@ -169,25 +169,25 @@ abstract class AtlasTheme {
         fillColor: AtlasColors.darkElevated,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
+          horizontal: 14,
+          vertical: 12,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.darkBorder,
             width: 1.0,
           ),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.darkBorder,
             width: 1.0,
           ),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusCard),
           borderSide: const BorderSide(
             color: AtlasColors.accentBlue,
             width: 1.5,
