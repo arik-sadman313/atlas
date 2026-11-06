@@ -10,6 +10,8 @@ import 'package:pencil_kit/pencil_kit.dart';
 import '../../../../app/providers.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/atlas_colors.dart';
+import '../../../../core/theme/atlas_spacing.dart';
+import '../../../documents/presentation/widgets/backlinks_panel.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
@@ -582,8 +584,77 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           tooltip: 'Add Page',
           onPressed: _addNewPage,
         ),
+        // Backlinks Button
+        IconButton(
+          icon: const Icon(Icons.link_rounded),
+          tooltip: 'Backlinks',
+          onPressed: () => _showBacklinksSheet(context),
+        ),
         const SizedBox(width: 8),
       ],
+    );
+  }
+
+  void _showBacklinksSheet(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.45,
+        minChildSize: 0.25,
+        maxChildSize: 0.85,
+        expand: false,
+        builder: (context, scrollCtrl) => SingleChildScrollView(
+          controller: scrollCtrl,
+          padding: const EdgeInsets.all(AtlasSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  const Icon(Icons.link_rounded, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Incoming Backlinks',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AtlasSpacing.sm),
+              BacklinksPanel(
+                nodeId: widget.notebookId,
+                initialExpanded: true,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

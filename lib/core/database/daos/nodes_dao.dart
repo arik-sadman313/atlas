@@ -79,6 +79,10 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
     return update(nodes).replace(node);
   }
 
+  Future<int> updateNodePartial(String id, NodesCompanion fields) {
+    return (update(nodes)..where((tbl) => tbl.id.equals(id))).write(fields);
+  }
+
   Future<int> deleteNode(String id, {bool hardDelete = false}) {
     if (hardDelete) {
       return (delete(nodes)..where((tbl) => tbl.id.equals(id))).go();
@@ -106,6 +110,26 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
             ),
           ]))
         .get();
+  }
+
+  Future<NodeEntry?> findNodeByTitle(String workspaceId, String title) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return Future.value(null);
+    return (select(nodes)
+          ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..where((tbl) => tbl.title.collate(Collate.noCase).equals(trimmed))
+          ..limit(1))
+        .getSingleOrNull();
+  }
+
+  Future<int> updateContentHash(String nodeId, String? contentHash) {
+    return (update(nodes)..where((tbl) => tbl.id.equals(nodeId))).write(
+      NodesCompanion(
+        contentHash: Value(contentHash),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 
   Stream<List<NodeBlockEntry>> watchBlocksForNode(String nodeId) {

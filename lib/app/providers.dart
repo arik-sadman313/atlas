@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/database/app_database.dart';
 import '../core/database/daos/ink_dao.dart';
+import '../core/database/daos/links_dao.dart';
 import '../core/database/daos/nodes_dao.dart';
 import '../core/database/daos/workspaces_dao.dart';
 import '../core/storage/blob_storage_service.dart';
+import '../features/documents/data/repositories/link_repository.dart';
 import '../features/handwriting/data/repositories/ink_repository.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
@@ -25,6 +27,10 @@ final inkDaoProvider = Provider<InkDao>((ref) {
   return ref.watch(appDatabaseProvider).inkDao;
 });
 
+final linksDaoProvider = Provider<LinksDao>((ref) {
+  return ref.watch(appDatabaseProvider).linksDao;
+});
+
 final blobStorageServiceProvider = Provider<BlobStorageService>((ref) {
   throw UnimplementedError(
     'blobStorageServiceProvider must be initialized in bootstrap',
@@ -35,6 +41,12 @@ final inkRepositoryProvider = Provider<InkRepository>((ref) {
   final inkDao = ref.watch(inkDaoProvider);
   final blobStorage = ref.watch(blobStorageServiceProvider);
   return InkRepository(inkDao: inkDao, blobStorage: blobStorage);
+});
+
+final linkRepositoryProvider = Provider<LinkRepository>((ref) {
+  final linksDao = ref.watch(linksDaoProvider);
+  final nodesDao = ref.watch(nodesDaoProvider);
+  return LinkRepository(linksDao: linksDao, nodesDao: nodesDao);
 });
 
 class CurrentWorkspaceIdNotifier extends Notifier<String> {

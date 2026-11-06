@@ -229,3 +229,93 @@
 
 6. **Prototype Screenshot Artifact:**
    - Rendered prototype image to `docs/images/atlas_handwriting_prototype.png` (32 KB) illustrating handwritten math notes, sine wave diagrams, and yellow highlighter multi-pass compositing over ruled paper.
+
+---
+
+# ATLAS — Milestone 3 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 3 — Rich Text & Knowledge System  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Architectural Requirements
+
+1. **Rich-Text Document Editor:** Integrate a production-grade rich-text editor behind an ATLAS-owned abstraction supporting headings (H1-H3), bullet/numbered lists, checklists, inline code, block quotes, and wiki-links.
+2. **Schema Version 3 Migration:** Upgrade Drift schema to v3, introducing `nodes.content_hash`, `node_links`, `tags`, and `node_tags` with indexing.
+3. **Wiki-Link Engine:** Implement `[[Note Title]]` and `[[Target|Alias]]` parsing, title resolution, and modal autocomplete dialog.
+4. **Bidirectional Knowledge Graph:** Real-time incoming backlinks querying and reactive streaming embedded in both typed documents and handwritten notebooks.
+5. **Aesthetics & Navigation Safety:** "Quiet Craft" styling, debounced 1-second CAS autosave, save mutex lock, and `PopScope` back-navigation interceptor.
+
+---
+
+## 2. Implemented Components
+
+### 2.1 Editor Package Evaluation & Selection
+- **Audit Findings:** Evaluated `appflowy_editor: 6.2.0` and discovered a fatal Flutter 3.47+ compilation error (`TextInputClient.onFocusReceived`).
+- **Selection:** Selected `flutter_quill: ^11.6.0` (Apache-2.0, zero AGPL dependencies) behind the ATLAS [`DocumentContentService`](../lib/features/documents/data/services/document_content_service.dart) abstraction.
+- **Audit Report:** Fully documented in [`docs/EDITOR_PACKAGE_AUDIT.md`](./EDITOR_PACKAGE_AUDIT.md).
+
+### 2.2 Database Schema Upgrade (v2 -> v3)
+- Upgraded `AppDatabase.schemaVersion` to `3`.
+- Added `nodes.content_hash` column to link documents to CAS blob storage.
+- Added `node_links` table with foreign key cascades and indexes on `source_node_id` and `target_node_id`.
+- Added `tags` and `node_tags` tables with workspace isolation.
+- Created [`LinksDao`](../lib/core/database/daos/links_dao.dart) providing reactive joins for incoming backlinks, forward links, and batch syncing.
+- Enhanced [`NodesDao`](../lib/core/database/daos/nodes_dao.dart) with `findNodeByTitle` and `updateNodePartial`.
+
+### 2.3 Domain & Persistence Services
+- [`WikiLinkParser`](../lib/features/documents/domain/parser/wiki_link_parser.dart): Robust regular expression parser handling unaliased and aliased wiki-links, bracket escaping, and open-query detection.
+- [`LinkRepository`](../lib/features/documents/data/repositories/link_repository.dart): Orchestrates link synchronization from document text to SQLite `node_links`, title search, and backlinks streaming.
+- [`DocumentContentService`](../lib/features/documents/data/services/document_content_service.dart): Manages Quill Delta serialization to CAS storage, plain text extraction, and default document scaffolding.
+
+### 2.4 Presentation & UI Components
+- [`DocumentEditorScreen`](../lib/features/documents/presentation/document_editor_screen.dart):
+  - Notion/Craft "Quiet Craft" responsive layout (max-width 860px centered desktop layout, fluid mobile layout).
+  - Unobtrusive formatting toolbar (`QuillSimpleToolbar`) with essential styling controls.
+  - Live word counter and document last-modified timestamp header.
+  - 1-second debounced autosave with save mutex (`_isSaving`, `_saveQueued`) preventing concurrent writes.
+  - `PopScope` back-navigation guard flushing pending changes before route dismissal.
+  - Interactive link tapping (`_handleLaunchUrl`) navigating internal `atlas://node/:id` links.
+- [`BacklinksPanel`](../lib/features/documents/presentation/widgets/backlinks_panel.dart):
+  - Collapsible references panel with reactive StreamBuilder listening to incoming links.
+  - Displays source node type badges (`Document`, `Notebook`), titles, and relative update times.
+  - Embedded directly below document editor body and inside notebook editor via action bottom sheet.
+- [`WikiLinkDialog`](../lib/features/documents/presentation/widgets/wiki_link_dialog.dart):
+  - Autocomplete search dialog allowing rapid searching of vault notes by title and entering optional aliases.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings).
+
+2. **Automated Test Suite (63 tests across all modules):**
+   - `test/core/database/database_test.dart` (4 tests)
+   - `test/core/database/schema_migration_v3_test.dart` (2 tests)
+   - `test/core/storage/cas_storage_service_test.dart` (5 tests)
+   - `test/features/app_smoke_test.dart` (24 tests)
+   - `test/features/handwriting/stroke_tessellator_test.dart` (8 tests)
+   - `test/features/handwriting/ink_serialization_test.dart` (4 tests)
+   - `test/features/handwriting/ink_repository_test.dart` (3 tests)
+   - `test/features/handwriting/ink_canvas_widget_test.dart` (4 tests)
+   - `test/features/handwriting/pencil_kit_converter_test.dart` (3 tests)
+   - `test/features/handwriting/notebook_editor_navigation_test.dart` (3 tests)
+   - `test/features/documents/wiki_link_parser_test.dart` (6 tests)
+   - `test/features/documents/link_repository_test.dart` (2 tests)
+   - `test/features/documents/document_content_service_test.dart` (2 tests)
+   - `test/features/documents/document_editor_test.dart` (3 tests)
+   - **Result:** `✓ All 63 tests passed!`.
+
+3. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+4. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk`.
+

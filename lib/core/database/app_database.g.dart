@@ -554,6 +554,17 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _contentHashMeta = const VerificationMeta(
+    'contentHash',
+  );
+  @override
+  late final GeneratedColumn<String> contentHash = GeneratedColumn<String>(
+    'content_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _sortOrderMeta = const VerificationMeta(
     'sortOrder',
   );
@@ -669,6 +680,7 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
     title,
     icon,
     coverImageHash,
+    contentHash,
     sortOrder,
     isFavorite,
     isPinned,
@@ -740,6 +752,15 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
         coverImageHash.isAcceptableOrUnknown(
           data['cover_image_hash']!,
           _coverImageHashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('content_hash')) {
+      context.handle(
+        _contentHashMeta,
+        contentHash.isAcceptableOrUnknown(
+          data['content_hash']!,
+          _contentHashMeta,
         ),
       );
     }
@@ -835,6 +856,10 @@ class $NodesTable extends Nodes with TableInfo<$NodesTable, NodeEntry> {
         DriftSqlType.string,
         data['${effectivePrefix}cover_image_hash'],
       ),
+      contentHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content_hash'],
+      ),
       sortOrder: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
         data['${effectivePrefix}sort_order'],
@@ -884,6 +909,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
   final String title;
   final String? icon;
   final String? coverImageHash;
+  final String? contentHash;
   final double sortOrder;
   final bool isFavorite;
   final bool isPinned;
@@ -900,6 +926,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     required this.title,
     this.icon,
     this.coverImageHash,
+    this.contentHash,
     required this.sortOrder,
     required this.isFavorite,
     required this.isPinned,
@@ -925,6 +952,9 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     if (!nullToAbsent || coverImageHash != null) {
       map['cover_image_hash'] = Variable<String>(coverImageHash);
     }
+    if (!nullToAbsent || contentHash != null) {
+      map['content_hash'] = Variable<String>(contentHash);
+    }
     map['sort_order'] = Variable<double>(sortOrder);
     map['is_favorite'] = Variable<bool>(isFavorite);
     map['is_pinned'] = Variable<bool>(isPinned);
@@ -949,6 +979,9 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       coverImageHash: coverImageHash == null && nullToAbsent
           ? const Value.absent()
           : Value(coverImageHash),
+      contentHash: contentHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contentHash),
       sortOrder: Value(sortOrder),
       isFavorite: Value(isFavorite),
       isPinned: Value(isPinned),
@@ -973,6 +1006,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       title: serializer.fromJson<String>(json['title']),
       icon: serializer.fromJson<String?>(json['icon']),
       coverImageHash: serializer.fromJson<String?>(json['coverImageHash']),
+      contentHash: serializer.fromJson<String?>(json['contentHash']),
       sortOrder: serializer.fromJson<double>(json['sortOrder']),
       isFavorite: serializer.fromJson<bool>(json['isFavorite']),
       isPinned: serializer.fromJson<bool>(json['isPinned']),
@@ -994,6 +1028,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       'title': serializer.toJson<String>(title),
       'icon': serializer.toJson<String?>(icon),
       'coverImageHash': serializer.toJson<String?>(coverImageHash),
+      'contentHash': serializer.toJson<String?>(contentHash),
       'sortOrder': serializer.toJson<double>(sortOrder),
       'isFavorite': serializer.toJson<bool>(isFavorite),
       'isPinned': serializer.toJson<bool>(isPinned),
@@ -1013,6 +1048,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     String? title,
     Value<String?> icon = const Value.absent(),
     Value<String?> coverImageHash = const Value.absent(),
+    Value<String?> contentHash = const Value.absent(),
     double? sortOrder,
     bool? isFavorite,
     bool? isPinned,
@@ -1031,6 +1067,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     coverImageHash: coverImageHash.present
         ? coverImageHash.value
         : this.coverImageHash,
+    contentHash: contentHash.present ? contentHash.value : this.contentHash,
     sortOrder: sortOrder ?? this.sortOrder,
     isFavorite: isFavorite ?? this.isFavorite,
     isPinned: isPinned ?? this.isPinned,
@@ -1053,6 +1090,9 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
       coverImageHash: data.coverImageHash.present
           ? data.coverImageHash.value
           : this.coverImageHash,
+      contentHash: data.contentHash.present
+          ? data.contentHash.value
+          : this.contentHash,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
@@ -1080,6 +1120,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
           ..write('title: $title, ')
           ..write('icon: $icon, ')
           ..write('coverImageHash: $coverImageHash, ')
+          ..write('contentHash: $contentHash, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('isPinned: $isPinned, ')
@@ -1101,6 +1142,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
     title,
     icon,
     coverImageHash,
+    contentHash,
     sortOrder,
     isFavorite,
     isPinned,
@@ -1121,6 +1163,7 @@ class NodeEntry extends DataClass implements Insertable<NodeEntry> {
           other.title == this.title &&
           other.icon == this.icon &&
           other.coverImageHash == this.coverImageHash &&
+          other.contentHash == this.contentHash &&
           other.sortOrder == this.sortOrder &&
           other.isFavorite == this.isFavorite &&
           other.isPinned == this.isPinned &&
@@ -1139,6 +1182,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
   final Value<String> title;
   final Value<String?> icon;
   final Value<String?> coverImageHash;
+  final Value<String?> contentHash;
   final Value<double> sortOrder;
   final Value<bool> isFavorite;
   final Value<bool> isPinned;
@@ -1156,6 +1200,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     this.title = const Value.absent(),
     this.icon = const Value.absent(),
     this.coverImageHash = const Value.absent(),
+    this.contentHash = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.isFavorite = const Value.absent(),
     this.isPinned = const Value.absent(),
@@ -1174,6 +1219,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     required String title,
     this.icon = const Value.absent(),
     this.coverImageHash = const Value.absent(),
+    this.contentHash = const Value.absent(),
     this.sortOrder = const Value.absent(),
     this.isFavorite = const Value.absent(),
     this.isPinned = const Value.absent(),
@@ -1197,6 +1243,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     Expression<String>? title,
     Expression<String>? icon,
     Expression<String>? coverImageHash,
+    Expression<String>? contentHash,
     Expression<double>? sortOrder,
     Expression<bool>? isFavorite,
     Expression<bool>? isPinned,
@@ -1215,6 +1262,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
       if (title != null) 'title': title,
       if (icon != null) 'icon': icon,
       if (coverImageHash != null) 'cover_image_hash': coverImageHash,
+      if (contentHash != null) 'content_hash': contentHash,
       if (sortOrder != null) 'sort_order': sortOrder,
       if (isFavorite != null) 'is_favorite': isFavorite,
       if (isPinned != null) 'is_pinned': isPinned,
@@ -1235,6 +1283,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     Value<String>? title,
     Value<String?>? icon,
     Value<String?>? coverImageHash,
+    Value<String?>? contentHash,
     Value<double>? sortOrder,
     Value<bool>? isFavorite,
     Value<bool>? isPinned,
@@ -1253,6 +1302,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
       title: title ?? this.title,
       icon: icon ?? this.icon,
       coverImageHash: coverImageHash ?? this.coverImageHash,
+      contentHash: contentHash ?? this.contentHash,
       sortOrder: sortOrder ?? this.sortOrder,
       isFavorite: isFavorite ?? this.isFavorite,
       isPinned: isPinned ?? this.isPinned,
@@ -1288,6 +1338,9 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
     }
     if (coverImageHash.present) {
       map['cover_image_hash'] = Variable<String>(coverImageHash.value);
+    }
+    if (contentHash.present) {
+      map['content_hash'] = Variable<String>(contentHash.value);
     }
     if (sortOrder.present) {
       map['sort_order'] = Variable<double>(sortOrder.value);
@@ -1329,6 +1382,7 @@ class NodesCompanion extends UpdateCompanion<NodeEntry> {
           ..write('title: $title, ')
           ..write('icon: $icon, ')
           ..write('coverImageHash: $coverImageHash, ')
+          ..write('contentHash: $contentHash, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('isPinned: $isPinned, ')
@@ -3719,6 +3773,974 @@ class InkPagesCompanion extends UpdateCompanion<InkPageEntry> {
   }
 }
 
+class $NodeLinksTable extends NodeLinks
+    with TableInfo<$NodeLinksTable, NodeLinkEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NodeLinksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceNodeIdMeta = const VerificationMeta(
+    'sourceNodeId',
+  );
+  @override
+  late final GeneratedColumn<String> sourceNodeId = GeneratedColumn<String>(
+    'source_node_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES nodes (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _targetNodeIdMeta = const VerificationMeta(
+    'targetNodeId',
+  );
+  @override
+  late final GeneratedColumn<String> targetNodeId = GeneratedColumn<String>(
+    'target_node_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES nodes (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _linkTextMeta = const VerificationMeta(
+    'linkText',
+  );
+  @override
+  late final GeneratedColumn<String> linkText = GeneratedColumn<String>(
+    'link_text',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    sourceNodeId,
+    targetNodeId,
+    linkText,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'node_links';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<NodeLinkEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('source_node_id')) {
+      context.handle(
+        _sourceNodeIdMeta,
+        sourceNodeId.isAcceptableOrUnknown(
+          data['source_node_id']!,
+          _sourceNodeIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceNodeIdMeta);
+    }
+    if (data.containsKey('target_node_id')) {
+      context.handle(
+        _targetNodeIdMeta,
+        targetNodeId.isAcceptableOrUnknown(
+          data['target_node_id']!,
+          _targetNodeIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_targetNodeIdMeta);
+    }
+    if (data.containsKey('link_text')) {
+      context.handle(
+        _linkTextMeta,
+        linkText.isAcceptableOrUnknown(data['link_text']!, _linkTextMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  NodeLinkEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return NodeLinkEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      sourceNodeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_node_id'],
+      )!,
+      targetNodeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target_node_id'],
+      )!,
+      linkText: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}link_text'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $NodeLinksTable createAlias(String alias) {
+    return $NodeLinksTable(attachedDatabase, alias);
+  }
+}
+
+class NodeLinkEntry extends DataClass implements Insertable<NodeLinkEntry> {
+  final String id;
+  final String sourceNodeId;
+  final String targetNodeId;
+  final String? linkText;
+  final DateTime createdAt;
+  const NodeLinkEntry({
+    required this.id,
+    required this.sourceNodeId,
+    required this.targetNodeId,
+    this.linkText,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['source_node_id'] = Variable<String>(sourceNodeId);
+    map['target_node_id'] = Variable<String>(targetNodeId);
+    if (!nullToAbsent || linkText != null) {
+      map['link_text'] = Variable<String>(linkText);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  NodeLinksCompanion toCompanion(bool nullToAbsent) {
+    return NodeLinksCompanion(
+      id: Value(id),
+      sourceNodeId: Value(sourceNodeId),
+      targetNodeId: Value(targetNodeId),
+      linkText: linkText == null && nullToAbsent
+          ? const Value.absent()
+          : Value(linkText),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory NodeLinkEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return NodeLinkEntry(
+      id: serializer.fromJson<String>(json['id']),
+      sourceNodeId: serializer.fromJson<String>(json['sourceNodeId']),
+      targetNodeId: serializer.fromJson<String>(json['targetNodeId']),
+      linkText: serializer.fromJson<String?>(json['linkText']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'sourceNodeId': serializer.toJson<String>(sourceNodeId),
+      'targetNodeId': serializer.toJson<String>(targetNodeId),
+      'linkText': serializer.toJson<String?>(linkText),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  NodeLinkEntry copyWith({
+    String? id,
+    String? sourceNodeId,
+    String? targetNodeId,
+    Value<String?> linkText = const Value.absent(),
+    DateTime? createdAt,
+  }) => NodeLinkEntry(
+    id: id ?? this.id,
+    sourceNodeId: sourceNodeId ?? this.sourceNodeId,
+    targetNodeId: targetNodeId ?? this.targetNodeId,
+    linkText: linkText.present ? linkText.value : this.linkText,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  NodeLinkEntry copyWithCompanion(NodeLinksCompanion data) {
+    return NodeLinkEntry(
+      id: data.id.present ? data.id.value : this.id,
+      sourceNodeId: data.sourceNodeId.present
+          ? data.sourceNodeId.value
+          : this.sourceNodeId,
+      targetNodeId: data.targetNodeId.present
+          ? data.targetNodeId.value
+          : this.targetNodeId,
+      linkText: data.linkText.present ? data.linkText.value : this.linkText,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NodeLinkEntry(')
+          ..write('id: $id, ')
+          ..write('sourceNodeId: $sourceNodeId, ')
+          ..write('targetNodeId: $targetNodeId, ')
+          ..write('linkText: $linkText, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, sourceNodeId, targetNodeId, linkText, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is NodeLinkEntry &&
+          other.id == this.id &&
+          other.sourceNodeId == this.sourceNodeId &&
+          other.targetNodeId == this.targetNodeId &&
+          other.linkText == this.linkText &&
+          other.createdAt == this.createdAt);
+}
+
+class NodeLinksCompanion extends UpdateCompanion<NodeLinkEntry> {
+  final Value<String> id;
+  final Value<String> sourceNodeId;
+  final Value<String> targetNodeId;
+  final Value<String?> linkText;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const NodeLinksCompanion({
+    this.id = const Value.absent(),
+    this.sourceNodeId = const Value.absent(),
+    this.targetNodeId = const Value.absent(),
+    this.linkText = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NodeLinksCompanion.insert({
+    required String id,
+    required String sourceNodeId,
+    required String targetNodeId,
+    this.linkText = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       sourceNodeId = Value(sourceNodeId),
+       targetNodeId = Value(targetNodeId),
+       createdAt = Value(createdAt);
+  static Insertable<NodeLinkEntry> custom({
+    Expression<String>? id,
+    Expression<String>? sourceNodeId,
+    Expression<String>? targetNodeId,
+    Expression<String>? linkText,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (sourceNodeId != null) 'source_node_id': sourceNodeId,
+      if (targetNodeId != null) 'target_node_id': targetNodeId,
+      if (linkText != null) 'link_text': linkText,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NodeLinksCompanion copyWith({
+    Value<String>? id,
+    Value<String>? sourceNodeId,
+    Value<String>? targetNodeId,
+    Value<String?>? linkText,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return NodeLinksCompanion(
+      id: id ?? this.id,
+      sourceNodeId: sourceNodeId ?? this.sourceNodeId,
+      targetNodeId: targetNodeId ?? this.targetNodeId,
+      linkText: linkText ?? this.linkText,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (sourceNodeId.present) {
+      map['source_node_id'] = Variable<String>(sourceNodeId.value);
+    }
+    if (targetNodeId.present) {
+      map['target_node_id'] = Variable<String>(targetNodeId.value);
+    }
+    if (linkText.present) {
+      map['link_text'] = Variable<String>(linkText.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NodeLinksCompanion(')
+          ..write('id: $id, ')
+          ..write('sourceNodeId: $sourceNodeId, ')
+          ..write('targetNodeId: $targetNodeId, ')
+          ..write('linkText: $linkText, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $TagsTable extends Tags with TableInfo<$TagsTable, TagEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TagsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _workspaceIdMeta = const VerificationMeta(
+    'workspaceId',
+  );
+  @override
+  late final GeneratedColumn<String> workspaceId = GeneratedColumn<String>(
+    'workspace_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES workspaces (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 255,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _colorMeta = const VerificationMeta('color');
+  @override
+  late final GeneratedColumn<int> color = GeneratedColumn<int>(
+    'color',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    workspaceId,
+    name,
+    color,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'tags';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TagEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('workspace_id')) {
+      context.handle(
+        _workspaceIdMeta,
+        workspaceId.isAcceptableOrUnknown(
+          data['workspace_id']!,
+          _workspaceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_workspaceIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('color')) {
+      context.handle(
+        _colorMeta,
+        color.isAcceptableOrUnknown(data['color']!, _colorMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {workspaceId, name},
+  ];
+  @override
+  TagEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TagEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      workspaceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}workspace_id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      color: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}color'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $TagsTable createAlias(String alias) {
+    return $TagsTable(attachedDatabase, alias);
+  }
+}
+
+class TagEntry extends DataClass implements Insertable<TagEntry> {
+  final String id;
+  final String workspaceId;
+  final String name;
+  final int? color;
+  final DateTime createdAt;
+  const TagEntry({
+    required this.id,
+    required this.workspaceId,
+    required this.name,
+    this.color,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['workspace_id'] = Variable<String>(workspaceId);
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || color != null) {
+      map['color'] = Variable<int>(color);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  TagsCompanion toCompanion(bool nullToAbsent) {
+    return TagsCompanion(
+      id: Value(id),
+      workspaceId: Value(workspaceId),
+      name: Value(name),
+      color: color == null && nullToAbsent
+          ? const Value.absent()
+          : Value(color),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory TagEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TagEntry(
+      id: serializer.fromJson<String>(json['id']),
+      workspaceId: serializer.fromJson<String>(json['workspaceId']),
+      name: serializer.fromJson<String>(json['name']),
+      color: serializer.fromJson<int?>(json['color']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'workspaceId': serializer.toJson<String>(workspaceId),
+      'name': serializer.toJson<String>(name),
+      'color': serializer.toJson<int?>(color),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  TagEntry copyWith({
+    String? id,
+    String? workspaceId,
+    String? name,
+    Value<int?> color = const Value.absent(),
+    DateTime? createdAt,
+  }) => TagEntry(
+    id: id ?? this.id,
+    workspaceId: workspaceId ?? this.workspaceId,
+    name: name ?? this.name,
+    color: color.present ? color.value : this.color,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  TagEntry copyWithCompanion(TagsCompanion data) {
+    return TagEntry(
+      id: data.id.present ? data.id.value : this.id,
+      workspaceId: data.workspaceId.present
+          ? data.workspaceId.value
+          : this.workspaceId,
+      name: data.name.present ? data.name.value : this.name,
+      color: data.color.present ? data.color.value : this.color,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TagEntry(')
+          ..write('id: $id, ')
+          ..write('workspaceId: $workspaceId, ')
+          ..write('name: $name, ')
+          ..write('color: $color, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, workspaceId, name, color, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TagEntry &&
+          other.id == this.id &&
+          other.workspaceId == this.workspaceId &&
+          other.name == this.name &&
+          other.color == this.color &&
+          other.createdAt == this.createdAt);
+}
+
+class TagsCompanion extends UpdateCompanion<TagEntry> {
+  final Value<String> id;
+  final Value<String> workspaceId;
+  final Value<String> name;
+  final Value<int?> color;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const TagsCompanion({
+    this.id = const Value.absent(),
+    this.workspaceId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.color = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TagsCompanion.insert({
+    required String id,
+    required String workspaceId,
+    required String name,
+    this.color = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       workspaceId = Value(workspaceId),
+       name = Value(name),
+       createdAt = Value(createdAt);
+  static Insertable<TagEntry> custom({
+    Expression<String>? id,
+    Expression<String>? workspaceId,
+    Expression<String>? name,
+    Expression<int>? color,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (workspaceId != null) 'workspace_id': workspaceId,
+      if (name != null) 'name': name,
+      if (color != null) 'color': color,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TagsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? workspaceId,
+    Value<String>? name,
+    Value<int?>? color,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return TagsCompanion(
+      id: id ?? this.id,
+      workspaceId: workspaceId ?? this.workspaceId,
+      name: name ?? this.name,
+      color: color ?? this.color,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (workspaceId.present) {
+      map['workspace_id'] = Variable<String>(workspaceId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (color.present) {
+      map['color'] = Variable<int>(color.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TagsCompanion(')
+          ..write('id: $id, ')
+          ..write('workspaceId: $workspaceId, ')
+          ..write('name: $name, ')
+          ..write('color: $color, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $NodeTagsTable extends NodeTags
+    with TableInfo<$NodeTagsTable, NodeTagEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NodeTagsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _nodeIdMeta = const VerificationMeta('nodeId');
+  @override
+  late final GeneratedColumn<String> nodeId = GeneratedColumn<String>(
+    'node_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES nodes (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _tagIdMeta = const VerificationMeta('tagId');
+  @override
+  late final GeneratedColumn<String> tagId = GeneratedColumn<String>(
+    'tag_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES tags (id) ON DELETE CASCADE',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [nodeId, tagId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'node_tags';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<NodeTagEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('node_id')) {
+      context.handle(
+        _nodeIdMeta,
+        nodeId.isAcceptableOrUnknown(data['node_id']!, _nodeIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nodeIdMeta);
+    }
+    if (data.containsKey('tag_id')) {
+      context.handle(
+        _tagIdMeta,
+        tagId.isAcceptableOrUnknown(data['tag_id']!, _tagIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tagIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {nodeId, tagId};
+  @override
+  NodeTagEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return NodeTagEntry(
+      nodeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}node_id'],
+      )!,
+      tagId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tag_id'],
+      )!,
+    );
+  }
+
+  @override
+  $NodeTagsTable createAlias(String alias) {
+    return $NodeTagsTable(attachedDatabase, alias);
+  }
+}
+
+class NodeTagEntry extends DataClass implements Insertable<NodeTagEntry> {
+  final String nodeId;
+  final String tagId;
+  const NodeTagEntry({required this.nodeId, required this.tagId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['node_id'] = Variable<String>(nodeId);
+    map['tag_id'] = Variable<String>(tagId);
+    return map;
+  }
+
+  NodeTagsCompanion toCompanion(bool nullToAbsent) {
+    return NodeTagsCompanion(nodeId: Value(nodeId), tagId: Value(tagId));
+  }
+
+  factory NodeTagEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return NodeTagEntry(
+      nodeId: serializer.fromJson<String>(json['nodeId']),
+      tagId: serializer.fromJson<String>(json['tagId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'nodeId': serializer.toJson<String>(nodeId),
+      'tagId': serializer.toJson<String>(tagId),
+    };
+  }
+
+  NodeTagEntry copyWith({String? nodeId, String? tagId}) =>
+      NodeTagEntry(nodeId: nodeId ?? this.nodeId, tagId: tagId ?? this.tagId);
+  NodeTagEntry copyWithCompanion(NodeTagsCompanion data) {
+    return NodeTagEntry(
+      nodeId: data.nodeId.present ? data.nodeId.value : this.nodeId,
+      tagId: data.tagId.present ? data.tagId.value : this.tagId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NodeTagEntry(')
+          ..write('nodeId: $nodeId, ')
+          ..write('tagId: $tagId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(nodeId, tagId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is NodeTagEntry &&
+          other.nodeId == this.nodeId &&
+          other.tagId == this.tagId);
+}
+
+class NodeTagsCompanion extends UpdateCompanion<NodeTagEntry> {
+  final Value<String> nodeId;
+  final Value<String> tagId;
+  final Value<int> rowid;
+  const NodeTagsCompanion({
+    this.nodeId = const Value.absent(),
+    this.tagId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NodeTagsCompanion.insert({
+    required String nodeId,
+    required String tagId,
+    this.rowid = const Value.absent(),
+  }) : nodeId = Value(nodeId),
+       tagId = Value(tagId);
+  static Insertable<NodeTagEntry> custom({
+    Expression<String>? nodeId,
+    Expression<String>? tagId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (nodeId != null) 'node_id': nodeId,
+      if (tagId != null) 'tag_id': tagId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NodeTagsCompanion copyWith({
+    Value<String>? nodeId,
+    Value<String>? tagId,
+    Value<int>? rowid,
+  }) {
+    return NodeTagsCompanion(
+      nodeId: nodeId ?? this.nodeId,
+      tagId: tagId ?? this.tagId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (nodeId.present) {
+      map['node_id'] = Variable<String>(nodeId.value);
+    }
+    if (tagId.present) {
+      map['tag_id'] = Variable<String>(tagId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NodeTagsCompanion(')
+          ..write('nodeId: $nodeId, ')
+          ..write('tagId: $tagId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3728,9 +4750,21 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AttachmentsTable attachments = $AttachmentsTable(this);
   late final $InkDocumentsTable inkDocuments = $InkDocumentsTable(this);
   late final $InkPagesTable inkPages = $InkPagesTable(this);
+  late final $NodeLinksTable nodeLinks = $NodeLinksTable(this);
+  late final $TagsTable tags = $TagsTable(this);
+  late final $NodeTagsTable nodeTags = $NodeTagsTable(this);
+  late final Index idxNodeLinksSource = Index(
+    'idx_node_links_source',
+    'CREATE INDEX idx_node_links_source ON node_links (source_node_id)',
+  );
+  late final Index idxNodeLinksTarget = Index(
+    'idx_node_links_target',
+    'CREATE INDEX idx_node_links_target ON node_links (target_node_id)',
+  );
   late final WorkspacesDao workspacesDao = WorkspacesDao(this as AppDatabase);
   late final NodesDao nodesDao = NodesDao(this as AppDatabase);
   late final InkDao inkDao = InkDao(this as AppDatabase);
+  late final LinksDao linksDao = LinksDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3742,6 +4776,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     attachments,
     inkDocuments,
     inkPages,
+    nodeLinks,
+    tags,
+    nodeTags,
+    idxNodeLinksSource,
+    idxNodeLinksTarget,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -3787,6 +4826,41 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       ),
       result: [TableUpdate('ink_pages', kind: UpdateKind.delete)],
     ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'nodes',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('node_links', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'nodes',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('node_links', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'workspaces',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('tags', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'nodes',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('node_tags', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'tags',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('node_tags', kind: UpdateKind.delete)],
+    ),
   ]);
 }
 
@@ -3829,6 +4903,25 @@ final class $$WorkspacesTableReferences
     ).filter((f) => f.workspaceId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_nodesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$TagsTable, List<TagEntry>> _tagsRefsTable(
+    _$AppDatabase db,
+  ) => MultiTypedResultKey.fromTable(
+    db.tags,
+    aliasName: 'workspaces__id__tags__workspace_id',
+  );
+
+  $$TagsTableProcessedTableManager get tagsRefs {
+    final manager = $$TagsTableTableManager(
+      $_db,
+      $_db.tags,
+    ).filter((f) => f.workspaceId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_tagsRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -3895,6 +4988,31 @@ class $$WorkspacesTableFilterComposer
           }) => $$NodesTableFilterComposer(
             $db: $db,
             $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> tagsRefs(
+    Expression<bool> Function($$TagsTableFilterComposer f) f,
+  ) {
+    final $$TagsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.tags,
+      getReferencedColumn: (t) => t.workspaceId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TagsTableFilterComposer(
+            $db: $db,
+            $table: $db.tags,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -4006,6 +5124,31 @@ class $$WorkspacesTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> tagsRefs<T extends Object>(
+    Expression<T> Function($$TagsTableAnnotationComposer a) f,
+  ) {
+    final $$TagsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.tags,
+      getReferencedColumn: (t) => t.workspaceId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TagsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.tags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$WorkspacesTableTableManager
@@ -4021,7 +5164,7 @@ class $$WorkspacesTableTableManager
           $$WorkspacesTableUpdateCompanionBuilder,
           (WorkspaceEntry, $$WorkspacesTableReferences),
           WorkspaceEntry,
-          PrefetchHooks Function({bool nodesRefs})
+          PrefetchHooks Function({bool nodesRefs, bool tagsRefs})
         > {
   $$WorkspacesTableTableManager(_$AppDatabase db, $WorkspacesTable table)
     : super(
@@ -4082,10 +5225,13 @@ class $$WorkspacesTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({nodesRefs = false}) {
+          prefetchHooksCallback: ({nodesRefs = false, tagsRefs = false}) {
             return PrefetchHooks(
               db: db,
-              explicitlyWatchedTables: [if (nodesRefs) db.nodes],
+              explicitlyWatchedTables: [
+                if (nodesRefs) db.nodes,
+                if (tagsRefs) db.tags,
+              ],
               addJoins: null,
               getPrefetchedDataCallback: (items) async {
                 return [
@@ -4101,6 +5247,22 @@ class $$WorkspacesTableTableManager
                           ._nodesRefsTable(db),
                       managerFromTypedResult: (p0) =>
                           $$WorkspacesTableReferences(db, table, p0).nodesRefs,
+                      currentColumn: 'id',
+                      referencedColumn: 'workspace_id',
+                      typedResults: items,
+                    ),
+                  if (tagsRefs)
+                    await $_getPrefetchedDataByColumns<
+                      WorkspaceEntry,
+                      $WorkspacesTable,
+                      TagEntry,
+                      $TagsTable
+                    >(
+                      currentTable: table,
+                      referencedTable: $$WorkspacesTableReferences
+                          ._tagsRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$WorkspacesTableReferences(db, table, p0).tagsRefs,
                       currentColumn: 'id',
                       referencedColumn: 'workspace_id',
                       typedResults: items,
@@ -4125,7 +5287,7 @@ typedef $$WorkspacesTableProcessedTableManager =
       $$WorkspacesTableUpdateCompanionBuilder,
       (WorkspaceEntry, $$WorkspacesTableReferences),
       WorkspaceEntry,
-      PrefetchHooks Function({bool nodesRefs})
+      PrefetchHooks Function({bool nodesRefs, bool tagsRefs})
     >;
 typedef $$NodesTableCreateCompanionBuilder = NodesCompanion Function({
   required String id,
@@ -4135,6 +5297,7 @@ typedef $$NodesTableCreateCompanionBuilder = NodesCompanion Function({
   required String title,
   Value<String?> icon,
   Value<String?> coverImageHash,
+  Value<String?> contentHash,
   Value<double> sortOrder,
   Value<bool> isFavorite,
   Value<bool> isPinned,
@@ -4153,6 +5316,7 @@ typedef $$NodesTableUpdateCompanionBuilder = NodesCompanion Function({
   Value<String> title,
   Value<String?> icon,
   Value<String?> coverImageHash,
+  Value<String?> contentHash,
   Value<double> sortOrder,
   Value<bool> isFavorite,
   Value<bool> isPinned,
@@ -4237,6 +5401,60 @@ final class $$NodesTableReferences
       manager.$state.copyWith(prefetchedData: cache),
     );
   }
+
+  static MultiTypedResultKey<$NodeLinksTable, List<NodeLinkEntry>>
+  _outgoingLinksTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.nodeLinks,
+    aliasName: 'nodes__id__node_links__source_node_id',
+  );
+
+  $$NodeLinksTableProcessedTableManager get outgoingLinks {
+    final manager = $$NodeLinksTableTableManager(
+      $_db,
+      $_db.nodeLinks,
+    ).filter((f) => f.sourceNodeId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_outgoingLinksTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$NodeLinksTable, List<NodeLinkEntry>>
+  _incomingLinksTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.nodeLinks,
+    aliasName: 'nodes__id__node_links__target_node_id',
+  );
+
+  $$NodeLinksTableProcessedTableManager get incomingLinks {
+    final manager = $$NodeLinksTableTableManager(
+      $_db,
+      $_db.nodeLinks,
+    ).filter((f) => f.targetNodeId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_incomingLinksTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$NodeTagsTable, List<NodeTagEntry>>
+  _nodeTagsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.nodeTags,
+    aliasName: 'nodes__id__node_tags__node_id',
+  );
+
+  $$NodeTagsTableProcessedTableManager get nodeTagsRefs {
+    final manager = $$NodeTagsTableTableManager(
+      $_db,
+      $_db.nodeTags,
+    ).filter((f) => f.nodeId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_nodeTagsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 }
 
 class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
@@ -4269,6 +5487,11 @@ class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
 
   ColumnFilters<String> get coverImageHash => $composableBuilder(
     column: $table.coverImageHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get contentHash => $composableBuilder(
+    column: $table.contentHash,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4407,6 +5630,81 @@ class $$NodesTableFilterComposer extends Composer<_$AppDatabase, $NodesTable> {
     );
     return f(composer);
   }
+
+  Expression<bool> outgoingLinks(
+    Expression<bool> Function($$NodeLinksTableFilterComposer f) f,
+  ) {
+    final $$NodeLinksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeLinks,
+      getReferencedColumn: (t) => t.sourceNodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeLinksTableFilterComposer(
+            $db: $db,
+            $table: $db.nodeLinks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> incomingLinks(
+    Expression<bool> Function($$NodeLinksTableFilterComposer f) f,
+  ) {
+    final $$NodeLinksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeLinks,
+      getReferencedColumn: (t) => t.targetNodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeLinksTableFilterComposer(
+            $db: $db,
+            $table: $db.nodeLinks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> nodeTagsRefs(
+    Expression<bool> Function($$NodeTagsTableFilterComposer f) f,
+  ) {
+    final $$NodeTagsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeTags,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeTagsTableFilterComposer(
+            $db: $db,
+            $table: $db.nodeTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$NodesTableOrderingComposer
@@ -4440,6 +5738,11 @@ class $$NodesTableOrderingComposer
 
   ColumnOrderings<String> get coverImageHash => $composableBuilder(
     column: $table.coverImageHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get contentHash => $composableBuilder(
+    column: $table.contentHash,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -4553,6 +5856,11 @@ class $$NodesTableAnnotationComposer
 
   GeneratedColumn<String> get coverImageHash => $composableBuilder(
     column: $table.coverImageHash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get contentHash => $composableBuilder(
+    column: $table.contentHash,
     builder: (column) => column,
   );
 
@@ -4681,6 +5989,81 @@ class $$NodesTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> outgoingLinks<T extends Object>(
+    Expression<T> Function($$NodeLinksTableAnnotationComposer a) f,
+  ) {
+    final $$NodeLinksTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeLinks,
+      getReferencedColumn: (t) => t.sourceNodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeLinksTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodeLinks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<T> incomingLinks<T extends Object>(
+    Expression<T> Function($$NodeLinksTableAnnotationComposer a) f,
+  ) {
+    final $$NodeLinksTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeLinks,
+      getReferencedColumn: (t) => t.targetNodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeLinksTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodeLinks,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<T> nodeTagsRefs<T extends Object>(
+    Expression<T> Function($$NodeTagsTableAnnotationComposer a) f,
+  ) {
+    final $$NodeTagsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeTags,
+      getReferencedColumn: (t) => t.nodeId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeTagsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodeTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$NodesTableTableManager
@@ -4701,6 +6084,9 @@ class $$NodesTableTableManager
             bool parentId,
             bool nodeBlocksRefs,
             bool inkDocumentsRefs,
+            bool outgoingLinks,
+            bool incomingLinks,
+            bool nodeTagsRefs,
           })
         > {
   $$NodesTableTableManager(_$AppDatabase db, $NodesTable table)
@@ -4723,6 +6109,7 @@ class $$NodesTableTableManager
                 Value<String> title = const Value.absent(),
                 Value<String?> icon = const Value.absent(),
                 Value<String?> coverImageHash = const Value.absent(),
+                Value<String?> contentHash = const Value.absent(),
                 Value<double> sortOrder = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
@@ -4740,6 +6127,7 @@ class $$NodesTableTableManager
                 title: title,
                 icon: icon,
                 coverImageHash: coverImageHash,
+                contentHash: contentHash,
                 sortOrder: sortOrder,
                 isFavorite: isFavorite,
                 isPinned: isPinned,
@@ -4759,6 +6147,7 @@ class $$NodesTableTableManager
                 required String title,
                 Value<String?> icon = const Value.absent(),
                 Value<String?> coverImageHash = const Value.absent(),
+                Value<String?> contentHash = const Value.absent(),
                 Value<double> sortOrder = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
@@ -4776,6 +6165,7 @@ class $$NodesTableTableManager
                 title: title,
                 icon: icon,
                 coverImageHash: coverImageHash,
+                contentHash: contentHash,
                 sortOrder: sortOrder,
                 isFavorite: isFavorite,
                 isPinned: isPinned,
@@ -4800,12 +6190,18 @@ class $$NodesTableTableManager
                 parentId = false,
                 nodeBlocksRefs = false,
                 inkDocumentsRefs = false,
+                outgoingLinks = false,
+                incomingLinks = false,
+                nodeTagsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (nodeBlocksRefs) db.nodeBlocks,
                     if (inkDocumentsRefs) db.inkDocuments,
+                    if (outgoingLinks) db.nodeLinks,
+                    if (incomingLinks) db.nodeLinks,
+                    if (nodeTagsRefs) db.nodeTags,
                   ],
                   addJoins:
                       <
@@ -4890,6 +6286,66 @@ class $$NodesTableTableManager
                           referencedColumn: 'node_id',
                           typedResults: items,
                         ),
+                      if (outgoingLinks)
+                        await $_getPrefetchedDataByColumns<
+                          NodeEntry,
+                          $NodesTable,
+                          NodeLinkEntry,
+                          $NodeLinksTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$NodesTableReferences
+                              ._outgoingLinksTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$NodesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).outgoingLinks,
+                          currentColumn: 'id',
+                          referencedColumn: 'source_node_id',
+                          typedResults: items,
+                        ),
+                      if (incomingLinks)
+                        await $_getPrefetchedDataByColumns<
+                          NodeEntry,
+                          $NodesTable,
+                          NodeLinkEntry,
+                          $NodeLinksTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$NodesTableReferences
+                              ._incomingLinksTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$NodesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).incomingLinks,
+                          currentColumn: 'id',
+                          referencedColumn: 'target_node_id',
+                          typedResults: items,
+                        ),
+                      if (nodeTagsRefs)
+                        await $_getPrefetchedDataByColumns<
+                          NodeEntry,
+                          $NodesTable,
+                          NodeTagEntry,
+                          $NodeTagsTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$NodesTableReferences
+                              ._nodeTagsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$NodesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).nodeTagsRefs,
+                          currentColumn: 'id',
+                          referencedColumn: 'node_id',
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -4915,6 +6371,9 @@ typedef $$NodesTableProcessedTableManager =
         bool parentId,
         bool nodeBlocksRefs,
         bool inkDocumentsRefs,
+        bool outgoingLinks,
+        bool incomingLinks,
+        bool nodeTagsRefs,
       })
     >;
 typedef $$NodeBlocksTableCreateCompanionBuilder = NodeBlocksCompanion Function({
@@ -6594,6 +8053,1138 @@ typedef $$InkPagesTableProcessedTableManager =
       InkPageEntry,
       PrefetchHooks Function({bool documentId})
     >;
+typedef $$NodeLinksTableCreateCompanionBuilder = NodeLinksCompanion Function({
+  required String id,
+  required String sourceNodeId,
+  required String targetNodeId,
+  Value<String?> linkText,
+  required DateTime createdAt,
+  Value<int> rowid,
+});
+typedef $$NodeLinksTableUpdateCompanionBuilder = NodeLinksCompanion Function({
+  Value<String> id,
+  Value<String> sourceNodeId,
+  Value<String> targetNodeId,
+  Value<String?> linkText,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+
+final class $$NodeLinksTableReferences
+    extends BaseReferences<_$AppDatabase, $NodeLinksTable, NodeLinkEntry> {
+  $$NodeLinksTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $NodesTable _sourceNodeIdTable(_$AppDatabase db) =>
+      db.nodes.createAlias('node_links__source_node_id__nodes__id');
+
+  $$NodesTableProcessedTableManager get sourceNodeId {
+    final $_column = $_itemColumn<String>('source_node_id')!;
+
+    final manager = $$NodesTableTableManager(
+      $_db,
+      $_db.nodes,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_sourceNodeIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $NodesTable _targetNodeIdTable(_$AppDatabase db) =>
+      db.nodes.createAlias('node_links__target_node_id__nodes__id');
+
+  $$NodesTableProcessedTableManager get targetNodeId {
+    final $_column = $_itemColumn<String>('target_node_id')!;
+
+    final manager = $$NodesTableTableManager(
+      $_db,
+      $_db.nodes,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_targetNodeIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$NodeLinksTableFilterComposer
+    extends Composer<_$AppDatabase, $NodeLinksTable> {
+  $$NodeLinksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get linkText => $composableBuilder(
+    column: $table.linkText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$NodesTableFilterComposer get sourceNodeId {
+    final $$NodesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sourceNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableFilterComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$NodesTableFilterComposer get targetNodeId {
+    final $$NodesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.targetNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableFilterComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeLinksTableOrderingComposer
+    extends Composer<_$AppDatabase, $NodeLinksTable> {
+  $$NodeLinksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get linkText => $composableBuilder(
+    column: $table.linkText,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$NodesTableOrderingComposer get sourceNodeId {
+    final $$NodesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sourceNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableOrderingComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$NodesTableOrderingComposer get targetNodeId {
+    final $$NodesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.targetNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableOrderingComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeLinksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NodeLinksTable> {
+  $$NodeLinksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get linkText =>
+      $composableBuilder(column: $table.linkText, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$NodesTableAnnotationComposer get sourceNodeId {
+    final $$NodesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sourceNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$NodesTableAnnotationComposer get targetNodeId {
+    final $$NodesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.targetNodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeLinksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $NodeLinksTable,
+          NodeLinkEntry,
+          $$NodeLinksTableFilterComposer,
+          $$NodeLinksTableOrderingComposer,
+          $$NodeLinksTableAnnotationComposer,
+          $$NodeLinksTableCreateCompanionBuilder,
+          $$NodeLinksTableUpdateCompanionBuilder,
+          (NodeLinkEntry, $$NodeLinksTableReferences),
+          NodeLinkEntry,
+          PrefetchHooks Function({bool sourceNodeId, bool targetNodeId})
+        > {
+  $$NodeLinksTableTableManager(_$AppDatabase db, $NodeLinksTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NodeLinksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NodeLinksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NodeLinksTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> sourceNodeId = const Value.absent(),
+                Value<String> targetNodeId = const Value.absent(),
+                Value<String?> linkText = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => NodeLinksCompanion(
+                id: id,
+                sourceNodeId: sourceNodeId,
+                targetNodeId: targetNodeId,
+                linkText: linkText,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String sourceNodeId,
+                required String targetNodeId,
+                Value<String?> linkText = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => NodeLinksCompanion.insert(
+                id: id,
+                sourceNodeId: sourceNodeId,
+                targetNodeId: targetNodeId,
+                linkText: linkText,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$NodeLinksTable, NodeLinkEntry>(table),
+                  $$NodeLinksTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback:
+              ({sourceNodeId = false, targetNodeId = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (sourceNodeId) {
+                          state = state.withJoin(
+                            currentTable: table,
+                            currentColumn: table.sourceNodeId,
+                            referencedTable: $$NodeLinksTableReferences
+                                ._sourceNodeIdTable(db),
+                            referencedColumn: $$NodeLinksTableReferences
+                                ._sourceNodeIdTable(db)
+                                .id,
+                          ) as T;
+                        }
+                        if (targetNodeId) {
+                          state = state.withJoin(
+                            currentTable: table,
+                            currentColumn: table.targetNodeId,
+                            referencedTable: $$NodeLinksTableReferences
+                                ._targetNodeIdTable(db),
+                            referencedColumn: $$NodeLinksTableReferences
+                                ._targetNodeIdTable(db)
+                                .id,
+                          ) as T;
+                        }
+
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [];
+                  },
+                );
+              },
+        ),
+      );
+}
+
+typedef $$NodeLinksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $NodeLinksTable,
+      NodeLinkEntry,
+      $$NodeLinksTableFilterComposer,
+      $$NodeLinksTableOrderingComposer,
+      $$NodeLinksTableAnnotationComposer,
+      $$NodeLinksTableCreateCompanionBuilder,
+      $$NodeLinksTableUpdateCompanionBuilder,
+      (NodeLinkEntry, $$NodeLinksTableReferences),
+      NodeLinkEntry,
+      PrefetchHooks Function({bool sourceNodeId, bool targetNodeId})
+    >;
+typedef $$TagsTableCreateCompanionBuilder = TagsCompanion Function({
+  required String id,
+  required String workspaceId,
+  required String name,
+  Value<int?> color,
+  required DateTime createdAt,
+  Value<int> rowid,
+});
+typedef $$TagsTableUpdateCompanionBuilder = TagsCompanion Function({
+  Value<String> id,
+  Value<String> workspaceId,
+  Value<String> name,
+  Value<int?> color,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+
+final class $$TagsTableReferences
+    extends BaseReferences<_$AppDatabase, $TagsTable, TagEntry> {
+  $$TagsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $WorkspacesTable _workspaceIdTable(_$AppDatabase db) =>
+      db.workspaces.createAlias('tags__workspace_id__workspaces__id');
+
+  $$WorkspacesTableProcessedTableManager get workspaceId {
+    final $_column = $_itemColumn<String>('workspace_id')!;
+
+    final manager = $$WorkspacesTableTableManager(
+      $_db,
+      $_db.workspaces,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_workspaceIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static MultiTypedResultKey<$NodeTagsTable, List<NodeTagEntry>>
+  _nodeTagsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.nodeTags,
+    aliasName: 'tags__id__node_tags__tag_id',
+  );
+
+  $$NodeTagsTableProcessedTableManager get nodeTagsRefs {
+    final manager = $$NodeTagsTableTableManager(
+      $_db,
+      $_db.nodeTags,
+    ).filter((f) => f.tagId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_nodeTagsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$TagsTableFilterComposer extends Composer<_$AppDatabase, $TagsTable> {
+  $$TagsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$WorkspacesTableFilterComposer get workspaceId {
+    final $$WorkspacesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.workspaceId,
+      referencedTable: $db.workspaces,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$WorkspacesTableFilterComposer(
+            $db: $db,
+            $table: $db.workspaces,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<bool> nodeTagsRefs(
+    Expression<bool> Function($$NodeTagsTableFilterComposer f) f,
+  ) {
+    final $$NodeTagsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeTags,
+      getReferencedColumn: (t) => t.tagId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeTagsTableFilterComposer(
+            $db: $db,
+            $table: $db.nodeTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$TagsTableOrderingComposer extends Composer<_$AppDatabase, $TagsTable> {
+  $$TagsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$WorkspacesTableOrderingComposer get workspaceId {
+    final $$WorkspacesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.workspaceId,
+      referencedTable: $db.workspaces,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$WorkspacesTableOrderingComposer(
+            $db: $db,
+            $table: $db.workspaces,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$TagsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TagsTable> {
+  $$TagsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get color =>
+      $composableBuilder(column: $table.color, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$WorkspacesTableAnnotationComposer get workspaceId {
+    final $$WorkspacesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.workspaceId,
+      referencedTable: $db.workspaces,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$WorkspacesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.workspaces,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<T> nodeTagsRefs<T extends Object>(
+    Expression<T> Function($$NodeTagsTableAnnotationComposer a) f,
+  ) {
+    final $$NodeTagsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.nodeTags,
+      getReferencedColumn: (t) => t.tagId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodeTagsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodeTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$TagsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TagsTable,
+          TagEntry,
+          $$TagsTableFilterComposer,
+          $$TagsTableOrderingComposer,
+          $$TagsTableAnnotationComposer,
+          $$TagsTableCreateCompanionBuilder,
+          $$TagsTableUpdateCompanionBuilder,
+          (TagEntry, $$TagsTableReferences),
+          TagEntry,
+          PrefetchHooks Function({bool workspaceId, bool nodeTagsRefs})
+        > {
+  $$TagsTableTableManager(_$AppDatabase db, $TagsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TagsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TagsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$TagsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> workspaceId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int?> color = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TagsCompanion(
+                id: id,
+                workspaceId: workspaceId,
+                name: name,
+                color: color,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String workspaceId,
+                required String name,
+                Value<int?> color = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => TagsCompanion.insert(
+                id: id,
+                workspaceId: workspaceId,
+                name: name,
+                color: color,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$TagsTable, TagEntry>(table),
+                  $$TagsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({workspaceId = false, nodeTagsRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (nodeTagsRefs) db.nodeTags],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (workspaceId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.workspaceId,
+                        referencedTable: $$TagsTableReferences
+                            ._workspaceIdTable(db),
+                        referencedColumn: $$TagsTableReferences
+                            ._workspaceIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (nodeTagsRefs)
+                    await $_getPrefetchedDataByColumns<
+                      TagEntry,
+                      $TagsTable,
+                      NodeTagEntry,
+                      $NodeTagsTable
+                    >(
+                      currentTable: table,
+                      referencedTable: $$TagsTableReferences._nodeTagsRefsTable(
+                        db,
+                      ),
+                      managerFromTypedResult: (p0) =>
+                          $$TagsTableReferences(db, table, p0).nodeTagsRefs,
+                      currentColumn: 'id',
+                      referencedColumn: 'tag_id',
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$TagsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TagsTable,
+      TagEntry,
+      $$TagsTableFilterComposer,
+      $$TagsTableOrderingComposer,
+      $$TagsTableAnnotationComposer,
+      $$TagsTableCreateCompanionBuilder,
+      $$TagsTableUpdateCompanionBuilder,
+      (TagEntry, $$TagsTableReferences),
+      TagEntry,
+      PrefetchHooks Function({bool workspaceId, bool nodeTagsRefs})
+    >;
+typedef $$NodeTagsTableCreateCompanionBuilder = NodeTagsCompanion Function({
+  required String nodeId,
+  required String tagId,
+  Value<int> rowid,
+});
+typedef $$NodeTagsTableUpdateCompanionBuilder = NodeTagsCompanion Function({
+  Value<String> nodeId,
+  Value<String> tagId,
+  Value<int> rowid,
+});
+
+final class $$NodeTagsTableReferences
+    extends BaseReferences<_$AppDatabase, $NodeTagsTable, NodeTagEntry> {
+  $$NodeTagsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $NodesTable _nodeIdTable(_$AppDatabase db) =>
+      db.nodes.createAlias('node_tags__node_id__nodes__id');
+
+  $$NodesTableProcessedTableManager get nodeId {
+    final $_column = $_itemColumn<String>('node_id')!;
+
+    final manager = $$NodesTableTableManager(
+      $_db,
+      $_db.nodes,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_nodeIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $TagsTable _tagIdTable(_$AppDatabase db) =>
+      db.tags.createAlias('node_tags__tag_id__tags__id');
+
+  $$TagsTableProcessedTableManager get tagId {
+    final $_column = $_itemColumn<String>('tag_id')!;
+
+    final manager = $$TagsTableTableManager(
+      $_db,
+      $_db.tags,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_tagIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$NodeTagsTableFilterComposer
+    extends Composer<_$AppDatabase, $NodeTagsTable> {
+  $$NodeTagsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  $$NodesTableFilterComposer get nodeId {
+    final $$NodesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableFilterComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$TagsTableFilterComposer get tagId {
+    final $$TagsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.tagId,
+      referencedTable: $db.tags,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TagsTableFilterComposer(
+            $db: $db,
+            $table: $db.tags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeTagsTableOrderingComposer
+    extends Composer<_$AppDatabase, $NodeTagsTable> {
+  $$NodeTagsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  $$NodesTableOrderingComposer get nodeId {
+    final $$NodesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableOrderingComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$TagsTableOrderingComposer get tagId {
+    final $$TagsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.tagId,
+      referencedTable: $db.tags,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TagsTableOrderingComposer(
+            $db: $db,
+            $table: $db.tags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeTagsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NodeTagsTable> {
+  $$NodeTagsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  $$NodesTableAnnotationComposer get nodeId {
+    final $$NodesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.nodeId,
+      referencedTable: $db.nodes,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$NodesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.nodes,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$TagsTableAnnotationComposer get tagId {
+    final $$TagsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.tagId,
+      referencedTable: $db.tags,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TagsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.tags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$NodeTagsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $NodeTagsTable,
+          NodeTagEntry,
+          $$NodeTagsTableFilterComposer,
+          $$NodeTagsTableOrderingComposer,
+          $$NodeTagsTableAnnotationComposer,
+          $$NodeTagsTableCreateCompanionBuilder,
+          $$NodeTagsTableUpdateCompanionBuilder,
+          (NodeTagEntry, $$NodeTagsTableReferences),
+          NodeTagEntry,
+          PrefetchHooks Function({bool nodeId, bool tagId})
+        > {
+  $$NodeTagsTableTableManager(_$AppDatabase db, $NodeTagsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NodeTagsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NodeTagsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NodeTagsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> nodeId = const Value.absent(),
+            Value<String> tagId = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => NodeTagsCompanion(nodeId: nodeId, tagId: tagId, rowid: rowid),
+          createCompanionCallback:
+              ({
+                required String nodeId,
+                required String tagId,
+                Value<int> rowid = const Value.absent(),
+              }) => NodeTagsCompanion.insert(
+                nodeId: nodeId,
+                tagId: tagId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$NodeTagsTable, NodeTagEntry>(table),
+                  $$NodeTagsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({nodeId = false, tagId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (nodeId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.nodeId,
+                        referencedTable: $$NodeTagsTableReferences._nodeIdTable(
+                          db,
+                        ),
+                        referencedColumn: $$NodeTagsTableReferences
+                            ._nodeIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+                    if (tagId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.tagId,
+                        referencedTable: $$NodeTagsTableReferences._tagIdTable(
+                          db,
+                        ),
+                        referencedColumn: $$NodeTagsTableReferences
+                            ._tagIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$NodeTagsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $NodeTagsTable,
+      NodeTagEntry,
+      $$NodeTagsTableFilterComposer,
+      $$NodeTagsTableOrderingComposer,
+      $$NodeTagsTableAnnotationComposer,
+      $$NodeTagsTableCreateCompanionBuilder,
+      $$NodeTagsTableUpdateCompanionBuilder,
+      (NodeTagEntry, $$NodeTagsTableReferences),
+      NodeTagEntry,
+      PrefetchHooks Function({bool nodeId, bool tagId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6610,4 +9201,9 @@ class $AppDatabaseManager {
       $$InkDocumentsTableTableManager(_db, _db.inkDocuments);
   $$InkPagesTableTableManager get inkPages =>
       $$InkPagesTableTableManager(_db, _db.inkPages);
+  $$NodeLinksTableTableManager get nodeLinks =>
+      $$NodeLinksTableTableManager(_db, _db.nodeLinks);
+  $$TagsTableTableManager get tags => $$TagsTableTableManager(_db, _db.tags);
+  $$NodeTagsTableTableManager get nodeTags =>
+      $$NodeTagsTableTableManager(_db, _db.nodeTags);
 }

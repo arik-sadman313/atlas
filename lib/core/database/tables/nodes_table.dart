@@ -13,6 +13,7 @@ class Nodes extends Table {
   TextColumn get title => text().withLength(min: 1, max: 500)();
   TextColumn get icon => text().nullable()();
   TextColumn get coverImageHash => text().nullable()();
+  TextColumn get contentHash => text().nullable()();
   RealColumn get sortOrder => real().withDefault(const Constant(0.0))();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();

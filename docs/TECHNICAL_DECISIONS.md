@@ -5,7 +5,7 @@
 - [ADR-001: Selection of Flutter + Dart as Unified Core](#adr-001-selection-of-flutter--dart-as-unified-core)
 - [ADR-002: Dual Handwriting Engine Architecture](#adr-002-dual-handwriting-engine-architecture)
 - [ADR-003: SQLite with Drift ORM & FTS5 as Local Source of Truth](#adr-003-sqlite-with-drift-orm--fts5-as-local-source-of-truth)
-- [ADR-004: Adoption of AppFlowy Editor under MPL-2.0](#adr-004-adoption-of-appflowy-editor-under-mpl-20)
+- [ADR-004: Adoption of AppFlowy Editor under MPL-2.0 (Superseded by ADR-017)](#adr-004-adoption-of-appflowy-editor-under-mpl-20)
 - [ADR-005: Custom Portable Ink Format (.atlas_ink) over PencilKit Serialization](#adr-005-custom-portable-ink-format-atlas_ink-over-pencilkit-serialization)
 - [ADR-006: Riverpod with Code Generation for State Management](#adr-006-riverpod-with-code-generation-for-state-management)
 - [ADR-007: Content-Addressable Storage (CAS) for Large File Blobs](#adr-007-content-addressable-storage-cas-for-large-file-blobs)
@@ -17,6 +17,8 @@
 - [ADR-013: Variable-width Ink Tessellation via perfect_freehand](#adr-013-variable-width-ink-tessellation-via-perfect_freehand)
 - [ADR-014: Native Apple Pencil Integration via pencil_kit and InkPlatformService](#adr-014-native-apple-pencil-integration-via-pencil_kit-and-inkplatformservice)
 - [ADR-015: Offscreen Multiply Compositing for Multi-Layer Highlighters](#adr-015-offscreen-multiply-compositing-for-multi-layer-highlighters)
+- [ADR-016: Bidirectional Portable-to-PencilKit Reconstruction & Autosave Navigation Lock](#adr-016-bidirectional-portable-to-pencilkit-reconstruction--autosave-navigation-lock)
+- [ADR-017: Selection of flutter_quill over appflowy_editor for Milestone 3](#adr-017-selection-of-flutter_quill-over-appflowy_editor-for-milestone-3)
 
 ---
 
@@ -67,9 +69,9 @@
 
 ### ADR-004: Adoption of AppFlowy Editor under MPL-2.0
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-017
 - **Context:** Building a Notion-style block editor from scratch with slash commands, markdown shortcuts, nested lists, and custom widgets requires thousands of engineering hours.
-- **Decision:** Adopt the `appflowy_editor` package from pub.dev under the terms of the **Mozilla Public License 2.0 (MPL-2.0)**.
+- **Decision:** Initially adopted `appflowy_editor` under MPL-2.0. In Milestone 3, audit revealed fatal compilation failure on Flutter 3.47+ due to `TextInputClient.onFocusReceived` interface breakage. Superseded by `flutter_quill` (ADR-017).
 - **Alternatives Considered:**
   - *flutter_quill:* Uses Quill Delta format, which is linear rather than block-based; difficult to embed complex custom blocks like inline handwriting canvases.
   - *super_editor:* Highly composable, but requires immense boilerplate to achieve standard Notion-style productivity workflows.
@@ -230,4 +232,23 @@
   - (+) Full cross-platform interoperability: notes created on Linux open and can be edited in native Apple PencilKit on iPadOS.
   - (+) 100% lossless preservation of raw Apple `.pkdrawing` binaries in CAS when notes are round-tripped without modification on other platforms.
   - (+) Guaranteed prevention of data loss during navigation gestures.
+
+---
+
+### ADR-017: Selection of flutter_quill over appflowy_editor for Milestone 3
+
+- **Status:** Accepted
+- **Context:** Milestone 3 requires a production-grade rich-text document editor supporting headings (H1-H3), bullet/numbered lists, checkboxes, code blocks, quote/callout styling, and wiki-link embedding across Linux desktop, iPadOS, and Android.
+  - Candidate A (`appflowy_editor: 6.2.0`) failed compilation under Flutter 3.47.9 due to missing `onFocusReceived` in `TextInputClient`.
+  - Candidate B (`flutter_quill: ^11.6.0`, Apache-2.0 license) compiles cleanly, provides comprehensive rich text capabilities, active cross-platform maintenance, and clean JSON Delta serialization.
+- **Decision:** Adopt `flutter_quill: ^11.6.0` encapsulated behind ATLAS abstractions:
+  - [`DocumentContentService`](../lib/features/documents/data/services/document_content_service.dart) for Delta serialization, plain text extraction, and CAS blob management.
+  - [`WikiLinkParser`](../lib/features/documents/domain/parser/wiki_link_parser.dart) for parsing `[[Target|Alias]]` links.
+  - [`LinkRepository`](../lib/features/documents/data/repositories/link_repository.dart) for managing graph link records and backlinks queries.
+- **Consequences:**
+  - (+) Zero AGPL contamination; Apache-2.0 is fully permissible.
+  - (+) Clean compilation across Linux desktop, Android, and iOS/iPadOS.
+  - (+) Document bodies are stored as immutable Delta JSON snapshots in CAS, with only the SHA-256 hash stored in SQLite `nodes.content_hash`.
+  - (+) Rapid rendering and smooth keyboard shortcuts on desktop.
+
 

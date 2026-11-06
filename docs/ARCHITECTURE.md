@@ -239,3 +239,30 @@ erDiagram
 - **Hybrid Logical Clocks (HLC):** Replaces physical wall-clock timestamps for conflict ordering. HLC provides causality tracking across offline devices without time-drift anomalies.
 - **Tombstone Strategy:** Deletions do not wipe rows immediately; they mark `is_deleted = 1` and record a tombstone in `sync_log`.
 - **Blob Sync:** Handled out-of-band via hash manifest comparison. Small metadata records sync first, heavy binary blobs download on-demand.
+
+---
+
+## 7. Rich Text & Knowledge Graph Architecture (Milestone 3)
+
+### 7.1 Rich Text Engine (`flutter_quill`)
+- **Package Selection:** `flutter_quill: ^11.6.0` (Apache-2.0) adopted behind the ATLAS `DocumentContentService` abstraction. Replaced `appflowy_editor` due to Flutter 3.47+ compilation break (`TextInputClient.onFocusReceived`).
+- **Content Storage:** Delta JSON documents are serialized and stored in Content-Addressable Storage (CAS) referenced by `nodes.content_hash`. SQLite stores metadata while CAS guarantees immutability, de-duplication, and instant snapshotting.
+- **Autosave & Navigation Safety:**
+  - 1-second debounced autosave timer resets on user typing.
+  - Asynchronous save mutex (`_isSaving`, `_saveQueued`) prevents racing writes.
+  - `PopScope` intercepts back navigation to flush pending changes before screen exit.
+
+### 7.2 Wiki-Links & Bidirectional Backlinks
+```mermaid
+flowchart LR
+    Doc[Document / Editor] -->|Types [[Note]]| Parser[WikiLinkParser]
+    Parser -->|Regex Matches| LinkRepo[LinkRepository]
+    LinkRepo -->|Search Titles| NodesDao[NodesDao]
+    LinkRepo -->|Insert / Sync Links| LinksDao[LinksDao / NodeLinks]
+    LinksDao -->|Watch Backlinks Stream| BacklinksPanel[BacklinksPanel Widget]
+    BacklinksPanel -->|Click Target| Router[GoRouter Navigate]
+```
+- **Wiki-Link Syntax:** Supports standard `[[Note Title]]` and aliased `[[Target Note|Custom Display Text]]`.
+- **Reactive Backlinks Stream:** `LinksDao.watchBacklinksForTarget(nodeId)` joins `node_links` with `nodes` to provide a real-time stream of incoming references sorted by update timestamp.
+- **Cross-Feature Interoperability:** Embedded in both `DocumentEditorScreen` and `NotebookEditorScreen` (via bottom sheet on iPadOS/Linux/Android).
+

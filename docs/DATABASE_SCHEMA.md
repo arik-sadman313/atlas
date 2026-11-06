@@ -74,6 +74,7 @@ CREATE TABLE nodes (
     title TEXT NOT NULL,
     icon TEXT,
     cover_image_hash TEXT,
+    content_hash TEXT, -- CAS hash of serialized rich-text JSON document
     sort_order REAL NOT NULL DEFAULT 0.0,
     is_favorite INTEGER NOT NULL DEFAULT 0,
     is_pinned INTEGER NOT NULL DEFAULT 0,
@@ -217,23 +218,22 @@ CREATE TABLE habit_logs (
 CREATE UNIQUE INDEX idx_habit_logs_unique ON habit_logs(habit_id, date_key);
 ```
 
-### 3.5 Backlinks & Tags
+### 3.5 Backlinks, Node Links & Tags (Schema v3)
 
 ```sql
--- Bi-directional links between nodes
-CREATE TABLE backlinks (
+-- Bi-directional wiki-links between nodes (Implemented in Schema v3)
+CREATE TABLE node_links (
     id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
     source_node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     target_node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    anchor_text TEXT,
-    context_snippet TEXT,
+    link_text TEXT,
     created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_backlinks_target ON backlinks(target_node_id, source_node_id);
-CREATE UNIQUE INDEX idx_backlinks_pair ON backlinks(source_node_id, target_node_id, anchor_text);
+CREATE INDEX idx_node_links_source ON node_links(source_node_id);
+CREATE INDEX idx_node_links_target ON node_links(target_node_id);
 
--- Tags taxonomy
+-- Tags taxonomy (Implemented in Schema v3)
 CREATE TABLE tags (
     id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -399,10 +399,30 @@ CREATE TABLE ink_pages (
 In `AppDatabase.migration`:
 ```dart
 onUpgrade: (m, from, to) async {
-  if (from == 1) {
+  if (from < 2) {
     await m.createTable(inkDocuments);
     await m.createTable(inkPages);
+  }
+  if (from < 3) {
+    await m.addColumn(nodes, nodes.contentHash);
+    await m.createTable(nodeLinks);
+    await m.createTable(tags);
+    await m.createTable(nodeTags);
   }
 }
 ```
 Tables are managed via [`InkDao`](../lib/core/database/daos/ink_dao.dart).
+
+---
+
+## 7. Schema Version 3 Migration (Milestone 3)
+
+### 7.1 New Columns & Tables
+- **`nodes.content_hash`**: Added nullable `TEXT` column storing the SHA-256 hash of serialized Delta rich-text JSON content in CAS storage.
+- **`node_links`**: Bi-directional wiki-link graph index mapping `source_node_id` to `target_node_id` with extracted `link_text`.
+- **`tags` & `node_tags`**: Tag entity and node-tag association tables.
+
+### 7.2 DAOs
+- [`LinksDao`](../lib/core/database/daos/links_dao.dart): Provides transactional link updates (`syncLinksForSource`), reactive incoming backlinks streams with node metadata joins (`watchBacklinksForTarget`), and forward links queries.
+- [`NodesDao`](../lib/core/database/daos/nodes_dao.dart): Added `findNodeByTitle` and `updateNodePartial` for fine-grained metadata and content updates without overwriting existing fields.
+

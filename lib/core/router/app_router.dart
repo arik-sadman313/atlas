@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/calendar/presentation/calendar_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
-import '../../features/documents/presentation/document_detail_screen.dart';
+import '../../features/documents/presentation/document_editor_screen.dart';
 import '../../features/documents/presentation/documents_screen.dart';
 import '../../features/handwriting/presentation/screens/notebook_editor_screen.dart';
 import '../../features/notebooks/presentation/notebooks_screen.dart';
@@ -59,7 +59,7 @@ GoRouter createAppRouter({String initialLocation = AtlasRoutes.dashboard}) {
                 pageBuilder: (context, state) {
                   final id = state.pathParameters['id'] ?? '';
                   return NoTransitionPage(
-                    child: DocumentDetailScreen(documentId: id),
+                    child: DocumentEditorScreen(documentId: id),
                   );
                 },
               ),
