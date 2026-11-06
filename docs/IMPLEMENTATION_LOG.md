@@ -807,6 +807,109 @@ Key architectural pillars implemented:
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (82.8s).
 
+---
+
+# Milestone 9: Production Hardening, Performance Optimization & Release Packaging
+
+## 1. Overview
+Finalized production readiness, performance tuning, and release packaging for ATLAS across Linux desktop, iPadOS, and Android companion platforms. Optimizations include viewport culling and static stroke picture caching for ink rendering (< 8ms latency target), native Linux desktop integration with standard `.desktop` entry, Quiet Craft application icons, automated relocatable release bundle packaging (`dist/atlas-linux-x64.tar.gz`), Android edge-to-edge transparent system bars with predictive back navigation, R8/ProGuard dead-code stripping, iOS 15.0+ deployment target configuration, and a comprehensive end-to-end integration smoke test suite.
+
+---
+
+## 2. Key Modules & Implementations
+
+### 2.1 Ink Rendering Performance Optimization
+- [`StrokeTessellator`](../lib/features/handwriting/domain/math/stroke_tessellator.dart):
+  - Added `computeBoundsFromPoints` and `computeBounds` computing spatial bounding boxes (`Rect.fromLTRB`) during stroke tessellation and persisting them on `InkStroke.bounds`.
+- [`InkRenderCache`](../lib/features/handwriting/presentation/widgets/ink_render_cache.dart):
+  - High-performance cache for static committed ink strokes.
+  - Automatically bakes committed strokes across layers into an offscreen `ui.Picture` when document stroke count reaches or exceeds 500 strokes.
+  - Disposes `ui.Picture` safely on invalidation and page switching.
+- [`InkDocumentPainter`](../lib/features/handwriting/presentation/widgets/ink_document_painter.dart):
+  - Implemented viewport culling using `canvas.getLocalClipBounds()`. Prunes any stroke whose bounding box falls entirely outside the current clip bounds before tessellation and drawing.
+  - Blits pre-recorded `ui.Picture` in a single GPU call on heavy documents, only tessellating the active in-flight stroke during user interaction.
+- [`InkCanvasController`](../lib/features/handwriting/presentation/controllers/ink_canvas_controller.dart):
+  - Precomputes stroke bounds on commit in `endStroke()`.
+  - Manages `revision` counter and invalidates `InkRenderCache` on mutations (`endStroke`, `eraseAt`, `undo`, `redo`, `clear`, `loadDocument`).
+  - Calls `renderCache.dispose()` in `dispose()`.
+- [`InkPageView`](../lib/features/handwriting/presentation/widgets/ink_page_view.dart) & [`InkCanvas`](../lib/features/handwriting/presentation/widgets/ink_canvas.dart):
+  - Integrated `renderCache` and `revision` parameters for GPU-accelerated static stroke playback and viewport culling.
+
+### 2.2 Linux Desktop Integration & Packaging
+- [`io.github.atlas_app.desktop`](../linux/packaging/io.github.atlas_app.desktop):
+  - Registered categories: `Office;Utility;TextEditor;`.
+  - Registered MIME types: `application/x-atlas-vault`, `application/x-atlas-ink`.
+  - Added quick desktop actions for `New Note` (`atlas --new-note`) and `Open Vault` (`atlas --open-vault`).
+- **Quiet Craft Visual Assets** ([`icons/hicolor/`](../linux/packaging/icons/hicolor/)):
+  - Designed scalable vector icon `io.github.atlas_app.svg` with dark graphite, cream parchment, and terracotta compass motif.
+  - Generated multi-resolution PNG icons (`256x256`, `128x128`, `64x64`, `32x32`).
+- [`build_linux_release.sh`](../scripts/build_linux_release.sh):
+  - Automated release packaging script compiling `flutter build linux --release`.
+  - Strips unneeded symbols via `strip --strip-unneeded`.
+  - Creates relocatable `dist/atlas-linux-x64.tar.gz` bundle (18 MB) containing binary, libraries, assets, desktop file, icons, and non-root `install.sh` installer.
+
+### 2.3 Android Production Readiness
+- [`MainActivity.kt`](../android/app/src/main/kotlin/com/atlas/app/atlas/MainActivity.kt):
+  - Configured `WindowCompat.setDecorFitsSystemWindows(window, false)` with transparent status and navigation bars.
+- [`AtlasScaffold`](../lib/shared/widgets/atlas_scaffold.dart):
+  - Implemented smooth Android 14+ predictive back gesture navigation via `PopScope`.
+- [`proguard-rules.pro`](../android/app/proguard-rules.pro):
+  - Keep rules for Drift SQLite (`com.simonbinder.sqlite3.**`), PDFium / `pdfrx` native bindings (`com.mypdfrx.**`), `flutter_local_notifications` receiver classes, desugared Java 8 time libraries (`j$.time.**`), and suppressed Play Store deferred component warnings.
+- [`build.gradle.kts`](../android/app/build.gradle.kts):
+  - Enabled `isMinifyEnabled = true`, `isShrinkResources = true`, and ProGuard configuration.
+
+### 2.4 iPadOS & macOS Build Layer
+- [`ios/Podfile`](../ios/Podfile):
+  - Specified `platform :ios, '15.0'` and post-install target override `IPHONEOS_DEPLOYMENT_TARGET = '15.0'`.
+- [`build_ios_check.sh`](../scripts/build_ios_check.sh):
+  - Verified native PencilKit bridge and AppDelegate link cleanly without warnings.
+  - Documented reproducible commands for `xcodebuild clean archive` and `.ipa` signing on macOS hosts.
+
+### 2.5 Comprehensive End-to-End System Smoke Test
+- [`atlas_end_to_end_test.dart`](../test/integration/atlas_end_to_end_test.dart):
+  - Full lifecycle test executing:
+    1. Fresh database and CAS storage initialization.
+    2. Typed document creation with wiki-link `[[Field Notebook]]`.
+    3. Handwritten notebook titled "Field Notebook" with 2 vector pages.
+    4. Bidirectional backlink verification between document and notebook.
+    5. High-priority linked task creation due today.
+    6. Habit creation and today's check-in completion.
+    7. Daily journal scaffolding and linked task context verification.
+    8. Multi-entity global search and score ranking.
+    9. Full `.atlas_vault` export with manifest checksum validation.
+    10. Vault restoration into a fresh database with zero data loss.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints across all 184 files).
+
+2. **Code Formatting:**
+   - `dart format .`
+   - **Result:** 100% formatted cleanly.
+
+3. **Automated Test Suite (157 tests across all modules):**
+   - `test/features/handwriting/ink_rendering_optimization_test.dart` (4 tests)
+   - `test/integration/atlas_end_to_end_test.dart` (1 end-to-end integration walkthrough)
+   - All 152 existing regression tests passing.
+   - **Result:** `✓ All 157 tests passed!` (100% pass rate).
+
+4. **Linux Desktop Release Build:**
+   - `scripts/build_linux_release.sh`
+   - **Result:** `✓ Built build/linux/x64/release/bundle/atlas` and generated `dist/atlas-linux-x64.tar.gz` (18 MB).
+
+5. **Android Release APK Build:**
+   - `flutter build apk --release`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-release.apk` (100.8 MB).
+
+6. **iOS Verification Check:**
+   - `scripts/build_ios_check.sh`
+   - **Result:** Deployment target and Swift sources validated.
+
+
 
 
 

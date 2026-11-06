@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ATLAS
+GenericName=Knowledge & Note-Taking Workspace
+Comment=Local-First Knowledge, Notes & Handwriting Workspace
+Exec=atlas %u
+Icon=io.github.atlas_app
+Terminal=false
+Categories=Office;Utility;TextEditor;
+MimeType=application/x-atlas-vault;application/x-atlas-ink;
+StartupWMClass=atlas
+Keywords=notes;notebook;handwriting;knowledge;markdown;calendar;tasks;journal;
+Actions=NewNote;OpenVault;
+
+[Desktop Action NewNote]
+Name=New Quick Note
+Exec=atlas --new-note
+
+[Desktop Action OpenVault]
+Name=Open Vault
+Exec=atlas --open-vault

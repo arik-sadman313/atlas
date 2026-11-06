@@ -601,6 +601,92 @@ ATLAS defines the `.atlas_vault` container format (v1.0) for full offline backup
 - **Markdown Export:** Bulk exports all document nodes to `.md` files formatted with YAML frontmatter (`id`, `title`, `created`, `updated`, `type`, `tags`), standard Obsidian/Roam `[[WikiLinks]]`, and extracts referenced CAS images into a companion `assets/` directory, packaged into a single ZIP archive.
 - **PDF Export:** Flattens all multi-page handwritten notebooks and annotated PDFs into standard vector/raster composite `.pdf` files packaged into a single ZIP archive.
 
+---
+
+## 13. Production Hardening, Performance Optimization & Release Packaging
+
+### 13.1 Vector Ink Rendering Optimizations (P4 Target: < 8ms Latency)
+
+```mermaid
+flowchart TD
+    subgraph Input_Pipeline [Touch / Stylus Event]
+        PointerMove[Pointer Move Event]
+        ActivePoints[Append Active Point Vector]
+    end
+
+    subgraph Evaluation [Viewport Culling & Cache Check]
+        ClipBounds[canvas.getLocalClipBounds]
+        CheckCache{Total Strokes >= 500?}
+    end
+
+    subgraph Cached_Path [Heavy Document Path]
+        ValidPic{Picture Valid?}
+        Blit[Single GPU Blit: canvas.drawPicture]
+        RecordPic[ui.PictureRecorder: Offscreen Bake]
+    end
+
+    subgraph Direct_Path [Standard Document Path]
+        OverlapCheck{Stroke Bounds Overlap Clip?}
+        CullStroke[Skip Tessellation & Draw]
+        Tessellate[Tessellate Vector Path & Draw]
+    end
+
+    subgraph Foreground [Overlay In-Flight Stroke]
+        TempTessellate[Tessellate In-Flight Stroke Only]
+        DrawActive[Draw Active Stroke on Top]
+    end
+
+    PointerMove --> ActivePoints
+    ActivePoints --> Evaluation
+    ClipBounds --> Evaluation
+
+    CheckCache -- Yes --> ValidPic
+    ValidPic -- Yes --> Blit
+    ValidPic -- No --> RecordPic --> Blit
+
+    CheckCache -- No --> OverlapCheck
+    OverlapCheck -- No --> CullStroke
+    OverlapCheck -- Yes --> Tessellate
+
+    Blit --> TempTessellate
+    Tessellate --> TempTessellate
+    TempTessellate --> DrawActive
+```
+
+1. **Viewport Culling & Bounding Box Pruning:**
+   - Precomputes spatial bounding boxes (`Rect.fromLTRB`) during stroke tessellation and persists them in `InkStroke.bounds`.
+   - In `InkDocumentPainter`, queries `canvas.getLocalClipBounds()`. If a stroke's bounding box does not overlap the visible canvas viewport, both expensive Bézier tessellation (`StrokeTessellator.tessellate`) and `canvas.drawPath` are pruned.
+2. **Static Stroke Picture Caching (`InkRenderCache`):**
+   - When a notebook page exceeds 500 committed strokes, all background layers (pen, pencil, multiply-composited highlighters) are baked into an offscreen `ui.Picture`.
+   - During pan/zoom gestures or active stylus input, the pre-recorded picture is blitted directly to the GPU buffer in a single call, while only the active in-flight stroke (`activePoints`) is tessellated per touch event.
+   - Cache invalidation occurs reactively on stroke addition, erasure, undo, redo, or document clearing. Memory is safely freed via `picture.dispose()` on notebook page changes and controller disposal.
+
+### 13.2 Linux Desktop Packaging Architecture
+- **Desktop Entry (`io.github.atlas_app.desktop`):**
+  - Registered categories: `Office;Utility;TextEditor;`
+  - MIME type associations: `application/x-atlas-vault`, `application/x-atlas-ink`.
+  - Quick action entries for `New Note` and `Open Vault`.
+- **Quiet Craft Visual Identity:**
+  - Scalable vector icon (`.svg`) and multi-resolution PNGs (`32x32`, `64x64`, `128x128`, `256x256`) following the dark graphite, parchment, and terracotta design language.
+- **Automated Relocatable Packaging (`scripts/build_linux_release.sh`):**
+  - Compiles release bundle with Flutter AOT.
+  - Strips unneeded debug symbols (`strip --strip-unneeded`) on binaries and shared libraries.
+  - Packages a self-contained `.tar.gz` bundle with bundled dynamic libraries, data assets, icons, desktop file, and a non-root `install.sh` installer symlinking to `~/.local/bin/atlas`.
+
+### 13.3 Android Production Readiness
+- **Edge-to-Edge Experience:**
+  - `MainActivity.kt` configures `WindowCompat.setDecorFitsSystemWindows(window, false)` with transparent navigation and status bars.
+  - Smooth predictive back gesture support via Flutter's `PopScope` in `AtlasScaffold`.
+- **R8 / ProGuard Optimization:**
+  - ProGuard rules configured in `android/app/proguard-rules.pro` keeping Drift SQLite (`com.simonbinder.sqlite3.**`), PDFium / `pdfrx` native bindings (`com.mypdfrx.**`), `flutter_local_notifications` receiver classes, desugared Java 8 time libraries (`j$.time.**`), and suppressing optional Play Store deferred components warnings.
+  - Full release APK assembly verified via `flutter build apk --release`.
+
+### 13.4 iPadOS & macOS Build Layer
+- **Podfile Target:** Configured for `platform :ios, '15.0'` to support low-latency PencilKit telemetry APIs.
+- **Native Interop Verification:** `AtlasPencilKitPlugin.swift` and `AppDelegate.swift` link without deprecated selector warnings.
+- **Verification Script (`scripts/build_ios_check.sh`):** Validates CocoaPods deployment targets and provides automated commands for `xcodebuild clean archive` and `.ipa` signing on macOS hosts.
+
+
 
 
 

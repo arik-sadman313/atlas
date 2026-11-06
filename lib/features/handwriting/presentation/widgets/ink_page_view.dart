@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/atlas_colors.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import 'ink_document_painter.dart';
+import 'ink_render_cache.dart';
 
 /// Read-only handwritten page viewer designed for the Android productivity
 /// companion and cross-platform read-only inspection (Linux & iPadOS).
@@ -37,6 +38,8 @@ class InkPageView extends StatefulWidget {
 class _InkPageViewState extends State<InkPageView> {
   late final TransformationController _transformController;
   bool _createdLocalController = false;
+  final InkRenderCache _renderCache = InkRenderCache();
+  int _revision = 0;
 
   @override
   void initState() {
@@ -50,7 +53,17 @@ class _InkPageViewState extends State<InkPageView> {
   }
 
   @override
+  void didUpdateWidget(covariant InkPageView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.document != widget.document) {
+      _revision++;
+      _renderCache.invalidate();
+    }
+  }
+
+  @override
   void dispose() {
+    _renderCache.dispose();
     if (_createdLocalController) {
       _transformController.dispose();
     }
@@ -116,6 +129,8 @@ class _InkPageViewState extends State<InkPageView> {
                             document: widget.document,
                             isDrawing: false,
                             drawBackground: widget.backgroundWidget == null,
+                            renderCache: _renderCache,
+                            revision: _revision,
                           ),
                         ),
                     ],

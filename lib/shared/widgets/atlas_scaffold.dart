@@ -171,26 +171,39 @@ class _AtlasScaffoldState extends ConsumerState<AtlasScaffold> {
     final isDesktop = width >= AtlasSpacing.desktopBreakpoint;
     final isTablet = width >= AtlasSpacing.mobileBreakpoint && !isDesktop;
     final isMobile = width < AtlasSpacing.mobileBreakpoint;
+    final canGoBack = context.canPop();
+    final isRootHome = widget.currentRoute == '/dashboard';
 
-    // Desktop & iPad keyboard shortcuts
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.backslash, control: true):
-            _toggleSidebar,
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
-            _showQuickCreateDialog(context),
-        const SingleActivator(LogicalKeyboardKey.comma, control: true): () =>
-            context.go('/settings'),
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
-            CommandPaletteModal.show(context),
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () =>
-            CommandPaletteModal.show(context),
+    // Android Predictive Back gesture support via PopScope
+    return PopScope(
+      canPop: !canGoBack && isRootHome,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (context.canPop()) {
+          context.pop();
+        } else if (!isRootHome) {
+          context.go('/dashboard');
+        }
       },
-      child: Focus(
-        autofocus: true,
-        child: isMobile
-            ? _buildMobileLayout(context)
-            : _buildDesktopLayout(context, isTablet: isTablet),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.backslash, control: true):
+              _toggleSidebar,
+          const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
+              _showQuickCreateDialog(context),
+          const SingleActivator(LogicalKeyboardKey.comma, control: true): () =>
+              context.go('/settings'),
+          const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
+              CommandPaletteModal.show(context),
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () =>
+              CommandPaletteModal.show(context),
+        },
+        child: Focus(
+          autofocus: true,
+          child: isMobile
+              ? _buildMobileLayout(context)
+              : _buildDesktopLayout(context, isTablet: isTablet),
+        ),
       ),
     );
   }

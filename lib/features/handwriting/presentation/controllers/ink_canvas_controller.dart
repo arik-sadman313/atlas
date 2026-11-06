@@ -2,17 +2,23 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
+import '../../domain/math/stroke_tessellator.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_layer.dart';
 import '../../domain/models/ink_point.dart';
 import '../../domain/models/ink_stroke.dart';
 import '../../domain/models/ink_tool.dart';
+import '../widgets/ink_render_cache.dart';
 
 class InkCanvasController extends ChangeNotifier {
   late AtlasInkDocument _document;
   InkToolConfig _activeTool;
   final List<AtlasInkDocument> _undoStack = [];
   final List<AtlasInkDocument> _redoStack = [];
+
+  // Static stroke picture render cache (Milestone 9 optimization)
+  final InkRenderCache _renderCache = InkRenderCache();
+  int _revision = 0;
 
   // Active in-flight stroke
   final List<InkPoint> _activePoints = [];
@@ -38,6 +44,8 @@ class InkCanvasController extends ChangeNotifier {
   bool get isDrawing => _isDrawing;
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
+  InkRenderCache get renderCache => _renderCache;
+  int get revision => _revision;
 
   void loadDocument(AtlasInkDocument doc) {
     _document = doc;
@@ -45,6 +53,8 @@ class InkCanvasController extends ChangeNotifier {
     _redoStack.clear();
     _activePoints.clear();
     _isDrawing = false;
+    _revision++;
+    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -120,6 +130,11 @@ class InkCanvasController extends ChangeNotifier {
     final strokeId = 's_${DateTime.now().microsecondsSinceEpoch}';
     final isHighlighter = _activeTool.type.isHighlighter;
 
+    final strokeBounds = StrokeTessellator.computeBoundsFromPoints(
+      _activePoints,
+      _activeTool.baseWidth,
+    );
+
     final stroke = InkStroke(
       id: strokeId,
       tool: _activeTool.type,
@@ -128,6 +143,7 @@ class InkCanvasController extends ChangeNotifier {
       opacity: isHighlighter ? 0.4 : _activeTool.opacity,
       blendMode: isHighlighter ? 'multiply' : 'srcOver',
       points: List.of(_activePoints),
+      bounds: strokeBounds,
     );
 
     // Commit to appropriate layer (highlighters on highlighter layer)
@@ -157,6 +173,8 @@ class InkCanvasController extends ChangeNotifier {
     _isDrawing = false;
     _activePoints.clear();
     _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -187,6 +205,8 @@ class InkCanvasController extends ChangeNotifier {
 
     if (mutated) {
       _document = _document.copyWith(layers: updatedLayers);
+      _revision++;
+      _renderCache.invalidate();
       notifyListeners();
     }
   }
@@ -197,6 +217,8 @@ class InkCanvasController extends ChangeNotifier {
     _document = _undoStack.removeLast();
     _activePoints.clear();
     _isDrawing = false;
+    _revision++;
+    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -206,6 +228,8 @@ class InkCanvasController extends ChangeNotifier {
     _document = _redoStack.removeLast();
     _activePoints.clear();
     _isDrawing = false;
+    _revision++;
+    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -219,6 +243,8 @@ class InkCanvasController extends ChangeNotifier {
     _activePoints.clear();
     _isDrawing = false;
     _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -227,5 +253,11 @@ class InkCanvasController extends ChangeNotifier {
     if (_undoStack.length > 50) {
       _undoStack.removeAt(0); // Cap history depth to 50 snapshots
     }
+  }
+
+  @override
+  void dispose() {
+    _renderCache.dispose();
+    super.dispose();
   }
 }

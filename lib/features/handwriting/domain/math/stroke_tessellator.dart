@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:perfect_freehand/perfect_freehand.dart';
 
+import '../models/ink_point.dart';
 import '../models/ink_stroke.dart';
 import '../models/ink_tool.dart';
 
@@ -63,6 +64,34 @@ class StrokeTessellator {
           isComplete: true,
         );
     }
+  }
+
+  /// Computes the bounding box of a list of points padded by baseWidth.
+  static Rect computeBoundsFromPoints(List<InkPoint> points, double baseWidth) {
+    if (points.isEmpty) return Rect.zero;
+    double minX = points.first.x;
+    double maxX = points.first.x;
+    double minY = points.first.y;
+    double maxY = points.first.y;
+    for (final pt in points) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+    final halfW = baseWidth * 1.5;
+    return Rect.fromLTRB(
+      minX - halfW,
+      minY - halfW,
+      maxX + halfW,
+      maxY + halfW,
+    );
+  }
+
+  /// Computes the bounding box of an [InkStroke].
+  static Rect computeBounds(InkStroke stroke) {
+    if (stroke.bounds != null) return stroke.bounds!;
+    return computeBoundsFromPoints(stroke.points, stroke.baseWidth);
   }
 
   /// Converts an InkStroke into a closed vector Path using perfect_freehand

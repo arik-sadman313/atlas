@@ -107,6 +107,8 @@ class _InkCanvasState extends State<InkCanvas> {
                 isDrawing: widget.controller.isDrawing,
                 drawBackground:
                     widget.drawBackground && widget.backgroundWidget == null,
+                renderCache: widget.controller.renderCache,
+                revision: widget.controller.revision,
               ),
             ),
           ),
