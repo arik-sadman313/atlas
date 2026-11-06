@@ -59,18 +59,20 @@ class _BacklinksPanelState extends ConsumerState<BacklinksPanel> {
             horizontal: AtlasSpacing.md,
             vertical: AtlasSpacing.lg,
           ),
-          decoration: BoxDecoration(
+          child: Material(
             color: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
-            borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
-            border: Border.all(
-              color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
-              width: 1.0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+              side: BorderSide(
+                color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+                width: 1.0,
+              ),
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               // Header Toggle
               InkWell(
                 onTap: () {
@@ -165,7 +167,9 @@ class _BacklinksPanelState extends ConsumerState<BacklinksPanel> {
                         item.sourceUpdatedAt,
                       );
 
-                      return ListTile(
+                      return Material(
+                        type: MaterialType.transparency,
+                        child: ListTile(
                         onTap: () => _navigateToNode(context, item),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: AtlasSpacing.md,
@@ -268,13 +272,15 @@ class _BacklinksPanelState extends ConsumerState<BacklinksPanel> {
                           Icons.arrow_forward_ios,
                           size: 14,
                         ),
-                      );
-                    },
-                  ),
-              ],
+                      ),
+                    );
+                  },
+                ),
             ],
-          ),
-        );
+          ],
+        ),
+      ),
+    );
       },
     );
   }

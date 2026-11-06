@@ -224,51 +224,54 @@ class _WikiLinkDialogState extends ConsumerState<WikiLinkDialog> {
                             final node = _results[index];
                             final isNotebook = node.type == 'notebook';
 
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: AtlasSpacing.sm,
-                                vertical: 2,
-                              ),
-                              leading: Icon(
-                                isNotebook
-                                    ? Icons.draw_outlined
-                                    : Icons.description_outlined,
-                                size: 18,
-                                color: isNotebook
-                                    ? Colors.purpleAccent
-                                    : AtlasColors.accentBlue,
-                              ),
-                              title: Text(
-                                node.title,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
+                            return Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: AtlasSpacing.sm,
                                   vertical: 2,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: (isNotebook
-                                          ? Colors.purple
-                                          : AtlasColors.accentBlue)
-                                      .withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(4),
+                                leading: Icon(
+                                  isNotebook
+                                      ? Icons.draw_outlined
+                                      : Icons.description_outlined,
+                                  size: 18,
+                                  color: isNotebook
+                                      ? Colors.purpleAccent
+                                      : AtlasColors.accentBlue,
                                 ),
-                                child: Text(
-                                  isNotebook ? 'Notebook' : 'Document',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: isNotebook
-                                        ? Colors.purple
-                                        : AtlasColors.accentBlue,
-                                    fontWeight: FontWeight.w600,
+                                title: Text(
+                                  node.title,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: (isNotebook
+                                            ? Colors.purple
+                                            : AtlasColors.accentBlue)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    isNotebook ? 'Notebook' : 'Document',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: isNotebook
+                                          ? Colors.purple
+                                          : AtlasColors.accentBlue,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                onTap: () => _submitSelection(node.title),
                               ),
-                              onTap: () => _submitSelection(node.title),
                             );
                           },
                         ),
