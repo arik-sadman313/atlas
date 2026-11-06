@@ -86,6 +86,41 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
+  Future<bool> _tableExists(String tableName) async {
+    final rows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='$tableName';",
+    ).get();
+    return rows.isNotEmpty;
+  }
+
+  Future<void> _safeAddColumn(
+    Migrator m,
+    TableInfo table,
+    GeneratedColumn column,
+  ) async {
+    final rows = await customSelect(
+      'PRAGMA table_info("${table.actualTableName}");',
+    ).get();
+    final existingCols = rows.map((r) => r.read<String>('name')).toSet();
+    if (!existingCols.contains(column.name)) {
+      await m.addColumn(table, column);
+    }
+  }
+
+  Future<void> _safeAddColumnCustom(
+    String tableName,
+    String columnName,
+    String columnSql,
+  ) async {
+    final rows = await customSelect('PRAGMA table_info("$tableName");').get();
+    final existingCols = rows.map((r) => r.read<String>('name')).toSet();
+    if (!existingCols.contains(columnName)) {
+      await customStatement(
+        'ALTER TABLE "$tableName" ADD COLUMN "$columnName" $columnSql;',
+      );
+    }
+  }
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -93,35 +128,63 @@ class AppDatabase extends _$AppDatabase {
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) {
-        await m.createTable(inkDocuments);
-        await m.createTable(inkPages);
+        if (!await _tableExists('ink_documents')) {
+          await m.createTable(inkDocuments);
+        }
+        if (!await _tableExists('ink_pages')) {
+          await m.createTable(inkPages);
+        }
       }
       if (from < 3) {
-        await m.addColumn(nodes, nodes.contentHash);
-        await m.createTable(nodeLinks);
-        await m.createTable(tags);
-        await m.createTable(nodeTags);
+        await _safeAddColumn(m, nodes, nodes.contentHash);
+        if (!await _tableExists('node_links')) {
+          await m.createTable(nodeLinks);
+        }
+        if (!await _tableExists('tags')) {
+          await m.createTable(tags);
+        }
+        if (!await _tableExists('node_tags')) {
+          await m.createTable(nodeTags);
+        }
       }
       if (from < 4) {
-        await m.createTable(pdfDocuments);
-        await m.addColumn(inkPages, inkPages.pdfDocumentId);
-        await m.addColumn(inkPages, inkPages.templateSpacing);
+        if (!await _tableExists('pdf_documents')) {
+          await m.createTable(pdfDocuments);
+        }
+        await _safeAddColumn(m, inkPages, inkPages.pdfDocumentId);
+        await _safeAddColumn(m, inkPages, inkPages.templateSpacing);
       }
       if (from < 5) {
-        await m.createTable(projects);
-        await m.createTable(tasks);
-        await m.createTable(calendarEvents);
+        if (!await _tableExists('projects')) {
+          await m.createTable(projects);
+        }
+        if (!await _tableExists('tasks')) {
+          await m.createTable(tasks);
+        }
+        if (!await _tableExists('calendar_events')) {
+          await m.createTable(calendarEvents);
+        }
       }
       if (from < 6) {
-        await m.createTable(habits);
-        await m.createTable(habitLogs);
-        await m.createTable(goals);
-        await m.createTable(journalEntries);
+        if (!await _tableExists('habits')) {
+          await m.createTable(habits);
+        }
+        if (!await _tableExists('habit_logs')) {
+          await m.createTable(habitLogs);
+        }
+        if (!await _tableExists('goals')) {
+          await m.createTable(goals);
+        }
+        if (!await _tableExists('journal_entries')) {
+          await m.createTable(journalEntries);
+        }
       }
       if (from < 7) {
-        await m.createTable(syncHistory);
+        if (!await _tableExists('sync_history')) {
+          await m.createTable(syncHistory);
+        }
 
-        // Add sync metadata columns to all 14 tables
+        // Add sync metadata columns to all 14 tables safely and idempotently
         final List<TableInfo> tablesWithSync = [
           workspaces,
           nodes,
@@ -139,11 +202,29 @@ class AppDatabase extends _$AppDatabase {
           journalEntries,
         ];
 
+        final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
         for (final table in tablesWithSync) {
-          await m.addColumn(table, table.columnsByName['deleted_at']!);
-          await m.addColumn(table, table.columnsByName['client_modified_at']!);
-          await m.addColumn(table, table.columnsByName['modified_device_id']!);
-          await m.addColumn(table, table.columnsByName['sync_version']!);
+          await _safeAddColumnCustom(
+            table.actualTableName,
+            'deleted_at',
+            'INTEGER',
+          );
+          await _safeAddColumnCustom(
+            table.actualTableName,
+            'client_modified_at',
+            'INTEGER NOT NULL DEFAULT $nowEpoch',
+          );
+          await _safeAddColumnCustom(
+            table.actualTableName,
+            'modified_device_id',
+            "TEXT NOT NULL DEFAULT 'local'",
+          );
+          await _safeAddColumnCustom(
+            table.actualTableName,
+            'sync_version',
+            'INTEGER NOT NULL DEFAULT 1',
+          );
         }
       }
     },

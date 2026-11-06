@@ -103,3 +103,4 @@ else
     echo ""
     echo "Configuration check passed successfully on Linux."
 fi
+

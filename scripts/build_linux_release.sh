@@ -110,3 +110,4 @@ tar -czf "$DIST_DIR/$ARCHIVE_NAME" -C "$ROOT_DIR/build/linux_staging" atlas
 
 echo "=== Release Packaging Successful! ==="
 ls -lh "$DIST_DIR/$ARCHIVE_NAME"
+
