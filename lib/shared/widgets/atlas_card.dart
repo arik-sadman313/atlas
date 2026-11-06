@@ -27,34 +27,32 @@ class AtlasCard extends StatelessWidget {
     final bg =
         backgroundColor ??
         (isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface);
-    final border =
-        customBorder ??
-        Border.all(
+    final borderSide =
+        customBorder?.top ??
+        BorderSide(
           color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
           width: 1.0,
         );
 
-    final content = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
-        border: border,
-      ),
-      child: child,
+    final cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+      side: borderSide,
     );
 
-    if (onTap == null) {
-      return content;
-    }
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
-      hoverColor: isDark
-          ? AtlasColors.darkElevated.withValues(alpha: 0.5)
-          : AtlasColors.lightElevated,
-      child: content,
+    return Material(
+      color: bg,
+      shape: cardShape,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        hoverColor: isDark
+            ? AtlasColors.darkElevated.withValues(alpha: 0.5)
+            : AtlasColors.lightElevated,
+        child: Padding(
+          padding: padding,
+          child: child,
+        ),
+      ),
     );
   }
 }
