@@ -367,4 +367,53 @@ flowchart TD
   - `bootstrap.dart` runs startup reconciliation (`reschedulePendingReminders`) to ensure all upcoming tasks and events maintain active notification triggers after device reboots.
   - Gracefully degrades without exceptions if permissions are denied or notification daemons are absent.
 
+---
+
+## 10. Personal Dashboard, Habits & Daily Journal Architecture (Milestone 6)
+
+### 10.1 Modular Dashboard & Bento-Grid Layout
+```mermaid
+flowchart TD
+    Dashboard[DashboardScreen] --> Header[Quiet Craft Greeting & Actions]
+    Dashboard --> QuickStats[Quick Stats: Documents, Notebooks, Tasks]
+    Dashboard --> BentoGrid[Responsive Bento Grid]
+    
+    BentoGrid --> MainCol[Primary Column]
+    BentoGrid --> SideCol[Secondary Column]
+    
+    MainCol --> FocusAgenda[Today's Focus & Agenda Widget]
+    MainCol --> RecentNotes[Recently Modified Notes & Notebooks]
+    
+    SideCol --> ReflectionCard[Today's Reflection / Journal Card]
+    SideCol --> HabitsStrip[Daily Habits Strip & Progress Ring]
+    SideCol --> GoalsCard[Goals & Milestones Card]
+```
+
+- **Responsive Multi-Card Layout:**
+  - **Linux Desktop (`width >= 960`):** Multi-column bento-grid. Focus & Agenda and Recent Notes on the left ($5\text{ flex}$); Journal, Habits Strip, and Goals on the right ($4\text{ flex}$).
+  - **Tablet & Mobile (`width < 960`):** Single-column stacked feed prioritizing today's journal reflection and habits strip, followed by agenda, goals, and recent notes.
+- **Header & Quick Action Bar:**
+  - Time-of-day greeting ("Good morning / afternoon / evening") with localized full date.
+  - One-tap quick actions: "New Note", "New Task", and "Today's Journal".
+
+### 10.2 Habit Tracking & Streak Engine
+- **Lightweight Custom Painting:**
+  - `HabitProgressRingPainter` (< 100 lines, zero external dependencies) renders smooth circular progress arcs with custom stroke widths and round caps.
+  - Encapsulated in `HabitProgressRing` with `RepaintBoundary` for optimal GPU layer caching.
+- **Streak Calculation Algorithm:**
+  - **Current Streak:** Contiguous chain of days ending on today (or yesterday if today is not yet checked in). If yesterday was missed, current streak is 0 (or 1 if checked today).
+  - **Best Streak:** Computed across the entire sorted set of completed log dates by detecting contiguous single-day increments.
+  - **Weekly History:** Emits a 7-day completion map rendered via `HabitWeeklyTracker` with weekday initials and status dots.
+  - **Idempotency:** Composite unique key `(habit_id, log_date)` prevents duplicate records on concurrent or repeated toggles.
+
+### 10.3 Daily Journal Engine & Contextual Day Scaffolding
+- **Date-Linked Scaffolding:**
+  - When the user taps "Today's Journal", `JournalRepository.getOrCreateTodayJournalNode` resolves whether a journal document exists for today's date (`YYYY-MM-DD`).
+  - If not found: Scaffolds a new document node in `nodes` (`type: 'document'`, title: `Journal: [Formatted Date]`), writes standard starter sections into CAS via `DocumentContentService` (`# Journal: ...`, `## Daily Focus`, `## Key Wins`, `## Reflections`), and inserts a row into `journal_entries`.
+  - If found: Reuses the existing node and navigates directly to `DocumentEditorScreen`.
+- **Contextual Day Summary Panel:**
+  - `JournalContextDayPanel` automatically detects when a document is linked to `journal_entries`.
+  - Renders an embedded panel displaying all tasks completed and habits fulfilled on that specific date.
+
+
 

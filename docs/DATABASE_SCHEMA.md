@@ -556,3 +556,88 @@ CREATE INDEX idx_calendar_events_node ON calendar_events(node_id);
 - [`CalendarRepository`](../lib/features/calendar/data/repositories/calendar_repository.dart):
   - Merges calendar events and due tasks into unified chronological `CalendarAgendaItem` agenda streams.
 
+---
+
+## 10. Milestone 6: Personal Dashboard, Habits & Daily Journal (Schema v6)
+
+### 10.1 Schema Version 6 Tables
+
+#### `habits` Table
+```sql
+CREATE TABLE habits (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title TEXT NOT NULL, -- min 1, max 500
+    description TEXT,
+    color_hex TEXT NOT NULL DEFAULT '#4CAF50',
+    icon TEXT,
+    frequency TEXT NOT NULL DEFAULT 'daily', -- 'daily' | 'weekly'
+    target_count_per_period INTEGER NOT NULL DEFAULT 1,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_habits_workspace ON habits(workspace_id, is_archived, sort_order);
+```
+
+#### `habit_logs` Table
+```sql
+CREATE TABLE habit_logs (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    habit_id TEXT NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+    log_date TEXT NOT NULL, -- YYYY-MM-DD format
+    completed_count INTEGER NOT NULL DEFAULT 1,
+    is_completed INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    UNIQUE(habit_id, log_date)
+);
+CREATE INDEX idx_habit_logs_habit_date ON habit_logs(habit_id, log_date);
+```
+
+#### `goals` Table
+```sql
+CREATE TABLE goals (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title TEXT NOT NULL, -- min 1, max 500
+    description TEXT,
+    target_date INTEGER,
+    status TEXT NOT NULL DEFAULT 'in_progress', -- 'not_started' | 'in_progress' | 'achieved' | 'abandoned'
+    color_hex TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_goals_workspace ON goals(workspace_id, status);
+```
+
+#### `journal_entries` Table
+```sql
+CREATE TABLE journal_entries (
+    id TEXT PRIMARY KEY NOT NULL, -- UUIDv4
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    journal_date TEXT NOT NULL, -- YYYY-MM-DD format
+    mood TEXT, -- 'great' | 'good' | 'neutral' | 'bad' | 'awful'
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(workspace_id, journal_date)
+);
+CREATE INDEX idx_journal_entries_date ON journal_entries(workspace_id, journal_date);
+CREATE INDEX idx_journal_entries_node ON journal_entries(node_id);
+```
+
+### 10.2 DAOs & Repositories
+- [`HabitsDao`](../lib/core/database/daos/habits_dao.dart):
+  - `watchHabitsForWorkspace`, `getHabitsForWorkspace`, `watchHabitsWithProgress`
+  - `calculateProgress`: contiguous date streak math (current streak, best streak, weekly completion map)
+  - `toggleHabit`: idempotent toggle of habit logs for YYYY-MM-DD
+  - Goals CRUD: `watchGoalsForWorkspace`, `getGoalsForWorkspace`, `createGoal`, `updateGoal`, `deleteGoal`
+- [`JournalDao`](../lib/core/database/daos/journal_dao.dart):
+  - `findEntryByDate`, `watchEntryByDate`, `findEntryByNodeId`, `watchEntryByNodeId`, `watchRecentJournalEntries`
+  - `createJournalEntry`, `updateJournalEntry`, `deleteJournalEntry`
+- [`HabitRepository`](../lib/features/habits/data/repositories/habit_repository.dart):
+  - Domain facade for habit operations, streak queries, active goal management.
+- [`JournalRepository`](../lib/features/journal/data/repositories/journal_repository.dart):
+  - Scaffolds date-linked document nodes in CAS with structured default reflection sections (`## Daily Focus`, `## Key Wins`, `## Reflections`) and manages journal entry metadata.
+

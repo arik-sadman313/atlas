@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/database/app_database.dart';
 import '../core/database/daos/calendar_dao.dart';
+import '../core/database/daos/habits_dao.dart';
 import '../core/database/daos/ink_dao.dart';
+import '../core/database/daos/journal_dao.dart';
 import '../core/database/daos/links_dao.dart';
 import '../core/database/daos/nodes_dao.dart';
 import '../core/database/daos/tasks_dao.dart';
@@ -11,7 +13,9 @@ import '../core/notifications/notification_service.dart';
 import '../core/storage/blob_storage_service.dart';
 import '../features/calendar/data/repositories/calendar_repository.dart';
 import '../features/documents/data/repositories/link_repository.dart';
+import '../features/habits/data/repositories/habit_repository.dart';
 import '../features/handwriting/data/repositories/ink_repository.dart';
+import '../features/journal/data/repositories/journal_repository.dart';
 import '../features/pdf/data/repositories/pdf_repository.dart';
 import '../features/pdf/data/services/pdf_export_service.dart';
 import '../features/pdf/data/services/pdf_rendering_service.dart';
@@ -45,6 +49,14 @@ final tasksDaoProvider = Provider<TasksDao>((ref) {
 
 final calendarDaoProvider = Provider<CalendarDao>((ref) {
   return ref.watch(appDatabaseProvider).calendarDao;
+});
+
+final habitsDaoProvider = Provider<HabitsDao>((ref) {
+  return ref.watch(appDatabaseProvider).habitsDao;
+});
+
+final journalDaoProvider = Provider<JournalDao>((ref) {
+  return ref.watch(appDatabaseProvider).journalDao;
 });
 
 final notificationServiceProvider = Provider<NotificationService>((ref) {
@@ -119,6 +131,22 @@ final calendarRepositoryProvider = Provider<CalendarRepository>((ref) {
   );
 });
 
+final habitRepositoryProvider = Provider<HabitRepository>((ref) {
+  final habitsDao = ref.watch(habitsDaoProvider);
+  return HabitRepository(habitsDao: habitsDao);
+});
+
+final journalRepositoryProvider = Provider<JournalRepository>((ref) {
+  final journalDao = ref.watch(journalDaoProvider);
+  final nodesDao = ref.watch(nodesDaoProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+  return JournalRepository(
+    journalDao: journalDao,
+    nodesDao: nodesDao,
+    blobStorage: blobStorage,
+  );
+});
+
 class CurrentWorkspaceIdNotifier extends Notifier<String> {
   @override
   String build() => 'workspace-default-primary';
@@ -154,4 +182,25 @@ final favoriteNodesProvider = StreamProvider<List<NodeEntry>>((ref) {
   final dao = ref.watch(nodesDaoProvider);
   final workspaceId = ref.watch(currentWorkspaceIdProvider);
   return dao.watchFavoriteNodes(workspaceId);
+});
+
+final habitsWithProgressProvider = StreamProvider<List<HabitWithProgress>>((
+  ref,
+) {
+  final repo = ref.watch(habitRepositoryProvider);
+  final workspaceId = ref.watch(currentWorkspaceIdProvider);
+  return repo.watchHabitsWithProgress(workspaceId);
+});
+
+final activeGoalsProvider = StreamProvider<List<GoalEntry>>((ref) {
+  final repo = ref.watch(habitRepositoryProvider);
+  final workspaceId = ref.watch(currentWorkspaceIdProvider);
+  return repo.watchGoals(workspaceId);
+});
+
+final todayJournalEntryProvider = StreamProvider<JournalEntryData?>((ref) {
+  final repo = ref.watch(journalRepositoryProvider);
+  final workspaceId = ref.watch(currentWorkspaceIdProvider);
+  final todayStr = HabitsDao.formatDate(DateTime.now());
+  return repo.watchEntryByDate(workspaceId, todayStr);
 });

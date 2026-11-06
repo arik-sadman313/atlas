@@ -518,5 +518,88 @@
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (27.8s) with core library desugaring enabled.
 
+---
+
+# ATLAS — Milestone 6 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 6 — Personal Dashboard, Habits & Daily Journal  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Scope Boundaries
+
+1. **Lightweight Visualization Evaluation:** Evaluate custom painting vs external packages for habit progress rings and streaks. Selected lightweight native `CustomPainter` (`HabitProgressRingPainter`, under 100 lines) with isolated `RepaintBoundary` caching. Documented in ADR-020.
+2. **Schema Version 6 Migration:** Added `habits`, `habit_logs`, `goals`, and `journal_entries` tables to Drift with foreign key cascades and unique composite constraints (`habit_logs(habit_id, log_date)`, `journal_entries(workspace_id, journal_date)`).
+3. **Data Access & Streak Math:** Implemented `HabitsDao` with contiguous day streak algorithm (calculating current streak backwards from today/yesterday, best streak across all chronological runs, and 7-day weekly completion map) and `JournalDao` (date lookups, node linkage, and recent reflections).
+4. **Habits & Goals Module:** Created `HabitProgressRingPainter`, `HabitProgressRing`, `HabitCheckInTile` (1-tap toggle, streak badge e.g. "🔥 12 days", weekly dots), `HabitWeeklyTracker`, `HabitEditDialog` (palette picker, icon picker, frequency), and `GoalsSummaryCard` (milestones, target dates, status pills).
+5. **Daily Journal Engine:** Created `JournalRepository` with `getOrCreateTodayJournalNode` (auto-scaffolding document node, pre-populating CAS storage with structured sections: `# Journal: ...`, `## Daily Focus`, `## Key Wins`, `## Reflections`, and reusing existing entries), and `JournalContextDayPanel` embedded into `DocumentEditorScreen` when viewing a daily reflection.
+6. **Central Dashboard Overhaul:** Redesigned `DashboardScreen` into a responsive bento-grid layout with "Quiet Craft" greeting header, quick action bar ("New Note", "New Task", "Today's Journal"), live "Today's Focus & Agenda" (tasks & calendar events), "Daily Habits" strip with progress ring, "Today's Reflection" card, and preserved stats counters.
+7. **Strict Scope Boundaries Maintained:** Zero external health platform sync (HealthKit/Google Fit), zero heavy graphing packages, zero cloud sync, zero AI sentiment analysis.
+
+---
+
+## 2. Implemented Architecture & Components
+
+### 2.1 Persistence & Data Layer
+- [`HabitsTable`](../lib/core/database/tables/habits_table.dart), [`HabitLogsTable`](../lib/core/database/tables/habit_logs_table.dart), [`GoalsTable`](../lib/core/database/tables/goals_table.dart), [`JournalEntriesTable`](../lib/core/database/tables/journal_entries_table.dart).
+- [`HabitsDao`](../lib/core/database/daos/habits_dao.dart):
+  - Streams: `watchHabitsForWorkspace`, `watchHabitsWithProgress`, `watchGoalsForWorkspace`.
+  - Contiguous day streak math: `calculateProgress`, `toggleHabit`, `setHabitCompleted`, Goals CRUD.
+- [`JournalDao`](../lib/core/database/daos/journal_dao.dart):
+  - Streams: `watchEntryByDate`, `watchEntryByNodeId`, `watchRecentJournalEntries`.
+  - CRUD operations for date-linked reflection records.
+- Database schema bumped to **version 6** in [`AppDatabase`](../lib/core/database/app_database.dart) with automated migration.
+
+### 2.2 Domain & Repositories
+- [`HabitRepository`](../lib/features/habits/data/repositories/habit_repository.dart):
+  - Manages active and archived habits, progress streams, 1-tap check-ins, and workspace goals.
+- [`JournalRepository`](../lib/features/journal/data/repositories/journal_repository.dart):
+  - Resolves or creates today's journal node, writes starter sections into CAS via `DocumentContentService`, and handles mood tracking.
+
+### 2.3 Presentation & Interaction
+- [`HabitProgressRingPainter`](../lib/features/habits/presentation/widgets/habit_progress_ring_painter.dart):
+  - 99-line `CustomPainter` with smooth arc rendering and `RepaintBoundary` wrapper.
+- [`HabitCheckInTile`](../lib/features/habits/presentation/widgets/habit_check_in_tile.dart):
+  - Interactive tile with progress ring, streak badge ("🔥 5 days"), title, description, and weekly tracker.
+- [`HabitWeeklyTracker`](../lib/features/habits/presentation/widgets/habit_weekly_tracker.dart):
+  - 7-day row with weekday initials, completed check indicators, and today accent ring.
+- [`HabitEditDialog`](../lib/features/habits/presentation/widgets/habit_edit_dialog.dart):
+  - Customization modal with title, description, frequency toggle, palette picker, and productivity icons.
+- [`GoalsSummaryCard`](../lib/features/habits/presentation/widgets/goals_summary_card.dart):
+  - Active workspace goals with target dates, status pills, and creation dialog.
+- [`JournalContextDayPanel`](../lib/features/journal/presentation/widgets/journal_context_day_panel.dart):
+  - Contextual summary panel displaying tasks completed and habits fulfilled on the journal's date.
+- [`DashboardScreen`](../lib/features/dashboard/presentation/dashboard_screen.dart):
+  - Bento grid layout adapting across Linux desktop (wide multi-column), iPadOS (2-column), and Android (vertical scroll feed).
+  - Quick action bar: "New Note", "New Task", "Today's Journal".
+  - Live cards: Today's Focus & Agenda, Daily Habits Strip, Goals & Milestones, Today's Reflection, Recently Modified Notes.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Automated Test Suite (111 tests across all modules):**
+   - `test/core/database/schema_migration_v6_test.dart` (6 tests)
+   - `test/features/habits/habit_repository_test.dart` (2 tests)
+   - `test/features/journal/journal_repository_test.dart` (1 test)
+   - `test/features/dashboard/dashboard_screen_test.dart` (1 test)
+   - All 101 existing regression tests verified passing.
+   - **Result:** `✓ All 111 tests passed!`.
+
+3. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+4. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (26.1s).
+
 
 

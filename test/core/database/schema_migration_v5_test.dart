@@ -14,105 +14,102 @@ void main() {
       await database.close();
     });
 
-    test(
-      'fresh database initializes schema version 5 with all tables',
-      () async {
-        expect(database.schemaVersion, 5);
+    test('fresh database initializes schema version with all tables', () async {
+      expect(database.schemaVersion, greaterThanOrEqualTo(5));
 
-        final now = DateTime.now();
+      final now = DateTime.now();
 
-        // 1. Verify workspace insertion
-        await database
-            .into(database.workspaces)
-            .insert(
-              WorkspacesCompanion.insert(
-                id: 'ws-v5',
-                name: 'Workspace V5',
-                createdAt: now,
-                updatedAt: now,
-              ),
-            );
+      // 1. Verify workspace insertion
+      await database
+          .into(database.workspaces)
+          .insert(
+            WorkspacesCompanion.insert(
+              id: 'ws-v5',
+              name: 'Workspace V5',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-        // 2. Verify project insertion
-        await database
-            .into(database.projects)
-            .insert(
-              ProjectsCompanion.insert(
-                id: 'proj-1',
-                workspaceId: 'ws-v5',
-                name: 'Productivity Overhaul',
-                colorHex: const Value('#3B82F6'),
-                createdAt: now,
-                updatedAt: now,
-              ),
-            );
+      // 2. Verify project insertion
+      await database
+          .into(database.projects)
+          .insert(
+            ProjectsCompanion.insert(
+              id: 'proj-1',
+              workspaceId: 'ws-v5',
+              name: 'Productivity Overhaul',
+              colorHex: const Value('#3B82F6'),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-        final project = await (database.select(
-          database.projects,
-        )..where((tbl) => tbl.id.equals('proj-1'))).getSingle();
-        expect(project.name, 'Productivity Overhaul');
-        expect(project.colorHex, '#3B82F6');
+      final project = await (database.select(
+        database.projects,
+      )..where((tbl) => tbl.id.equals('proj-1'))).getSingle();
+      expect(project.name, 'Productivity Overhaul');
+      expect(project.colorHex, '#3B82F6');
 
-        // 3. Verify task insertion with foreign keys
-        await database
-            .into(database.tasks)
-            .insert(
-              TasksCompanion.insert(
-                id: 'task-parent',
-                workspaceId: 'ws-v5',
-                title: 'Implement Notification Engine',
-                projectId: const Value('proj-1'),
-                priority: const Value(1),
-                sortOrder: const Value(0),
-                createdAt: now,
-                updatedAt: now,
-              ),
-            );
+      // 3. Verify task insertion with foreign keys
+      await database
+          .into(database.tasks)
+          .insert(
+            TasksCompanion.insert(
+              id: 'task-parent',
+              workspaceId: 'ws-v5',
+              title: 'Implement Notification Engine',
+              projectId: const Value('proj-1'),
+              priority: const Value(1),
+              sortOrder: const Value(0),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-        // 4. Verify subtask insertion with parentTaskId
-        await database
-            .into(database.tasks)
-            .insert(
-              TasksCompanion.insert(
-                id: 'task-sub-1',
-                workspaceId: 'ws-v5',
-                parentTaskId: const Value('task-parent'),
-                title: 'Register DBus Linux adapter',
-                priority: const Value(2),
-                sortOrder: const Value(0),
-                createdAt: now,
-                updatedAt: now,
-              ),
-            );
+      // 4. Verify subtask insertion with parentTaskId
+      await database
+          .into(database.tasks)
+          .insert(
+            TasksCompanion.insert(
+              id: 'task-sub-1',
+              workspaceId: 'ws-v5',
+              parentTaskId: const Value('task-parent'),
+              title: 'Register DBus Linux adapter',
+              priority: const Value(2),
+              sortOrder: const Value(0),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-        final subtasks = await database.tasksDao
-            .watchSubtasks('task-parent')
-            .first;
-        expect(subtasks.length, 1);
-        expect(subtasks.first.title, 'Register DBus Linux adapter');
+      final subtasks = await database.tasksDao
+          .watchSubtasks('task-parent')
+          .first;
+      expect(subtasks.length, 1);
+      expect(subtasks.first.title, 'Register DBus Linux adapter');
 
-        // 5. Verify calendar event insertion
-        await database
-            .into(database.calendarEvents)
-            .insert(
-              CalendarEventsCompanion.insert(
-                id: 'event-1',
-                workspaceId: 'ws-v5',
-                title: 'Sprint Demo & Architecture Review',
-                startTime: now,
-                endTime: now.add(const Duration(hours: 1)),
-                isAllDay: const Value(false),
-                colorHex: const Value('#10B981'),
-                createdAt: now,
-                updatedAt: now,
-              ),
-            );
+      // 5. Verify calendar event insertion
+      await database
+          .into(database.calendarEvents)
+          .insert(
+            CalendarEventsCompanion.insert(
+              id: 'event-1',
+              workspaceId: 'ws-v5',
+              title: 'Sprint Demo & Architecture Review',
+              startTime: now,
+              endTime: now.add(const Duration(hours: 1)),
+              isAllDay: const Value(false),
+              colorHex: const Value('#10B981'),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
 
-        final event = await database.calendarDao.getEvent('event-1');
-        expect(event, isNotNull);
-        expect(event!.title, 'Sprint Demo & Architecture Review');
-      },
-    );
+      final event = await database.calendarDao.getEvent('event-1');
+      expect(event, isNotNull);
+      expect(event!.title, 'Sprint Demo & Architecture Review');
+    });
 
     test('cascading delete on parent task removes child subtasks', () async {
       final now = DateTime.now();

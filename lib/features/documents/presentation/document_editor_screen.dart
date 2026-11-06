@@ -11,6 +11,7 @@ import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
+import '../../journal/presentation/widgets/journal_context_day_panel.dart';
 import '../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../data/services/document_content_service.dart';
 import 'widgets/backlinks_panel.dart';
@@ -511,6 +512,26 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     ),
 
                     const SizedBox(height: AtlasSpacing.xxl),
+
+                    // Contextual Day Summary (if this document is a daily journal)
+                    StreamBuilder<JournalEntryData?>(
+                      stream: ref
+                          .watch(journalDaoProvider)
+                          .watchEntryByNodeId(widget.documentId),
+                      builder: (context, snapshot) {
+                        final entry = snapshot.data;
+                        if (entry == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: AtlasSpacing.xl,
+                          ),
+                          child: JournalContextDayPanel(
+                            journalDate: entry.journalDate,
+                            initialExpanded: true,
+                          ),
+                        );
+                      },
+                    ),
 
                     // Node Tasks Panel
                     NodeTasksPanel(

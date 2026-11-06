@@ -297,6 +297,33 @@
   - (+) Fully local-first and privacy-respecting: Operates 100% offline without external server dependencies.
   - (+) High resilience: `NotificationService` features graceful degradation when notification daemons or permissions are unavailable, and runs reconciliation on startup via `bootstrap.dart`.
 
+---
+
+### ADR-020: Custom Lightweight CustomPainter for Habit Rings & Streak Badges
+
+- **Date:** 2026-11-06
+- **Status:** Accepted
+- **Context:** Milestone 6 requires streak and habit progress visualization (circular completion rings, progress fractions, 7-day dot trackers) across Linux desktop, iPadOS, and Android companion.
+  - Candidate Evaluation:
+    - Candidate A (External Chart Packages e.g., `fl_chart`, `syncfusion_flutter_gauges`):
+      - `fl_chart`: Heavy dependency primarily designed for complex multi-series Cartesian graphs, bar charts, and radar charts. Overkill for circular progress rings and introduces significant overhead.
+      - `syncfusion_flutter_gauges`: Commercial/proprietary licensing requirements, not permissible under open-source and offline constraints.
+      - `percent_indicator`: Simple package, but adds an extra external dependency for functionality that is directly natively supported by Flutter's Canvas API in under 100 lines.
+    - Candidate B (Custom Canvas Painting via `CustomPainter`):
+      - Uses standard Flutter `Canvas.drawCircle` and `Canvas.drawArc`.
+      - Kept strictly under 100 lines of code (`HabitProgressRingPainter`).
+      - Wrapped in `RepaintBoundary` for isolated render layer caching.
+      - Zero external dependencies and zero AGPL risk.
+- **Decision:**
+  - Implement `HabitProgressRingPainter` and `HabitProgressRing` natively using Flutter's built-in `CustomPainter`.
+  - Enforce `< 150` lines constraint (actual implementation is 99 lines).
+  - Preclude external health platforms (HealthKit, Google Fit), heavy graph packages, and cloud sync per scope boundaries.
+- **Consequences:**
+  - (+) Sub-millisecond paint performance on Linux desktop, iPadOS, and Android.
+  - (+) Zero dependency bloat, zero licensing ambiguity.
+  - (+) Full control over stroke width, cap styles (`StrokeCap.round`), track and accent colors.
+  - (+) Efficient GPU redraws via `RepaintBoundary`.
+
 
 
 
