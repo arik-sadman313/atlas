@@ -270,6 +270,127 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'highlighter stroke commits to dedicated layer with multiply blend mode',
+      (tester) async {
+        final initialDoc = AtlasInkDocument.empty(
+          documentId: 'doc_hl',
+          width: 800,
+          height: 600,
+        );
+        final controller = InkCanvasController(
+          document: initialDoc,
+          initialTool: const InkToolConfig(
+            type: InkToolType.highlighter,
+            color: 0xFFFACC15,
+            baseWidth: 20.0,
+            opacity: 0.4,
+          ),
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: InkCanvas(
+                  controller: controller,
+                  width: 800,
+                  height: 600,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final gesture = await tester.startGesture(const Offset(100, 100));
+        await gesture.moveTo(const Offset(300, 100));
+        await gesture.up();
+        await tester.pump();
+
+        expect(controller.document.totalStrokeCount, equals(1));
+        final hlLayer = controller.document.layers.firstWhere(
+          (l) => l.blendMode == 'multiply',
+        );
+        expect(hlLayer.id, equals('layer_highlighter'));
+        expect(hlLayer.strokes.length, equals(1));
+        expect(hlLayer.strokes.first.tool, equals(InkToolType.highlighter));
+      },
+    );
+
+    testWidgets(
+      'vector eraser selectively erases only intersecting stroke and preserves distant stroke',
+      (tester) async {
+        final s1 = InkStroke(
+          id: 's_near',
+          tool: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 3.0,
+          points: const [
+            InkPoint(x: 50, y: 50, pressure: 0.5, timeOffsetMs: 0),
+            InkPoint(x: 60, y: 60, pressure: 0.5, timeOffsetMs: 10),
+          ],
+        );
+        final s2 = InkStroke(
+          id: 's_distant',
+          tool: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 3.0,
+          points: const [
+            InkPoint(x: 500, y: 500, pressure: 0.5, timeOffsetMs: 0),
+            InkPoint(x: 520, y: 520, pressure: 0.5, timeOffsetMs: 10),
+          ],
+        );
+
+        final doc = AtlasInkDocument(
+          version: 1,
+          documentId: 'doc_selective_erase',
+          pageNumber: 1,
+          width: 800,
+          height: 600,
+          layers: [
+            InkLayer(id: 'l1', name: 'Ink', strokes: [s1, s2]),
+          ],
+        );
+
+        final controller = InkCanvasController(document: doc);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: InkCanvas(
+                  controller: controller,
+                  width: 800,
+                  height: 600,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(controller.document.totalStrokeCount, equals(2));
+
+        controller.setTool(
+          const InkToolConfig(
+            type: InkToolType.vectorEraser,
+            color: 0xFF000000,
+            baseWidth: 10.0,
+          ),
+        );
+
+        // Erase near s1 only (55, 55)
+        final eraser = await tester.startGesture(const Offset(55, 55));
+        await eraser.up();
+        await tester.pump();
+
+        expect(controller.document.totalStrokeCount, equals(1));
+        expect(
+          controller.document.layers.first.strokes.first.id,
+          equals('s_distant'),
+        );
+      },
+    );
   });
 
   group('InkToolPalette Widget', () {

@@ -94,11 +94,49 @@ class InkDocumentPainter extends CustomPainter {
   }
 
   void _drawPaperBackground(Canvas canvas, Size size) {
+    PaperPatternPainter.paintPattern(
+      canvas,
+      size,
+      document.backgroundTemplate,
+      Color(document.backgroundColor),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant InkDocumentPainter oldDelegate) {
+    return isDrawing ||
+        oldDelegate.isDrawing ||
+        oldDelegate.document != document ||
+        oldDelegate.activePoints.length != activePoints.length;
+  }
+}
+
+/// Standalone paper pattern painter rendering standard stationery guidelines
+/// (ruled, dotted, square grid, or blank) with subtle DPI-scaled aesthetics.
+class PaperPatternPainter extends CustomPainter {
+  final String template;
+  final Color backgroundColor;
+
+  const PaperPatternPainter({
+    required this.template,
+    this.backgroundColor = const Color(0xFFFFFFFF),
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    paintPattern(canvas, size, template, backgroundColor);
+  }
+
+  static void paintPattern(
+    Canvas canvas,
+    Size size,
+    String template,
+    Color backgroundColor,
+  ) {
     // Base paper background
-    final bgPaint = Paint()..color = Color(document.backgroundColor);
+    final bgPaint = Paint()..color = backgroundColor;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
-    final template = document.backgroundTemplate;
     if (template == 'blank') return;
 
     final gridPaint = Paint()
@@ -120,10 +158,6 @@ class InkDocumentPainter extends CustomPainter {
           canvas.drawCircle(Offset(x, y), 1.2, dotPaint);
         }
       }
-    } else if (template.contains('ruled')) {
-      for (double y = spacing * 1.5; y < size.height; y += spacing) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-      }
     } else if (template.contains('grid')) {
       for (double x = spacing; x < size.width; x += spacing) {
         canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
@@ -131,14 +165,17 @@ class InkDocumentPainter extends CustomPainter {
       for (double y = spacing; y < size.height; y += spacing) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
       }
+    } else {
+      // Default: ruled / lined
+      for (double y = spacing * 1.5; y < size.height; y += spacing) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant InkDocumentPainter oldDelegate) {
-    return isDrawing ||
-        oldDelegate.isDrawing ||
-        oldDelegate.document != document ||
-        oldDelegate.activePoints.length != activePoints.length;
+  bool shouldRepaint(covariant PaperPatternPainter oldDelegate) {
+    return oldDelegate.template != template ||
+        oldDelegate.backgroundColor != backgroundColor;
   }
 }

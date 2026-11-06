@@ -12,5 +12,8 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if #available(iOS 14.0, *) {
+      AtlasPencilKitPlugin.register(with: engineBridge.pluginRegistry.registrar(forPlugin: "AtlasPencilKitPlugin")!)
+    }
   }
 }

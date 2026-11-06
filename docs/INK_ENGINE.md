@@ -338,3 +338,31 @@ Following the mandatory software reuse directive, ATLAS evaluated existing open-
 | **Companion Viewer**| `InkPageView` | `lib/features/handwriting/presentation/widgets/` | Read-only zoom/pan viewer for Android & preview mode |
 | **Tool Palette** | `InkToolPalette` | `lib/features/handwriting/presentation/widgets/` | Floating pill with tools, widths, colors, undo/redo |
 | **Screen** | `NotebookEditorScreen` | `lib/features/handwriting/presentation/screens/` | Full multi-page editor with autosave |
+
+---
+
+## 7. Milestone 2.1: Native PencilKit Mounting & Bidirectional Interoperability
+
+Milestone 2.1 addresses the findings of the independent M2 Technical Verification Audit, completing the production bridge between native Apple PencilKit and the cross-platform ATLAS Portable Ink Engine.
+
+### 7.1 Native iPadOS PencilKit Mounting (`NotebookEditorScreen`)
+On iPadOS (`defaultTargetPlatform == TargetPlatform.iOS`), `NotebookEditorScreen` conditionally mounts the native `PencilKit` widget (`package:pencil_kit/pencil_kit.dart`) inside an adaptive stationery container matching document dimensions (e.g. 1600x2200):
+- **Visual Parity:** Underlying `CustomPaint` with `PaperPatternPainter` renders paper templates (ruled, dotted, square grid, blank) beneath a transparent `PKCanvasView`.
+- **Rehydration Safety:** Re-hydrates from raw Apple `.pkdrawing` binaries stored in CAS (`page.rawPencilkitHash`) for 100% lossless fidelity, or reconstructs `PKDrawing` from portable ink if created on Linux desktop.
+- **Initialization Guard:** Blocks modification flags until the initial drawing is fully loaded into `PKCanvasView`, guaranteeing opening an existing drawing never overwrites it with a blank canvas.
+
+### 7.2 Swift Bidirectional Reconstruction Layer (`AtlasPencilKitPlugin.swift` & `PencilKitConverter.dart`)
+ATLAS implements full bidirectional translation between Apple `PKDrawing` and `.atlas_ink`:
+1. **Portable Ink -> PencilKit Reconstruction (`constructDrawing`):**
+   - Synthesizes `PKStrokePoint` objects from portable ink points, mapping coordinates `(x, y)`, normalized force `pressure.clamp(0.01, 1.0)`, `tiltAzimuth`, `tiltAltitude`, and millisecond `timeOffset`.
+   - **Single-Point Dot Handling:** Generates an offset point ($+0.1$ px, $+0.001$ s) for single-point taps to prevent `PKStrokePath` from discarding standalone punctuation or dots.
+   - **Tool & Color Mapping:** Maps ballpoint pen, fountain pen, pencil, and highlighter to Apple `PKInk.InkType` (.pen, .pencil, .marker) and converts 32-bit ARGB values to `UIColor`. Unsupported or newer iOS 17+ tools fall back gracefully to `PKInk.InkType.pen`.
+2. **PencilKit -> Portable Ink Extraction (`extractPortableStrokes`):**
+   - Extracts raw `PKStroke` control points, force, and tilt telemetry into portable stroke dictionaries.
+   - Separates highlighter strokes into dedicated multiply-composited layers (`layer_highlighter`).
+
+### 7.3 Autosave & Back-Navigation Data Loss Prevention (P3)
+To eliminate data loss on screen exit:
+- **Mutex & Queue:** `_flushPendingSaves()` coordinates with in-flight autosaves via a `Completer<bool>` mutex.
+- **Route Interception (`PopScope`):** `PopScope(canPop: !_hasUnsavedChanges && !_isSaving)` intercepts system back gestures, swipes, and the AppBar back button, flushing pending changes before popping.
+- **Failure Resilience:** If CAS disk or database persistence fails, the unsaved state remains active (`_hasUnsavedChanges = true`), a persistent SnackBar alerts the user with a Retry affordance, and navigation is aborted.

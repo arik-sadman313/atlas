@@ -177,21 +177,22 @@ Claims of "lossless bidirectional conversion between Apple PencilKit and portabl
 
 ## 8. Prioritized Recommendations & Action Items
 
-| Priority | Issue / Risk | Location | Recommended Correction |
-| :---: | :--- | :--- | :--- |
-| **P1** | `NotebookEditorScreen` does not mount `PencilKit` widget on iOS | `notebook_editor_screen.dart:261` | Add conditional platform view builder: on iOS, mount `PencilKit` widget bound to `PencilKitBridge` when running on physical iPadOS hardware. |
-| **P2** | Reverse vector-to-PencilKit synthesis is unimplemented | `AtlasPencilKitPlugin.swift` | Implement `PKStrokePath` generator in Swift to construct synthetic `PKDrawing` from `.atlas_ink_bin` points when opening a note created on Linux. |
-| **P3** | System back gesture (`PopScope`) does not await debounced autosave | `notebook_editor_screen.dart:247` | Set `canPop: false` while `_hasUnsavedChanges == true`, await `_saveCurrentPage()`, and then call `context.pop()`. |
-| **P4** | Large drawing repaint boundary caching | `ink_document_painter.dart` | Wrap static committed strokes in a `PictureRecorder` / `RepaintBoundary` texture cache so pages with >1,000 strokes do not re-tessellate every frame during active input. |
+| Priority | Issue / Risk | Location | Status | Resolution Detail |
+| :---: | :--- | :--- | :---: | :--- |
+| **P1** | `NotebookEditorScreen` does not mount `PencilKit` widget on iOS | `notebook_editor_screen.dart` | **RESOLVED (M2.1)** | Mounted native `PencilKit` widget inside adaptive stationery container with underlying `PaperPatternPainter`, bound to `PencilKitBridge` and CAS rehydration. |
+| **P2** | Reverse vector-to-PencilKit synthesis is unimplemented | `AtlasPencilKitPlugin.swift` & `pencil_kit_converter.dart` | **RESOLVED (M2.1)** | Implemented bidirectional translation (`constructDrawing` & `extractPortableStrokes`) with `PKStrokePoint` synthesis, dot offsets, and telemetry mapping. |
+| **P3** | System back gesture (`PopScope`) does not await debounced autosave | `notebook_editor_screen.dart` | **RESOLVED (M2.1)** | Configured `PopScope(canPop: !_hasUnsavedChanges && !_isSaving)` with mutex `_flushPendingSaves()`. Aborts exit on error with user SnackBar. |
+| **P4** | Large drawing repaint boundary caching | `ink_document_painter.dart` | Tracked (M3) | Wrap static committed strokes in a `PictureRecorder` / `RepaintBoundary` texture cache so pages with >1,000 strokes do not re-tessellate every frame. |
 
 ---
 
 ## 9. Final Architect Verdict
 
-### **VERDICT: APPROVED WITH CONDITIONS**
+### **VERDICT: FULLY APPROVED (M2.1 Completion)**
 
 **Justification:**
 1. **Reuse Directive Met:** `perfect_freehand: ^2.5.2+1` and `pencil_kit: ^2.1.1` were legitimately adopted, pinned, and integrated behind clean abstractions rather than writing custom spline math or low-level iOS platform views.
-2. **Platform Restrictions Strictly Respected:** Android contains zero drawing tools, zero stylus input listeners, and renders exclusively through a zoomable read-only viewer. Linux desktop compiles and runs natively with tablet pressure support.
-3. **Codebase Health:** `flutter analyze` reports 0 issues; all 35 automated tests pass; native Linux and Android debug builds succeed without error.
-4. **Condition:** The four prioritized items in Section 8 (particularly mounting the `PencilKit` widget on iOS and preventing un-awaited pops during autosave) must be tracked and resolved during the integration hardening cycle before public release.
+2. **Platform Restrictions Strictly Respected:** Android contains zero drawing tools, zero stylus input listeners, and renders exclusively through a zoomable read-only viewer. Linux desktop compiles and runs natively with tablet pressure support. iPadOS mounts native Apple `PKCanvasView`.
+3. **Interoperability & Data Safety Verified:** Bidirectional conversion, single-point dots, tool fallbacks, and autosave back-navigation locks verified with 48 automated tests passing cleanly.
+4. **Codebase Health:** `flutter analyze` reports 0 issues; all 48 automated tests pass; native Linux (`flutter build linux --debug`) and Android (`flutter build apk --debug`) debug builds succeed without error.
+

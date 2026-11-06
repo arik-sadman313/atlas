@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pencil_kit/pencil_kit.dart';
 
 import '../../../../app/providers.dart';
 import '../../../../core/database/app_database.dart';
@@ -12,7 +13,9 @@ import '../../../../core/theme/atlas_colors.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
+import '../platform/pencil_kit_bridge.dart';
 import '../widgets/ink_canvas.dart';
+import '../widgets/ink_document_painter.dart';
 import '../widgets/ink_page_view.dart';
 import '../widgets/ink_tool_palette.dart';
 
@@ -21,7 +24,8 @@ import '../widgets/ink_tool_palette.dart';
 /// Adaptive across platforms:
 /// - Android: Read-only companion viewer with pinch-to-zoom ([InkPageView]).
 /// - Linux & Desktop: Vector handwriting canvas with mouse/tablet pressure support ([InkCanvas] + [InkToolPalette]).
-/// - iPadOS: Prepares for native PencilKit bridge with fallback to vector canvas.
+/// - iPadOS: Mounts native Apple PencilKit canvas ([PencilKit]) with hardware latency,
+///   pressure/tilt telemetry, lossless CAS binary persistence, and bidirectional portable ink conversion.
 class NotebookEditorScreen extends ConsumerStatefulWidget {
   final String notebookId;
 
@@ -35,6 +39,8 @@ class NotebookEditorScreen extends ConsumerStatefulWidget {
 class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _saveQueued = false;
+  Completer<bool>? _activeSaveCompleter;
   String _title = 'Notebook';
 
   InkDocumentEntry? _documentEntry;
@@ -42,6 +48,10 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   int _currentPageIndex = 0;
 
   InkCanvasController? _canvasController;
+  final PencilKitBridge _pencilKitBridge = PencilKitBridge();
+  Uint8List? _currentRawPkBytes;
+  bool _isPencilKitReady = false;
+
   Timer? _autosaveTimer;
   bool _hasUnsavedChanges = false;
 
@@ -54,6 +64,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _pencilKitBridge.dispose();
+    _canvasController?.removeListener(_onCanvasChanged);
     _canvasController?.dispose();
     super.dispose();
   }
@@ -64,6 +76,7 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     final nodesDao = ref.read(nodesDaoProvider);
     final inkDao = ref.read(inkDaoProvider);
     final inkRepo = ref.read(inkRepositoryProvider);
+    final blobStorage = ref.read(blobStorageServiceProvider);
 
     // 1. Fetch Notebook Title
     final node = await nodesDao.getNode(widget.notebookId);
@@ -85,8 +98,19 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
 
     // 4. Load First Page Drawing
     final firstPage = _pages.first;
-    final inkDoc = await inkRepo.loadPageDrawing(firstPage);
+    if (firstPage.rawPencilkitHash != null) {
+      try {
+        _currentRawPkBytes = await blobStorage.readBlob(
+          firstPage.rawPencilkitHash!,
+        );
+      } catch (_) {
+        _currentRawPkBytes = null;
+      }
+    } else {
+      _currentRawPkBytes = null;
+    }
 
+    final inkDoc = await inkRepo.loadPageDrawing(firstPage);
     _initController(inkDoc);
 
     if (mounted) {
@@ -107,11 +131,54 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
       ),
     );
 
+    _pencilKitBridge.attachController(_canvasController!);
     _canvasController!.addListener(_onCanvasChanged);
   }
 
+  InkToolConfig? _lastSyncedTool;
+
   void _onCanvasChanged() {
-    _hasUnsavedChanges = true;
+    if (_canvasController != null &&
+        _canvasController!.activeTool != _lastSyncedTool) {
+      _lastSyncedTool = _canvasController!.activeTool;
+      _pencilKitBridge.setTool(_canvasController!.activeTool);
+    }
+    if (!_hasUnsavedChanges) {
+      _hasUnsavedChanges = true;
+      if (mounted) setState(() {});
+    }
+    _scheduleAutosave();
+  }
+
+  void _onPencilKitViewCreated(PencilKitController controller) async {
+    _pencilKitBridge.attachPencilKitController(controller);
+    if (_canvasController != null) {
+      _pencilKitBridge.attachController(_canvasController!);
+      _pencilKitBridge.setTool(_canvasController!.activeTool);
+    }
+
+    // Rehydrate existing drawing
+    if (_currentRawPkBytes != null && _currentRawPkBytes!.isNotEmpty) {
+      await _pencilKitBridge.loadRawPencilKitBytes(_currentRawPkBytes!);
+    } else if (_canvasController != null &&
+        _canvasController!.document.totalStrokeCount > 0) {
+      final pkBytes = await _pencilKitBridge.convertPortableDocToPkDrawing(
+        _canvasController!.document,
+      );
+      if (pkBytes != null && pkBytes.isNotEmpty) {
+        await _pencilKitBridge.loadRawPencilKitBytes(pkBytes);
+      }
+    }
+
+    _isPencilKitReady = true;
+  }
+
+  void _onPencilKitDrawingChanged() {
+    if (!_isPencilKitReady) return;
+    if (!_hasUnsavedChanges) {
+      _hasUnsavedChanges = true;
+      if (mounted) setState(() {});
+    }
     _scheduleAutosave();
   }
 
@@ -122,33 +189,118 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     });
   }
 
-  Future<void> _saveCurrentPage() async {
-    if (_canvasController == null ||
-        _pages.isEmpty ||
-        !_hasUnsavedChanges ||
-        _isSaving) {
-      return;
+  /// Flushes any pending autosave timers and awaits any in-flight or queued saves.
+  ///
+  /// Returns `true` if all pending modifications have been safely persisted,
+  /// or `false` if an unrecoverable persistence error occurred.
+  Future<bool> _flushPendingSaves() async {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
+
+    if (!_hasUnsavedChanges && !_isSaving) {
+      return true;
     }
 
-    setState(() => _isSaving = true);
+    while (_isSaving && _activeSaveCompleter != null) {
+      _saveQueued = true;
+      await _activeSaveCompleter!.future;
+    }
 
+    if (!_hasUnsavedChanges) {
+      return true;
+    }
+
+    return await _saveCurrentPage();
+  }
+
+  Future<bool> _saveCurrentPage() async {
+    if (_isSaving) {
+      _saveQueued = true;
+      if (_activeSaveCompleter != null) {
+        return await _activeSaveCompleter!.future;
+      }
+      return false;
+    }
+
+    if (_pages.isEmpty || (!_hasUnsavedChanges && !_saveQueued)) {
+      return true;
+    }
+
+    _isSaving = true;
+    _saveQueued = false;
+    final completer = Completer<bool>();
+    _activeSaveCompleter = completer;
+    if (mounted) setState(() {});
+
+    bool success = false;
     try {
       final inkRepo = ref.read(inkRepositoryProvider);
       final currentPage = _pages[_currentPageIndex];
+
+      Uint8List? pkBytes;
+      Uint8List? previewPngBytes;
+      AtlasInkDocument docToSave;
+
+      if (defaultTargetPlatform == TargetPlatform.iOS && _isPencilKitReady) {
+        pkBytes = await _pencilKitBridge.exportRawPencilKitBytes();
+        previewPngBytes = await _pencilKitBridge.exportPngBytes();
+        if (pkBytes != null && pkBytes.isNotEmpty) {
+          _currentRawPkBytes = pkBytes;
+          final portableDoc = await _pencilKitBridge
+              .convertPkDrawingToPortableDoc(
+                pkBytes: pkBytes,
+                documentId: currentPage.documentId,
+                pageNumber: currentPage.pageNumber,
+                width: currentPage.width,
+                height: currentPage.height,
+                backgroundTemplate: currentPage.templateType,
+                backgroundColor: currentPage.backgroundColor,
+              );
+          docToSave = portableDoc ?? _canvasController!.document;
+        } else {
+          docToSave = _canvasController!.document;
+        }
+      } else {
+        docToSave = _canvasController!.document;
+      }
+
       final updatedPage = await inkRepo.savePageDrawing(
         page: currentPage,
-        doc: _canvasController!.document,
+        doc: docToSave,
+        rawPencilKitBytes: pkBytes,
+        previewPngBytes: previewPngBytes,
       );
 
       _pages[_currentPageIndex] = updatedPage;
       _hasUnsavedChanges = false;
+      success = true;
     } catch (e) {
       debugPrint('Error autosaving page ink: $e');
-    } finally {
+      success = false;
       if (mounted) {
-        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save drawing: $e'),
+            backgroundColor: Colors.red.shade800,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () => _flushPendingSaves(),
+            ),
+          ),
+        );
+      }
+    } finally {
+      _isSaving = false;
+      completer.complete(success);
+      _activeSaveCompleter = null;
+      if (mounted) setState(() {});
+
+      if (_saveQueued && _hasUnsavedChanges) {
+        _saveCurrentPage();
       }
     }
+    return success;
   }
 
   Future<void> _switchPage(int targetIndex) async {
@@ -158,11 +310,10 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
       return;
     }
 
-    // Save active page first
-    if (_hasUnsavedChanges) {
-      await _saveCurrentPage();
-    }
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
 
+    _isPencilKitReady = false;
     setState(() {
       _currentPageIndex = targetIndex;
       _isLoading = true;
@@ -170,9 +321,40 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
 
     final targetPage = _pages[targetIndex];
     final inkRepo = ref.read(inkRepositoryProvider);
-    final loadedDoc = await inkRepo.loadPageDrawing(targetPage);
+    final blobStorage = ref.read(blobStorageServiceProvider);
 
+    if (targetPage.rawPencilkitHash != null) {
+      try {
+        _currentRawPkBytes = await blobStorage.readBlob(
+          targetPage.rawPencilkitHash!,
+        );
+      } catch (_) {
+        _currentRawPkBytes = null;
+      }
+    } else {
+      _currentRawPkBytes = null;
+    }
+
+    final loadedDoc = await inkRepo.loadPageDrawing(targetPage);
     _initController(loadedDoc);
+
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      if (_currentRawPkBytes != null && _currentRawPkBytes!.isNotEmpty) {
+        await _pencilKitBridge.loadRawPencilKitBytes(_currentRawPkBytes!);
+      } else if (loadedDoc.totalStrokeCount > 0) {
+        final pkBytes = await _pencilKitBridge.convertPortableDocToPkDrawing(
+          loadedDoc,
+        );
+        if (pkBytes != null && pkBytes.isNotEmpty) {
+          await _pencilKitBridge.loadRawPencilKitBytes(pkBytes);
+        } else {
+          _pencilKitBridge.clear();
+        }
+      } else {
+        _pencilKitBridge.clear();
+      }
+      _isPencilKitReady = true;
+    }
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -180,9 +362,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   }
 
   Future<void> _addNewPage() async {
-    if (_hasUnsavedChanges) {
-      await _saveCurrentPage();
-    }
+    final saved = await _flushPendingSaves();
+    if (!saved) return;
 
     final inkDao = ref.read(inkDaoProvider);
     final docId = _documentEntry!.id;
@@ -219,7 +400,6 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     );
     _canvasController!.loadDocument(updatedDoc);
 
-    // Also update SQLite page record
     final inkDao = ref.read(inkDaoProvider);
     final currentPage = _pages[_currentPageIndex];
     await inkDao.updatePage(
@@ -236,17 +416,29 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     setState(() {});
   }
 
+  void _popSafely() {
+    if (!mounted || !context.mounted) return;
+    if (GoRouter.maybeOf(context) != null) {
+      context.pop();
+    } else if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+    final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
 
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
-        if (_hasUnsavedChanges) {
-          _saveCurrentPage();
+      canPop: !_hasUnsavedChanges && !_isSaving,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final saved = await _flushPendingSaves();
+        if (saved) {
+          _popSafely();
         }
       },
       child: Scaffold(
@@ -256,17 +448,19 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // --- Canvas / Page Area ---
+                  // --- Adaptive Canvas Selection ---
                   Positioned.fill(
                     child: isAndroid
                         ? InkPageView(
                             document: _canvasController!.document,
                             showCompanionBadge: true,
                           )
+                        : isIOS
+                        ? _buildIosPencilKitCanvas(isDark)
                         : _buildDesktopCanvas(isDark),
                   ),
 
-                  // --- Floating Palette on Linux & Desktop ---
+                  // --- Floating Palette on Linux & iPadOS ---
                   if (!isAndroid && _canvasController != null)
                     Positioned(
                       bottom: 24,
@@ -276,6 +470,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                         child: InkToolPalette(
                           controller: _canvasController!,
                           onClearRequested: () {
+                            if (isIOS) {
+                              _pencilKitBridge.clear();
+                            }
                             _hasUnsavedChanges = true;
                             _scheduleAutosave();
                           },
@@ -303,10 +500,10 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
         icon: const Icon(Icons.arrow_back),
         tooltip: 'Back to Notebooks',
         onPressed: () async {
-          if (_hasUnsavedChanges) {
-            await _saveCurrentPage();
+          final saved = await _flushPendingSaves();
+          if (saved) {
+            _popSafely();
           }
-          if (mounted) context.pop();
         },
       ),
       title: Column(
@@ -340,10 +537,12 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(
-                    Icons.check_circle_outline,
+                    _hasUnsavedChanges
+                        ? Icons.pending_outlined
+                        : Icons.check_circle_outline,
                     size: 18,
-                    color: isDark
-                        ? AtlasColors.accentSage
+                    color: _hasUnsavedChanges
+                        ? Colors.amber
                         : AtlasColors.accentSage,
                   ),
           ),
@@ -414,6 +613,55 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
               width: doc.width,
               height: doc.height,
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIosPencilKitCanvas(bool isDark) {
+    final doc = _canvasController!.document;
+    final bgColor = Color(doc.backgroundColor);
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.only(top: 24, bottom: 96),
+        child: Container(
+          width: doc.width,
+          height: doc.height,
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(isDark ? 80 : 25),
+                blurRadius: 18,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: PaperPatternPainter(
+                    template: doc.backgroundTemplate,
+                    backgroundColor: bgColor,
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: PencilKit(
+                  isOpaque: false,
+                  backgroundColor: Colors.transparent,
+                  alwaysBounceVertical: false,
+                  alwaysBounceHorizontal: false,
+                  drawingPolicy: PencilKitIos14DrawingPolicy.defaultInput,
+                  onPencilKitViewCreated: _onPencilKitViewCreated,
+                  canvasViewDrawingDidChange: _onPencilKitDrawingChanged,
+                ),
+              ),
+            ],
           ),
         ),
       ),

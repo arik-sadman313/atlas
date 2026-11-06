@@ -214,3 +214,20 @@
   - (+) Overlapping highlighter strokes fuse seamlessly like physical ink on paper without darkening seams.
   - (+) Text beneath the highlighter remains perfectly crisp and readable.
 
+---
+
+### ADR-016: Bidirectional Portable-to-PencilKit Reconstruction & Autosave Navigation Lock
+
+- **Status:** Accepted
+- **Context:** Following the Milestone 2 review, two critical issues were identified: (1) Linux-authored portable ink could not be synthesized into a native Apple `PKDrawing` when opening notes on iPadOS, and (2) back-navigation via system gestures (`PopScope`) or AppBar back button could unmount `NotebookEditorScreen` while debounced saves were pending or in-flight, risking data loss.
+- **Decision:**
+  1. Implement a bidirectional synthesis engine in Swift ([`AtlasPencilKitPlugin.swift`](../ios/Runner/PencilKit/AtlasPencilKitPlugin.swift)) and Dart ([`PencilKitConverter.dart`](../lib/features/handwriting/domain/interop/pencil_kit_converter.dart)).
+  2. Synthesize `PKStrokePoint` collections mapping coordinates, pressure ($[0.01, 1.0]$), tilt azimuth, tilt altitude, and time offset, with synthetic duplicate offsets ($+0.1$ px, $+0.001$ s) for single-point dots to prevent `PKStrokePath` point pruning.
+  3. Map tools (.pen, .pencil, .marker) and gracefully fall back newer/unsupported tools to `ballpointPen` without data loss.
+  4. Implement an autosave mutex lock (`_flushPendingSaves()`) with `Completer<bool>` coordinating with debounced timers.
+  5. Intercept pops with `PopScope(canPop: !_hasUnsavedChanges && !_isSaving)` to flush pending edits before exiting, aborting pop and displaying a SnackBar with Retry action if persistence fails.
+- **Consequences:**
+  - (+) Full cross-platform interoperability: notes created on Linux open and can be edited in native Apple PencilKit on iPadOS.
+  - (+) 100% lossless preservation of raw Apple `.pkdrawing` binaries in CAS when notes are round-tripped without modification on other platforms.
+  - (+) Guaranteed prevention of data loss during navigation gestures.
+
