@@ -7,6 +7,7 @@ import '../../core/theme/atlas_colors.dart';
 import '../../core/theme/atlas_spacing.dart';
 import '../../core/theme/theme_provider.dart';
 import '../models/navigation_item.dart';
+import '../presentation/command_palette/command_palette_modal.dart';
 
 class AtlasSidebar extends ConsumerWidget {
   final String currentRoute;
@@ -111,6 +112,80 @@ class AtlasSidebar extends ConsumerWidget {
                 vertical: AtlasSpacing.sm,
               ),
               children: [
+                // Quick Command Palette Trigger
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AtlasSpacing.sm),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                    onTap: () => CommandPaletteModal.show(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AtlasColors.darkElevated
+                            : AtlasColors.lightElevated,
+                        borderRadius: BorderRadius.circular(
+                          AtlasSpacing.radiusSm,
+                        ),
+                        border: Border.all(
+                          color: isDark
+                              ? AtlasColors.darkBorder
+                              : AtlasColors.lightBorder,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.search,
+                            size: 16,
+                            color: isDark
+                                ? AtlasColors.darkTextSecondary
+                                : AtlasColors.lightTextSecondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Search / Command',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: isDark
+                                    ? AtlasColors.darkTextSecondary
+                                    : AtlasColors.lightTextSecondary,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? AtlasColors.darkBg
+                                  : AtlasColors.lightBg,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: isDark
+                                    ? AtlasColors.darkBorderSubtle
+                                    : AtlasColors.lightBorderSubtle,
+                              ),
+                            ),
+                            child: Text(
+                              'Ctrl+K',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
                 ...atlasNavigationItems.map((item) {
                   final isSelected = currentRoute.startsWith(item.route);
                   return _SidebarItem(

@@ -601,5 +601,103 @@
    - `flutter build apk --debug`
    - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (26.1s).
 
+---
+
+# ATLAS — Milestone 7 Implementation Log
+
+**Date:** 2026-11-06  
+**Milestone:** Milestone 7 — Global Search, Command Palette & Knowledge Graph  
+**Author:** Principal Software Architect & Senior Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Architectural Requirements
+
+1. **Unified Global Search Engine:** Cross-entity indexing and querying across typed Documents, Notebooks (titles + CAS Delta extracts), Tasks (with parent projects), Calendar Events, Daily Journals, and Tags.
+2. **Relevance Scoring Rubric:** Implement multi-tiered relevance scoring: Exact title ($100$), Prefix title ($80$), Word-prefix ($70$), Tag/Project ($60$), Content body ($40$), Fuzzy subsequence ($25$), and Recency decay boost ($+1$ to $+10$).
+3. **Universal Command Palette:** Floating modal with backdrop blur accessible globally via `Ctrl+K` / `Cmd+K`. Support mode prefixes (`>` for system actions, `#` for taxonomy tags, `@` for calendar dates).
+4. **Interactive 2D Knowledge Graph:** Visualizing node topology, degree-scaled radii, direction-neutral subtle edges, and real-time node dragging.
+5. **Self-Contained Physics Simulation:** Fruchterman-Reingold / Verlet 2D physics engine (< 250 lines) with kinetic energy convergence detection to halt ticking at equilibrium.
+6. **Embedded 1-Hop Local Graph:** Embed localized neighborhood graph in `DocumentEditorScreen` and `NotebookEditorScreen`.
+7. **Quality Gates:** 0 analyzer warnings, 100% test pass rate, clean Linux and Android builds.
+
+---
+
+## 2. Implemented Components
+
+### 2.1 Package Audits & Architectural Decisions
+- Evaluated `graphview: ^1.2.0` (MIT) vs a lightweight self-contained 2D Force-Directed Layout service. Chose self-contained physics service (`ForceDirectedLayoutService`, 171 lines) for 60 FPS repaint isolation, kinetic energy convergence stopping, and instant dragging without widget overhead.
+- Evaluated `fuzzy: ^0.5.1` (Apache-2.0) vs custom multi-tier scorer. Chose custom `SearchScorer` for exact rubric compliance and contextual window snippet extraction.
+- Fully documented in [`docs/TECHNICAL_DECISIONS.md`](./TECHNICAL_DECISIONS.md#adr-021-unified-search-scorer-universal-command-palette--self-contained-2d-knowledge-graph-layout).
+
+### 2.2 Global Search Subsystem
+- [`SearchScorer`](../lib/features/search/data/services/search_scorer.dart):
+  - Implements the 7-tier scoring rubric with recency decay boost and window snippet extraction.
+- [`SearchService`](../lib/features/search/data/services/search_service.dart):
+  - Asynchronously queries `NodesDao`, `TasksDao`, `CalendarDao`, `JournalDao`, `LinksDao`, and CAS `BlobStorageService`.
+- [`SearchRepository`](../lib/features/search/data/repositories/search_repository.dart):
+  - Exposes clean domain search interface to presentation layer.
+- [`SearchScreen`](../lib/features/search/presentation/search_screen.dart):
+  - Overhauled with 250ms debounced search-as-you-type, entity filter chips (`All`, `Documents`, `Notebooks`, `Tasks`, `Calendar`, `Journal`), rich result cards with keyword highlighting, breadcrumbs, relative timestamps, and keyboard navigation.
+
+### 2.3 Universal Command Palette Subsystem
+- [`CommandAction`](../lib/shared/presentation/command_palette/command_action.dart):
+  - Model for executable palette actions with categories, shortcuts, and keywords.
+- [`CommandRegistry`](../lib/shared/presentation/command_palette/command_registry.dart):
+  - Comprehensive action registry: Navigation (Dashboard, Notebooks, Documents, Tasks, Calendar, Graph, Search, Settings), Quick Creation (New Document, New Notebook, New Task, Today's Journal, New Habit), and System commands (Toggle Theme, Knowledge Graph).
+- [`CommandPaletteModal`](../lib/shared/presentation/command_palette/command_palette_modal.dart):
+  - Floating centered modal with backdrop blur (`BackdropFilter`), mode prefixes (`>`, `#`, `@`), keyboard navigation (Arrow Up/Down, Enter, Esc), and quick hint badges.
+- [`AtlasScaffold`](../lib/shared/widgets/atlas_scaffold.dart):
+  - Wired global `Ctrl+K` and `Cmd+K` keyboard shortcuts via `CallbackShortcuts`.
+- [`AtlasSidebar`](../lib/shared/widgets/atlas_sidebar.dart):
+  - Added quick command launcher button.
+
+### 2.4 Knowledge Graph Subsystem
+- [`GraphData`, `GraphNode`, `GraphEdge`](../lib/features/graph/domain/models/graph_models.dart):
+  - Graph domain topology models with degree tracking, position kinematics, and type categorization.
+- [`ForceDirectedLayoutService`](../lib/features/graph/domain/services/force_directed_layout_service.dart):
+  - Self-contained 2D physics simulation with Coulomb repulsion, Hooke's law spring tension, center gravity pull, velocity clamping, damping, and kinetic energy convergence stopping (< 0.04 threshold).
+- [`GraphRepository`](../lib/features/graph/data/repositories/graph_repository.dart):
+  - Assembles nodes and node links from SQLite, calculates connectivity degrees, and extracts 1-hop local subgraphs.
+- [`KnowledgeGraphPainter`](../lib/features/graph/presentation/widgets/knowledge_graph_painter.dart):
+  - High-performance custom painter with subtle direction-neutral edges, degree-scaled node radii ($4\text{px}$ to $16\text{px}$), glow highlights on hover/selection, and text labels.
+- [`InteractiveKnowledgeGraph`](../lib/features/graph/presentation/widgets/interactive_knowledge_graph.dart):
+  - Interactive widget with `InteractiveViewer` zoom/pan bounds, node dragging with dynamic spring updates, and hover tooltips.
+- [`KnowledgeGraphScreen`](../lib/features/graph/presentation/knowledge_graph_screen.dart):
+  - Full-screen graph viewer with filter capsule (Docs, Notebooks, Tags, Orphans toggle, live node search) mounted at route `/graph`.
+- [`LocalGraphPanel`](../lib/features/graph/presentation/widgets/local_graph_panel.dart):
+  - Collapsible 1-hop local neighborhood graph mounted in `DocumentEditorScreen` and `NotebookEditorScreen`.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Code Formatting:**
+   - `dart format .`
+   - **Result:** All files formatted cleanly.
+
+3. **Automated Test Suite (139 tests across all modules):**
+   - `test/features/search/search_scorer_test.dart` (10 tests)
+   - `test/features/search/search_service_test.dart` (4 tests)
+   - `test/shared/command_palette_test.dart` (4 tests)
+   - `test/features/graph/force_directed_layout_test.dart` (7 tests)
+   - `test/features/graph/knowledge_graph_widget_test.dart` (3 tests)
+   - All 111 existing regression tests verified passing.
+   - **Result:** `✓ All 139 tests passed!`.
+
+4. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+5. **Android Build Verification:**
+   - `flutter build apk --debug`
+   - **Result:** `✓ Built build/app/outputs/flutter-apk/app-debug.apk` (24.0s).
+
+
 
 

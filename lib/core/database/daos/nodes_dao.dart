@@ -53,6 +53,20 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
         .watch();
   }
 
+  Future<List<NodeEntry>> getRecentNodes(String workspaceId, {int limit = 10}) {
+    return (select(nodes)
+          ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..orderBy([
+            (tbl) => OrderingTerm(
+              expression: tbl.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+          ])
+          ..limit(limit))
+        .get();
+  }
+
   Stream<List<NodeEntry>> watchFavoriteNodes(String workspaceId) {
     return (select(nodes)
           ..where((tbl) => tbl.workspaceId.equals(workspaceId))
@@ -152,5 +166,31 @@ class NodesDao extends DatabaseAccessor<AppDatabase> with _$NodesDaoMixin {
 
   Future<int> deleteBlock(String blockId) {
     return (delete(nodeBlocks)..where((tbl) => tbl.id.equals(blockId))).go();
+  }
+
+  Future<List<NodeEntry>> getAllNodes(String workspaceId) {
+    return (select(nodes)
+          ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..orderBy([
+            (tbl) => OrderingTerm(
+              expression: tbl.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
+        .get();
+  }
+
+  Stream<List<NodeEntry>> watchAllNodes(String workspaceId) {
+    return (select(nodes)
+          ..where((tbl) => tbl.workspaceId.equals(workspaceId))
+          ..where((tbl) => tbl.isDeleted.equals(false))
+          ..orderBy([
+            (tbl) => OrderingTerm(
+              expression: tbl.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
+        .watch();
   }
 }

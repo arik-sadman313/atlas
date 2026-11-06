@@ -13,12 +13,16 @@ import '../core/notifications/notification_service.dart';
 import '../core/storage/blob_storage_service.dart';
 import '../features/calendar/data/repositories/calendar_repository.dart';
 import '../features/documents/data/repositories/link_repository.dart';
+import '../features/graph/data/repositories/graph_repository.dart';
+import '../features/graph/domain/models/graph_models.dart';
 import '../features/habits/data/repositories/habit_repository.dart';
 import '../features/handwriting/data/repositories/ink_repository.dart';
 import '../features/journal/data/repositories/journal_repository.dart';
 import '../features/pdf/data/repositories/pdf_repository.dart';
 import '../features/pdf/data/services/pdf_export_service.dart';
 import '../features/pdf/data/services/pdf_rendering_service.dart';
+import '../features/search/data/repositories/search_repository.dart';
+import '../features/search/data/services/search_service.dart';
 import '../features/tasks/data/repositories/task_repository.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
@@ -145,6 +149,41 @@ final journalRepositoryProvider = Provider<JournalRepository>((ref) {
     nodesDao: nodesDao,
     blobStorage: blobStorage,
   );
+});
+
+final searchServiceProvider = Provider<SearchService>((ref) {
+  final nodesDao = ref.watch(nodesDaoProvider);
+  final tasksDao = ref.watch(tasksDaoProvider);
+  final calendarDao = ref.watch(calendarDaoProvider);
+  final journalDao = ref.watch(journalDaoProvider);
+  final linksDao = ref.watch(linksDaoProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+
+  return SearchService(
+    nodesDao: nodesDao,
+    tasksDao: tasksDao,
+    calendarDao: calendarDao,
+    journalDao: journalDao,
+    linksDao: linksDao,
+    blobStorage: blobStorage,
+  );
+});
+
+final searchRepositoryProvider = Provider<SearchRepository>((ref) {
+  final searchService = ref.watch(searchServiceProvider);
+  return SearchRepository(searchService: searchService);
+});
+
+final graphRepositoryProvider = Provider<GraphRepository>((ref) {
+  final nodesDao = ref.watch(nodesDaoProvider);
+  final linksDao = ref.watch(linksDaoProvider);
+  return GraphRepository(nodesDao: nodesDao, linksDao: linksDao);
+});
+
+final workspaceGraphProvider = FutureProvider<GraphData>((ref) async {
+  final repo = ref.watch(graphRepositoryProvider);
+  final workspaceId = ref.watch(currentWorkspaceIdProvider);
+  return repo.loadWorkspaceGraph(workspaceId);
 });
 
 class CurrentWorkspaceIdNotifier extends Notifier<String> {

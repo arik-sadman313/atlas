@@ -8,6 +8,7 @@ import '../../core/database/app_database.dart';
 import '../../core/theme/atlas_colors.dart';
 import '../../core/theme/atlas_spacing.dart';
 import '../models/navigation_item.dart';
+import '../presentation/command_palette/command_palette_modal.dart';
 import 'atlas_sidebar.dart';
 
 class AtlasScaffold extends ConsumerStatefulWidget {
@@ -180,6 +181,10 @@ class _AtlasScaffoldState extends ConsumerState<AtlasScaffold> {
             _showQuickCreateDialog(context),
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () =>
             context.go('/settings'),
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
+            CommandPaletteModal.show(context),
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () =>
+            CommandPaletteModal.show(context),
       },
       child: Focus(
         autofocus: true,
@@ -291,6 +296,11 @@ class _AtlasScaffoldState extends ConsumerState<AtlasScaffold> {
 
     return Scaffold(
       body: widget.child,
+      floatingActionButton: FloatingActionButton.small(
+        onPressed: () => CommandPaletteModal.show(context),
+        tooltip: 'Command Palette (Ctrl+K)',
+        child: const Icon(Icons.terminal, size: 18),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {

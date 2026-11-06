@@ -7,5 +7,6 @@ abstract class AtlasRoutes {
   static const tasks = '/tasks';
   static const calendar = '/calendar';
   static const search = '/search';
+  static const graph = '/graph';
   static const settings = '/settings';
 }

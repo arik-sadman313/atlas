@@ -6,6 +6,7 @@ import '../../features/calendar/presentation/calendar_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/documents/presentation/document_editor_screen.dart';
 import '../../features/documents/presentation/documents_screen.dart';
+import '../../features/graph/presentation/knowledge_graph_screen.dart';
 import '../../features/handwriting/presentation/screens/notebook_editor_screen.dart';
 import '../../features/notebooks/presentation/notebooks_screen.dart';
 import '../../features/search/presentation/search_screen.dart';
@@ -79,6 +80,11 @@ GoRouter createAppRouter({String initialLocation = AtlasRoutes.dashboard}) {
             path: AtlasRoutes.search,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: SearchScreen()),
+          ),
+          GoRoute(
+            path: AtlasRoutes.graph,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: KnowledgeGraphScreen()),
           ),
           GoRoute(
             path: AtlasRoutes.settings,

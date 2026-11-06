@@ -415,5 +415,129 @@ flowchart TD
   - `JournalContextDayPanel` automatically detects when a document is linked to `journal_entries`.
   - Renders an embedded panel displaying all tasks completed and habits fulfilled on that specific date.
 
+---
+
+## 11. Global Search, Command Palette & Knowledge Graph Architecture (Milestone 7)
+
+### 11.1 Unified Global Search Engine & Relevance Scorer
+
+```mermaid
+flowchart TD
+    Query[User Query String] --> Debounce[250ms Debounce]
+    Debounce --> SearchService[SearchService.search]
+    
+    SearchService --> FilterCheck{Entity Filter}
+    FilterCheck -- Documents & Notebooks --> NodesDao[NodesDao + CAS Delta Inspector]
+    FilterCheck -- Tasks --> TasksDao[TasksDao + Project Resolver]
+    FilterCheck -- Calendar --> CalendarDao[CalendarDao Events]
+    FilterCheck -- Daily Journal --> JournalDao[JournalDao + CAS Reflection Parser]
+    FilterCheck -- Tags --> LinksDao[LinksDao Tag Registry]
+    
+    NodesDao --> Scorer[SearchScorer.computeScore]
+    TasksDao --> Scorer
+    CalendarDao --> Scorer
+    JournalDao --> Scorer
+    LinksDao --> Scorer
+    
+    Scorer --> Sorter[Descending Score Sorter & Limiter]
+    Sorter --> SearchScreen[SearchScreen Cards / CommandPaletteModal]
+```
+
+- **Relevance Scoring Rubric (`SearchScorer`):**
+  - **Exact Title Match:** $100\text{ pts}$ (case-insensitive full title equality).
+  - **Prefix Title Match:** $80\text{ pts}$ (title starts with search query).
+  - **Word-Prefix Match:** $70\text{ pts}$ (any word token in title starts with query).
+  - **Tag / Project Match:** $60\text{ pts}$ (associated tag name or parent project matches query).
+  - **Content Body Match:** $40\text{ pts}$ (substring match in CAS Delta JSON plain text).
+  - **Fuzzy Subsequence Match:** $25\text{ pts}$ (characters of query appear in sequential order).
+  - **Recency Boost:** $+1.0$ to $+10.0\text{ pts}$ scaled inversely with days elapsed since `updatedAt` ($\text{boost} = \max(1.0, 10.0 - 0.3 \times \text{days})$).
+- **Contextual Snippet Extraction:**
+  - `SearchScorer.extractSnippet` locates the first match index in the entity body and returns an ellipsis-bounded contextual window of ~60-80 characters.
+- **Search UI (`SearchScreen`):**
+  - Instant debounced search-as-you-type ($250\text{ ms}$).
+  - Filter chips (`All`, `Documents`, `Notebooks`, `Tasks`, `Calendar`, `Journal`).
+  - Rich result cards with entity-specific colored badge icons, highlighted matching words, parent breadcrumbs, and relative timestamps.
+  - Full keyboard accessibility: Arrow Up/Down navigation, Enter to open, Escape to clear.
+
+### 11.2 Universal Command Palette
+
+```mermaid
+flowchart LR
+    Shortcuts["Ctrl+K / Cmd+K (AtlasScaffold)"] --> Modal[CommandPaletteModal]
+    Modal --> PrefixSwitch{Prefix Parser}
+    PrefixSwitch -- "No Prefix" --> UnifiedMode["Unified Search & Recent Notes"]
+    PrefixSwitch -- ">" --> CommandMode["System Actions (CommandRegistry)"]
+    PrefixSwitch -- "#" --> TagMode["Taxonomy & Tag Explorer"]
+    PrefixSwitch -- "@" --> DateMode["Calendar & Event Jumper"]
+```
+
+- **Global Hotkey Registration:**
+  - `CallbackShortcuts` in `AtlasScaffold` binds `LogicalKeyboardKey.keyK` with `controlPressed` or `metaPressed`.
+  - Mobile & compact fallback: Floating action pill and quick sidebar launcher trigger `CommandPaletteModal.show(context)`.
+- **Backdrop Blur & Modal Presentation:**
+  - Centered floating dialog constrained to $640\text{ px}$ width with backdrop blur (`BackdropFilter` with `sigmaX: 8, sigmaY: 8`) and dark/light surface elevations.
+- **Mode Prefixes:**
+  - `> `: Filters actions from `CommandRegistry` (Navigation, Quick Creation, Theme Toggling, Knowledge Graph).
+  - `# `: Queries workspace tags from `LinksDao` and provides 1-tap navigation to filtered graph exploration.
+  - `@ `: Surfaces today's agenda, date jumping, and upcoming calendar appointments.
+  - *No prefix (unified)*: Combines recent notes, top actions, and cross-entity search results.
+
+### 11.3 Interactive 2D Knowledge Graph Architecture
+
+```mermaid
+flowchart TD
+    subgraph Topology [Data & Graph Assembly]
+        NodesTable[(Nodes)]
+        LinksTable[(NodeLinks)]
+        TagsTable[(Tags & NodeTags)]
+        GraphRepo[GraphRepository.loadWorkspaceGraph]
+        NodesTable --> GraphRepo
+        LinksTable --> GraphRepo
+        TagsTable --> GraphRepo
+    end
+
+    subgraph Physics [Kinetic Simulation Service]
+        LayoutService[ForceDirectedLayoutService]
+        Coulomb[Coulomb Pairwise Repulsion]
+        Hooke[Hooke's Law Spring Tension]
+        Gravity[Center Gravity Pull]
+        LayoutService --> Coulomb
+        LayoutService --> Hooke
+        LayoutService --> Gravity
+    end
+
+    subgraph Presentation [Repaint-Isolated Canvas]
+        InteractiveViewer[Flutter InteractiveViewer]
+        CustomPainter[KnowledgeGraphPainter]
+        InteractiveViewer --> CustomPainter
+    end
+
+    GraphRepo --> LayoutService
+    LayoutService --> Presentation
+```
+
+- **Self-Contained Physics Engine (`ForceDirectedLayoutService`):**
+  - Lightweight (< 250 lines, actual 171 lines) Fruchterman-Reingold / Verlet particle simulation.
+  - **Repulsion:** Coulomb repulsion between all node pairs ($F_{\text{rep}} = \frac{k_r}{d^2 + 10}$) pushes disconnected nodes apart and prevents node overlapping.
+  - **Attraction:** Hooke's law spring tension ($F_{\text{att}} = k_s \cdot (d - l_0) \cdot w$) along bidirectional edges pulls linked ideas together.
+  - **Centering & Damping:** Central gravitational force ($F_{\text{grav}} = (C - P) \cdot g$) prevents disconnected clusters from drifting off-screen; velocity damping ($0.85$) smoothly dissipates kinetic energy.
+  - **Equilibrium Detection:** Computes total kinetic energy $E_k = \sum (v_x^2 + v_y^2)$. Automatically halts the simulation ticker once $E_k < 0.04$, ensuring zero unnecessary battery drain or CPU load when the graph reaches rest.
+- **Visual Encoding:**
+  - **Documents:** Accent Blue (`AtlasColors.accentBlue`).
+  - **Notebooks:** Accent Sage (`AtlasColors.accentSage`).
+  - **Tags:** Accent Amber (`AtlasColors.accentAmber`).
+  - **Degree-Scaled Radius:** Node radius scales dynamically between $4\text{ px}$ and $16\text{ px}$ proportional to connectivity degree ($\text{in-degree} + \text{out-degree}$).
+  - **Subtle Edges:** Direction-neutral low-opacity edges with real-time glow highlighting when incident nodes are hovered or selected.
+- **Interactive Controls:**
+  - Smooth pinch-to-zoom and pan navigation backed by Flutter's native `InteractiveViewer`.
+  - Real-time node dragging: drags wake up the physics simulation ticker and update adjacent spring tensions dynamically.
+  - Node hover and tap listeners: click navigates directly to `/documents/:id` or `/notebooks/:id`.
+  - Filter capsule: Type toggles (`Docs`, `Notebooks`, `Tags`), orphan node toggle (`Icons.scatter_plot`), and live text search filter.
+- **Embedded 1-Hop Local Graph (`LocalGraphPanel`):**
+  - Integrated into `DocumentEditorScreen` and `NotebookEditorScreen` (backlinks sheet).
+  - `GraphRepository.extractNeighborhood` extracts a localized 1-hop subgraph around the current node.
+  - Supports quick contextual visual discovery of interconnected ideas directly from the active note editor.
+
+
 
 

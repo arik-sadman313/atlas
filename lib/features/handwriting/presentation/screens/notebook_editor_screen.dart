@@ -12,6 +12,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/atlas_colors.dart';
 import '../../../../core/theme/atlas_spacing.dart';
 import '../../../documents/presentation/widgets/backlinks_panel.dart';
+import '../../../graph/presentation/widgets/local_graph_panel.dart';
 import '../../../pdf/presentation/widgets/pdf_page_background.dart';
 import '../../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../../domain/models/atlas_ink_document.dart';
@@ -991,6 +992,8 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
               ),
               const SizedBox(height: AtlasSpacing.sm),
               BacklinksPanel(nodeId: widget.notebookId, initialExpanded: true),
+              const SizedBox(height: AtlasSpacing.md),
+              LocalGraphPanel(nodeId: widget.notebookId, initialExpanded: true),
             ],
           ),
         ),

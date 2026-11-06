@@ -46,6 +46,12 @@ const atlasNavigationItems = [
     route: '/calendar',
   ),
   AtlasNavigationItem(
+    label: 'Graph',
+    icon: Icons.hub_outlined,
+    selectedIcon: Icons.hub,
+    route: '/graph',
+  ),
+  AtlasNavigationItem(
     label: 'Search',
     icon: Icons.search_outlined,
     selectedIcon: Icons.search,

@@ -12,6 +12,7 @@ import '../../../core/database/app_database.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
 import '../../journal/presentation/widgets/journal_context_day_panel.dart';
+import '../../graph/presentation/widgets/local_graph_panel.dart';
 import '../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../data/services/document_content_service.dart';
 import 'widgets/backlinks_panel.dart';
@@ -545,6 +546,14 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     BacklinksPanel(
                       nodeId: widget.documentId,
                       initialExpanded: true,
+                    ),
+
+                    const SizedBox(height: AtlasSpacing.xl),
+
+                    // Local 1-Hop Knowledge Graph Panel
+                    LocalGraphPanel(
+                      nodeId: widget.documentId,
+                      initialExpanded: false,
                     ),
                     const SizedBox(height: AtlasSpacing.xxl),
                   ],

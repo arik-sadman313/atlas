@@ -155,4 +155,3 @@ class JournalRepository {
     return journalDao.deleteJournalEntry(entryId);
   }
 }
-
