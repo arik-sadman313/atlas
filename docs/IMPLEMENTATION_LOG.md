@@ -1193,3 +1193,101 @@ Milestone 11 delivers two major productivity upgrades across ATLAS:
    - `flutter build linux --debug`
    - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
 
+---
+
+# ATLAS Implementation Log — Milestone 12: Slash Command Menu, Callout Blocks & Inline Ink Embeds
+
+**Date:** November 7, 2026  
+**Status:** Completed & Verified  
+**Milestone:** 12 (Notion/Craft Slash Command Menu, Callout Blocks & Inline Ink Embeds)
+
+---
+
+## 1. Architectural Overview & Design Decisions
+
+Milestone 12 elevates the typed document engine in `lib/features/documents/` into a Craft/Notion-grade hybrid block editor:
+1. **Inline Slash Command Menu (`/`)**: Anchored overlay triggered by `/` at line start or after whitespace, offering live query filtering, full keyboard traversal, and clean dismissal.
+2. **Callout Box Custom Embed**: Stylized card container with left accent stripe, configurable leading icon, accent color tint, and inline editable text serialized into Delta JSON.
+3. **Inline Vector Ink Embed (`/ink`)**: Embedded vector ink drawing canvas with 260px default height, minimal floating toolbar, 3 quick colors, height adjustment popup, platform-adaptive read-only rendering on Android, and round-trip CAS blob persistence.
+
+---
+
+## 2. Implemented Components
+
+### 2.1 Inline Slash Command Subsystem
+- [`SlashCommandMenu`](../lib/features/documents/presentation/widgets/slash_menu/slash_command_menu.dart):
+  - Moved and structured into `lib/features/documents/presentation/widgets/slash_menu/` with backward-compatible re-export in [`slash_command_menu.dart`](../lib/features/documents/presentation/widgets/slash_command_menu.dart).
+  - Supports keyboard traversal (`ArrowDown`, `ArrowUp`, `Enter`, `Tab`, `Escape`) with auto-scrolling to keep active items in view.
+  - Category groupings: `Text & Headings`, `Lists`, `Containers`, `Dividers & Code`, `ATLAS Embeds`.
+  - Registered commands:
+    * **Text & Headings**: Plain Text (`/text`), Heading 1 (`/h1`), Heading 2 (`/h2`), Heading 3 (`/h3`).
+    * **Lists & Tasks**: Bulleted List (`/bullet`), Numbered List (`/number`), To-Do Task (`/todo`).
+    * **Structural Blocks**: Quote Block (`/quote`), Code Block (`/code`), Divider (`/divider`).
+    * **Custom ATLAS Blocks**: Callout Box (`/callout`, `/call`), Wiki-Link (`/link`), Database Task (`/task`), Vector Ink Canvas (`/ink`).
+- [`DocumentEditorScreen`](../lib/features/documents/presentation/document_editor_screen.dart):
+  - Cursor tracking and caret anchoring using `CompositedTransformFollower` and `OverlayEntry`.
+  - Slash query trigger detection (at line start or preceded by whitespace, dismissing on spaces or linebreaks).
+  - Keyboard event interception in `_handleKeyEvent`.
+  - Automatic deletion of the typed slash query string upon command execution.
+
+### 2.2 Callout Box Custom Embed
+- [`CalloutBlockEmbed`](../lib/features/documents/domain/models/document_embed_models.dart):
+  - Custom Delta embed type: `callout`.
+  - Dual attribute support: `content` and `text`, `icon`, `colorHex`.
+  - JSON serialization/deserialization with robust fallback for raw and nested Delta maps.
+- [`CalloutEmbedBuilder`](../lib/features/documents/presentation/embeds/callout_embed_builder.dart):
+  - Integrates `CalloutBlockWidget` into Quill editor.
+  - Implements `toPlainText` for universal search and backlink extraction.
+- [`CalloutBlockWidget`](../lib/features/documents/presentation/embeds/callout_embed_builder.dart):
+  - Quiet Craft styling: elevated card (`#181B24` with 8% accent tint), 3px solid accent left edge border with 12px rounded corners.
+  - Interactive leading icon badge with modal icon & color picker.
+  - Editable inline `TextField` synchronized directly with Delta state.
+
+### 2.3 Inline Vector Ink Canvas Embed (`/ink`)
+- [`InkBlockEmbed`](../lib/features/documents/domain/models/document_embed_models.dart):
+  - Custom Delta embed type: `ink_block`.
+  - Attributes: `inkHash`, `inkDocId`, `height` (default 260px), and `width`.
+- [`InkBlockEmbedBuilder`](../lib/features/documents/presentation/embeds/ink_block_embed_builder.dart):
+  - Renders `InlineInkBlockWidget` (`InkBlockWidget`) with bounded responsive canvas.
+  - Minimal floating toolbar: Pen, Highlighter, Eraser, 3 quick colors (`#18181B`, `#6366F1`, `#10B981`), Canvas Height Adjuster (200px, 260px, 360px, 480px), Clear, and Remove.
+  - Read-only handling for Android companion viewer; interactive drawing on Linux desktop and iPadOS.
+  - Stroke fidelity matching `NotebookEditorScreen` using `StrokeTessellator` and `InkDocumentPainter`.
+- [`DocumentContentService`](../lib/features/documents/data/services/document_content_service.dart):
+  - Factory helpers: `createCalloutEmbed` and `createInkBlockEmbed`.
+  - CAS blob stroke persistence: `saveInkBlockDrawing` and `loadInkBlockDrawing`.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Automated Test Suite (195 tests):**
+   - `test/features/documents/slash_menu_test.dart` (4 tests):
+     - Slash trigger detection at line start and whitespace boundary.
+     - Live query filtering matching `/h2`, `/todo`, `/call`, `/ink`.
+     - Keyboard traversal with `ArrowDown`/`ArrowUp` and execution with `Enter`.
+     - Direct tap selection and execution.
+   - `test/features/documents/callout_block_test.dart` (5 tests):
+     - Serialization and deserialization of `content`, `icon`, `colorHex`.
+     - Raw and nested Delta payload parsing.
+     - Immutability and `copyWith` behavior.
+     - Search plaintext extraction.
+     - `CalloutBlockWidget` rendering with accent stripe and editable text.
+   - `test/features/documents/inline_ink_block_test.dart` (3 tests):
+     - `InkBlockEmbed` serialization with `inkHash`, `inkDocId`, and height.
+     - Round-trip lossless CAS persistence of strokes and layers.
+     - Safe fallback handling on missing or corrupt hashes.
+   - All 183 existing unit, widget, and integration tests passed.
+   - **Result:** `✓ All 195 tests passed!`.
+
+3. **Code Formatting:**
+   - `dart format .`
+   - **Result:** Formatted cleanly across 202 files.
+
+4. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+

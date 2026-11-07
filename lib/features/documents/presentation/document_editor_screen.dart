@@ -537,12 +537,12 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
             documentId: 'sketch_${DateTime.now().millisecondsSinceEpoch}',
             pageNumber: 1,
             width: 760.0,
-            height: 240.0,
+            height: 260.0,
           );
           final hash = await _contentService.saveInkBlockDrawing(inkDoc);
           final inkEmbed = DocumentContentService.createInkBlockEmbed(
             inkHash: hash,
-            height: 240.0,
+            height: 260.0,
           );
           controller.replaceText(pos, 0, inkEmbed, null);
           controller.replaceText(pos + 1, 0, '\n', null);

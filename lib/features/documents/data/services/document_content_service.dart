@@ -67,12 +67,14 @@ class DocumentContentService {
 
   /// Creates a Callout block embed.
   static BlockEmbed createCalloutEmbed({
-    required String text,
+    String? text,
+    String? content,
     String icon = '💡',
     String colorHex = '#6366F1',
   }) {
     final embed = CalloutBlockEmbed.fromAttributes(
-      text: text,
+      text: content ?? text ?? '',
+      content: content ?? text ?? '',
       icon: icon,
       colorHex: colorHex,
     );
@@ -82,11 +84,13 @@ class DocumentContentService {
   /// Creates an inline Vector Ink canvas block embed.
   static BlockEmbed createInkBlockEmbed({
     required String inkHash,
-    double height = 240.0,
+    double height = 260.0,
     double? width,
+    String? inkDocId,
   }) {
     final embed = InkBlockEmbed.fromAttributes(
       inkHash: inkHash,
+      inkDocId: inkDocId ?? inkHash,
       height: height,
       width: width,
     );

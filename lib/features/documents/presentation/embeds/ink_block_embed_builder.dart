@@ -37,6 +37,9 @@ class InkBlockEmbedBuilder extends EmbedBuilder {
   }
 }
 
+/// Type alias providing clean interoperability for inline vector ink block embeddings.
+typedef InlineInkBlockWidget = InkBlockWidget;
+
 class InkBlockWidget extends StatefulWidget {
   final EmbedContext embedContext;
   final WidgetRef ref;
@@ -63,12 +66,9 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
   double _strokeWidth = 2.5;
 
   static const List<int> presetColors = [
-    0xFF18181B, // Dark ink
-    0xFFFFFFFF, // White ink
+    0xFF18181B, // Obsidian Black
     0xFF6366F1, // Indigo Slate
     0xFF10B981, // Sage Emerald
-    0xFFF97316, // Terracotta
-    0xFFF59E0B, // Amber
   ];
 
   @override
@@ -206,10 +206,28 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
     quill.replaceText(offset, 1, '', null);
   }
 
+  void _changeHeight(double newHeight) {
+    if (newHeight == _embedData.height) return;
+    _embedData = _embedData.copyWith(height: newHeight);
+
+    final quill = widget.embedContext.controller;
+    final node = widget.embedContext.node;
+    final offset = node.documentOffset;
+
+    final newEmbed = BlockEmbed(
+      InkBlockEmbed.inkBlockType,
+      jsonEncode(_embedData.toMap()),
+    );
+    quill.replaceText(offset, 1, newEmbed, null);
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isAndroid = Theme.of(context).platform == TargetPlatform.android;
+    final isReadOnly = widget.embedContext.readOnly || isAndroid;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: AtlasSpacing.md),
@@ -252,13 +270,15 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
                 ),
                 const SizedBox(width: AtlasSpacing.xs),
                 Text(
-                  'Vector Ink Canvas',
+                  isReadOnly
+                      ? 'Vector Ink Canvas (Read-Only)'
+                      : 'Vector Ink Canvas',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const Spacer(),
-                if (!widget.embedContext.readOnly) ...[
+                if (!isReadOnly) ...[
                   // Tool Selectors
                   IconButton(
                     icon: const Icon(Icons.edit, size: 16),
@@ -303,7 +323,7 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
                     onPressed: () => _selectTool(InkToolType.vectorEraser),
                   ),
                   const SizedBox(width: AtlasSpacing.sm),
-                  // Color swatches
+                  // Color swatches (3 quick colors)
                   ...presetColors.map((colValue) {
                     final isSelected = _selectedColor == colValue;
                     return Padding(
@@ -331,6 +351,59 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
                     );
                   }),
                   const SizedBox(width: AtlasSpacing.sm),
+                  // Height adjuster
+                  PopupMenuButton<double>(
+                    tooltip: 'Adjust Canvas Height',
+                    initialValue: _embedData.height,
+                    onSelected: _changeHeight,
+                    itemBuilder: (ctx) => [
+                      const PopupMenuItem(
+                        value: 200.0,
+                        child: Text('Compact (200px)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 260.0,
+                        child: Text('Standard (260px)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 360.0,
+                        child: Text('Medium (360px)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 480.0,
+                        child: Text('Large (480px)'),
+                      ),
+                    ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.height_rounded,
+                            size: 15,
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : const Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            '${_embedData.height.toInt()}px',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AtlasSpacing.xs),
                   // Clear Canvas
                   IconButton(
                     icon: const Icon(Icons.delete_sweep_outlined, size: 16),
@@ -380,7 +453,7 @@ class _InkBlockWidgetState extends State<InkBlockWidget> {
                           controller: _canvasController!,
                           width: canvasWidth,
                           height: _embedData.height,
-                          readOnly: widget.embedContext.readOnly,
+                          readOnly: isReadOnly,
                           drawBackground: false,
                         ),
                       );

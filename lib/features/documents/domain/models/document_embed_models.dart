@@ -12,12 +12,15 @@ class CalloutBlockEmbed extends CustomBlockEmbed {
   CalloutBlockEmbed(String data) : super(calloutType, data);
 
   factory CalloutBlockEmbed.fromAttributes({
-    required String text,
+    String? text,
+    String? content,
     String icon = '💡',
     String colorHex = '#6366F1',
   }) {
+    final bodyText = content ?? text ?? '';
     final map = <String, dynamic>{
-      'text': text,
+      'text': bodyText,
+      'content': bodyText,
       'icon': icon,
       'colorHex': colorHex,
     };
@@ -30,7 +33,7 @@ class CalloutBlockEmbed extends CustomBlockEmbed {
         return CalloutBlockEmbed.fromData(rawData[calloutType]);
       }
       return CalloutBlockEmbed.fromAttributes(
-        text: rawData['text'] as String? ?? '',
+        text: (rawData['content'] ?? rawData['text']) as String? ?? '',
         icon: rawData['icon'] as String? ?? '💡',
         colorHex: rawData['colorHex'] as String? ?? '#6366F1',
       );
@@ -65,19 +68,29 @@ class CalloutBlockEmbed extends CustomBlockEmbed {
             return Map<String, dynamic>.from(inner);
           }
         }
-        return Map<String, dynamic>.from(current);
+        final map = Map<String, dynamic>.from(current);
+        final bodyText = (map['content'] ?? map['text']) as String? ?? '';
+        map['text'] = bodyText;
+        map['content'] = bodyText;
+        return map;
       }
     } catch (_) {}
-    return {'text': data, 'icon': '💡', 'colorHex': '#6366F1'};
+    return {'text': data, 'content': data, 'icon': '💡', 'colorHex': '#6366F1'};
   }
 
   String get text => toMap()['text'] as String? ?? '';
+  String get content => text;
   String get icon => toMap()['icon'] as String? ?? '💡';
   String get colorHex => toMap()['colorHex'] as String? ?? '#6366F1';
 
-  CalloutBlockEmbed copyWith({String? text, String? icon, String? colorHex}) {
+  CalloutBlockEmbed copyWith({
+    String? text,
+    String? content,
+    String? icon,
+    String? colorHex,
+  }) {
     return CalloutBlockEmbed.fromAttributes(
-      text: text ?? this.text,
+      text: content ?? text ?? this.text,
       icon: icon ?? this.icon,
       colorHex: colorHex ?? this.colorHex,
     );
@@ -94,10 +107,15 @@ class InkBlockEmbed extends CustomBlockEmbed {
 
   factory InkBlockEmbed.fromAttributes({
     required String inkHash,
-    double height = 240.0,
+    double height = 260.0,
     double? width,
+    String? inkDocId,
   }) {
-    final map = <String, dynamic>{'inkHash': inkHash, 'height': height};
+    final map = <String, dynamic>{
+      'inkHash': inkHash,
+      'inkDocId': inkDocId ?? inkHash,
+      'height': height,
+    };
     if (width != null) {
       map['width'] = width;
     }
@@ -110,8 +128,10 @@ class InkBlockEmbed extends CustomBlockEmbed {
         return InkBlockEmbed.fromData(rawData[inkBlockType]);
       }
       return InkBlockEmbed.fromAttributes(
-        inkHash: rawData['inkHash'] as String? ?? '',
-        height: (rawData['height'] as num?)?.toDouble() ?? 240.0,
+        inkHash:
+            (rawData['inkHash'] ?? rawData['inkDocId'] ?? '') as String? ?? '',
+        inkDocId: (rawData['inkDocId'] ?? rawData['inkHash']) as String?,
+        height: (rawData['height'] as num?)?.toDouble() ?? 260.0,
         width: (rawData['width'] as num?)?.toDouble(),
       );
     } else if (rawData is String) {
@@ -145,19 +165,28 @@ class InkBlockEmbed extends CustomBlockEmbed {
             return Map<String, dynamic>.from(inner);
           }
         }
-        return Map<String, dynamic>.from(current);
+        final map = Map<String, dynamic>.from(current);
+        map['inkDocId'] = map['inkDocId'] ?? map['inkHash'] ?? '';
+        return map;
       }
     } catch (_) {}
-    return {'inkHash': data, 'height': 240.0};
+    return {'inkHash': data, 'inkDocId': data, 'height': 260.0};
   }
 
   String get inkHash => toMap()['inkHash'] as String? ?? '';
-  double get height => (toMap()['height'] as num?)?.toDouble() ?? 240.0;
+  String get inkDocId => toMap()['inkDocId'] as String? ?? inkHash;
+  double get height => (toMap()['height'] as num?)?.toDouble() ?? 260.0;
   double? get width => (toMap()['width'] as num?)?.toDouble();
 
-  InkBlockEmbed copyWith({String? inkHash, double? height, double? width}) {
+  InkBlockEmbed copyWith({
+    String? inkHash,
+    double? height,
+    double? width,
+    String? inkDocId,
+  }) {
     return InkBlockEmbed.fromAttributes(
       inkHash: inkHash ?? this.inkHash,
+      inkDocId: inkDocId ?? this.inkDocId,
       height: height ?? this.height,
       width: width ?? this.width,
     );
