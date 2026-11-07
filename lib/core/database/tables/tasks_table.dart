@@ -21,6 +21,7 @@ class Tasks extends Table {
   TextColumn get title => text().withLength(min: 1, max: 1000)();
   TextColumn get description => text().nullable()();
   BoolColumn get isCompleted => boolean().withDefault(const Constant(false))();
+  TextColumn get status => text().withDefault(const Constant('todo'))();
   IntColumn get priority => integer().withDefault(const Constant(4))();
   DateTimeColumn get dueDate => dateTime().nullable()();
   BoolColumn get hasTime => boolean().withDefault(const Constant(false))();

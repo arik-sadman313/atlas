@@ -25,6 +25,11 @@ class InkCanvasController extends ChangeNotifier {
   int _strokeStartTime = 0;
   bool _isDrawing = false;
 
+  // Lasso selection state
+  final List<Offset> _lassoPolygon = [];
+  Set<String> _selectedStrokeIds = {};
+  Rect? _selectionBounds;
+
   InkCanvasController({
     required AtlasInkDocument document,
     InkToolConfig? initialTool,
@@ -47,11 +52,33 @@ class InkCanvasController extends ChangeNotifier {
   InkRenderCache get renderCache => _renderCache;
   int get revision => _revision;
 
+  // Lasso getters
+  List<Offset> get lassoPolygon => List.unmodifiable(_lassoPolygon);
+  Set<String> get selectedStrokeIds => Set.unmodifiable(_selectedStrokeIds);
+  Rect? get selectionBounds => _selectionBounds;
+  bool get hasSelection => _selectedStrokeIds.isNotEmpty;
+
+  List<InkStroke> get selectedStrokes {
+    if (_selectedStrokeIds.isEmpty) return const [];
+    final list = <InkStroke>[];
+    for (final layer in _document.layers) {
+      for (final stroke in layer.strokes) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          list.add(stroke);
+        }
+      }
+    }
+    return list;
+  }
+
   void loadDocument(AtlasInkDocument doc) {
     _document = doc;
     _undoStack.clear();
     _redoStack.clear();
     _activePoints.clear();
+    _lassoPolygon.clear();
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
     _isDrawing = false;
     _revision++;
     _renderCache.invalidate();
@@ -60,7 +87,11 @@ class InkCanvasController extends ChangeNotifier {
 
   void setTool(InkToolConfig tool) {
     _activeTool = tool;
-    notifyListeners();
+    if (!tool.type.isLasso && _selectedStrokeIds.isNotEmpty) {
+      clearSelection();
+    } else {
+      notifyListeners();
+    }
   }
 
   void startStroke(
@@ -72,6 +103,16 @@ class InkCanvasController extends ChangeNotifier {
     if (_activeTool.type.isEraser) {
       _recordUndoSnapshot();
       eraseAt(position, _activeTool.baseWidth * 3);
+      return;
+    }
+
+    if (_activeTool.type.isLasso) {
+      _selectedStrokeIds = {};
+      _selectionBounds = null;
+      _isDrawing = true;
+      _lassoPolygon.clear();
+      _lassoPolygon.add(position);
+      notifyListeners();
       return;
     }
 
@@ -102,6 +143,13 @@ class InkCanvasController extends ChangeNotifier {
       return;
     }
 
+    if (_activeTool.type.isLasso) {
+      if (!_isDrawing) return;
+      _lassoPolygon.add(position);
+      notifyListeners();
+      return;
+    }
+
     if (!_isDrawing) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -119,6 +167,29 @@ class InkCanvasController extends ChangeNotifier {
   }
 
   void endStroke() {
+    if (_activeTool.type.isLasso) {
+      if (!_isDrawing) return;
+      _isDrawing = false;
+      if (_lassoPolygon.length >= 3) {
+        final selected = <String>{};
+        for (final layer in _document.layers) {
+          for (final stroke in layer.strokes) {
+            if (StrokeTessellator.isStrokeSelectedByLasso(
+              stroke,
+              _lassoPolygon,
+            )) {
+              selected.add(stroke.id);
+            }
+          }
+        }
+        _selectedStrokeIds = selected;
+        _recomputeSelectionBounds();
+      }
+      _lassoPolygon.clear();
+      notifyListeners();
+      return;
+    }
+
     if (!_isDrawing || _activePoints.isEmpty) {
       _isDrawing = false;
       _activePoints.clear();
@@ -216,6 +287,9 @@ class InkCanvasController extends ChangeNotifier {
     _redoStack.add(_document);
     _document = _undoStack.removeLast();
     _activePoints.clear();
+    _lassoPolygon.clear();
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
     _isDrawing = false;
     _revision++;
     _renderCache.invalidate();
@@ -227,6 +301,9 @@ class InkCanvasController extends ChangeNotifier {
     _undoStack.add(_document);
     _document = _redoStack.removeLast();
     _activePoints.clear();
+    _lassoPolygon.clear();
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
     _isDrawing = false;
     _revision++;
     _renderCache.invalidate();
@@ -241,11 +318,175 @@ class InkCanvasController extends ChangeNotifier {
         .toList();
     _document = _document.copyWith(layers: clearedLayers);
     _activePoints.clear();
+    _lassoPolygon.clear();
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
     _isDrawing = false;
     _redoStack.clear();
     _revision++;
     _renderCache.invalidate();
     notifyListeners();
+  }
+
+  // --- Lasso Stroke Transformation Actions ---
+
+  void clearSelection() {
+    if (_selectedStrokeIds.isEmpty && _selectionBounds == null) return;
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
+    _lassoPolygon.clear();
+    notifyListeners();
+  }
+
+  void recordSelectionUndoSnapshot() {
+    _recordUndoSnapshot();
+  }
+
+  void translateSelectedStrokes(Offset delta, {bool recordUndo = false}) {
+    if (_selectedStrokeIds.isEmpty || delta == Offset.zero) return;
+    if (recordUndo) {
+      _recordUndoSnapshot();
+    }
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return StrokeTessellator.transformStroke(stroke, delta: delta);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    if (_selectionBounds != null) {
+      _selectionBounds = _selectionBounds!.shift(delta);
+    }
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void scaleSelectedStrokes(
+    double scaleX,
+    double scaleY,
+    Offset origin, {
+    bool recordUndo = false,
+  }) {
+    if (_selectedStrokeIds.isEmpty) return;
+    if (recordUndo) {
+      _recordUndoSnapshot();
+    }
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return StrokeTessellator.transformStroke(
+            stroke,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            origin: origin,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void duplicateSelectedStrokes({Offset offset = const Offset(20, 20)}) {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final newSelectedIds = <String>{};
+    int counter = 0;
+    final nowMicro = DateTime.now().microsecondsSinceEpoch;
+
+    final updatedLayers = _document.layers.map((layer) {
+      final newStrokesInLayer = <InkStroke>[];
+      for (final stroke in layer.strokes) {
+        newStrokesInLayer.add(stroke);
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          counter++;
+          final newId = 's_${nowMicro}_dup_$counter';
+          final dup = StrokeTessellator.transformStroke(
+            stroke.copyWith(id: newId),
+            delta: offset,
+          );
+          newStrokesInLayer.add(dup);
+          newSelectedIds.add(newId);
+        }
+      }
+      return layer.copyWith(strokes: newStrokesInLayer);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _selectedStrokeIds = newSelectedIds;
+    _recomputeSelectionBounds();
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void recolorSelectedStrokes(int newColor) {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(color: newColor);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void deleteSelectedStrokes() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final remaining = layer.strokes
+          .where((s) => !_selectedStrokeIds.contains(s.id))
+          .toList();
+      return layer.copyWith(strokes: remaining);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void _recomputeSelectionBounds() {
+    if (_selectedStrokeIds.isEmpty) {
+      _selectionBounds = null;
+      return;
+    }
+    final selected = selectedStrokes;
+    if (selected.isEmpty) {
+      _selectionBounds = null;
+    } else {
+      _selectionBounds = StrokeTessellator.computeEnclosingBounds(selected);
+    }
   }
 
   void _recordUndoSnapshot() {

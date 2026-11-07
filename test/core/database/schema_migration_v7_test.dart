@@ -15,7 +15,7 @@ void main() {
     });
 
     test('fresh database initializes schema version 7 with syncHistory and sync metadata columns', () async {
-      expect(database.schemaVersion, 7);
+      expect(database.schemaVersion, greaterThanOrEqualTo(7));
 
       final now = DateTime.now().toUtc();
       const wsId = 'ws-v7-sync-test';

@@ -6,6 +6,7 @@ import 'package:atlas/core/storage/cas_storage_service.dart';
 import 'package:atlas/features/handwriting/data/repositories/ink_repository.dart';
 import 'package:atlas/features/handwriting/domain/models/atlas_ink_document.dart';
 import 'package:atlas/features/handwriting/presentation/screens/notebook_editor_screen.dart';
+import 'package:atlas/features/handwriting/presentation/widgets/floating_tool_dock.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/ink_canvas.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/ink_page_view.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/ink_tool_palette.dart';
@@ -91,7 +92,12 @@ void main() {
           // Android must NOT mount interactive drawing components
           expect(find.byType(InkCanvas), findsNothing);
           expect(find.byType(PencilKit), findsNothing);
-          expect(find.byType(InkToolPalette), findsNothing);
+          expect(
+            find.byWidgetPredicate(
+              (w) => w is FloatingToolDock || w is InkToolPalette,
+            ),
+            findsNothing,
+          );
         } finally {
           debugDefaultTargetPlatformOverride = null;
         }
@@ -108,7 +114,12 @@ void main() {
 
           // Linux must mount InkCanvas & tool palette
           expect(find.byType(InkCanvas), findsOneWidget);
-          expect(find.byType(InkToolPalette), findsOneWidget);
+          expect(
+            find.byWidgetPredicate(
+              (w) => w is FloatingToolDock || w is InkToolPalette,
+            ),
+            findsOneWidget,
+          );
 
           // Linux must NOT mount read-only viewer or PencilKit
           expect(find.byType(InkPageView), findsNothing);
@@ -137,7 +148,12 @@ void main() {
 
           // iOS must mount native PencilKit widget
           expect(find.byType(PencilKit), findsOneWidget);
-          expect(find.byType(InkToolPalette), findsOneWidget);
+          expect(
+            find.byWidgetPredicate(
+              (w) => w is FloatingToolDock || w is InkToolPalette,
+            ),
+            findsOneWidget,
+          );
 
           // iOS must NOT mount Linux InkCanvas or Android read-only InkPageView
           expect(find.byType(InkCanvas), findsNothing);

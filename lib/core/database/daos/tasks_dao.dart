@@ -196,8 +196,46 @@ class TasksDao extends DatabaseAccessor<AppDatabase> with _$TasksDaoMixin {
     await (update(tasks)..where((tbl) => tbl.id.equals(taskId))).write(
       TasksCompanion(
         isCompleted: Value(isCompleted),
+        status: Value(isCompleted ? 'done' : 'todo'),
         completedAt: Value(isCompleted ? now : null),
         updatedAt: Value(now),
+        clientModifiedAt: Value(now.toUtc()),
+      ),
+    );
+  }
+
+  Future<void> updateTaskStatus(String taskId, String status) async {
+    final now = DateTime.now();
+    final isDone = status == 'done' || status == 'completed';
+    await (update(tasks)..where((tbl) => tbl.id.equals(taskId))).write(
+      TasksCompanion(
+        status: Value(status),
+        isCompleted: Value(isDone),
+        completedAt: Value(isDone ? now : null),
+        updatedAt: Value(now),
+        clientModifiedAt: Value(now.toUtc()),
+      ),
+    );
+  }
+
+  Future<void> updateTaskPriority(String taskId, int priority) async {
+    final now = DateTime.now();
+    await (update(tasks)..where((tbl) => tbl.id.equals(taskId))).write(
+      TasksCompanion(
+        priority: Value(priority),
+        updatedAt: Value(now),
+        clientModifiedAt: Value(now.toUtc()),
+      ),
+    );
+  }
+
+  Future<void> reorderTaskInColumn(String taskId, int newSortOrder) async {
+    final now = DateTime.now();
+    await (update(tasks)..where((tbl) => tbl.id.equals(taskId))).write(
+      TasksCompanion(
+        sortOrder: Value(newSortOrder),
+        updatedAt: Value(now),
+        clientModifiedAt: Value(now.toUtc()),
       ),
     );
   }

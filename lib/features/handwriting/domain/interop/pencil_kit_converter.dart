@@ -26,7 +26,8 @@ class PencilKitConverter {
         return 'pencil'; // Maps to PKInk.InkType.pencil in Swift
       case InkToolType.vectorEraser:
       case InkToolType.pixelEraser:
-        return 'ballpointPen'; // Erasers are not stroke inks; fallback safely
+      case InkToolType.lasso:
+        return 'ballpointPen'; // Erasers and lasso are not stroke inks; fallback safely
     }
   }
 

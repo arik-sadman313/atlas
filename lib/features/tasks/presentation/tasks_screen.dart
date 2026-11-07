@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
@@ -9,6 +10,7 @@ import '../../../core/theme/atlas_spacing.dart';
 import '../../../shared/widgets/atlas_button.dart';
 import '../../../shared/widgets/atlas_card.dart';
 import '../data/repositories/task_repository.dart';
+import 'widgets/kanban/kanban_board_view.dart';
 import 'widgets/quick_add_task_bar.dart';
 import 'widgets/task_detail_sheet.dart';
 import 'widgets/task_item_widget.dart';
@@ -24,6 +26,27 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   TaskFilter _currentFilter = TaskFilter.inbox;
   TaskGrouping _currentGrouping = TaskGrouping.none;
   String? _selectedProjectId;
+  String _viewMode = 'list'; // 'list' or 'board'
+
+  @override
+  void initState() {
+    super.initState();
+    _loadViewMode();
+  }
+
+  Future<void> _loadViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('tasks_view_mode') ?? 'list';
+    if (mounted) {
+      setState(() => _viewMode = mode);
+    }
+  }
+
+  Future<void> _setViewMode(String mode) async {
+    setState(() => _viewMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tasks_view_mode', mode);
+  }
 
   void _showNewProjectDialog() {
     final nameCtrl = TextEditingController();
@@ -341,7 +364,9 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 880),
+            constraints: BoxConstraints(
+              maxWidth: _viewMode == 'board' ? double.infinity : 880,
+            ),
             child: Padding(
               padding: const EdgeInsets.all(AtlasSpacing.xl),
               child: Column(
@@ -375,63 +400,69 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                       const SizedBox(width: AtlasSpacing.md),
                       Row(
                         children: [
-                          // Grouping Menu
-                          PopupMenuButton<TaskGrouping>(
-                            tooltip: 'Group Tasks',
-                            initialValue: _currentGrouping,
-                            onSelected: (g) =>
-                                setState(() => _currentGrouping = g),
-                            itemBuilder: (ctx) => [
-                              const PopupMenuItem(
-                                value: TaskGrouping.none,
-                                child: Text('No Grouping'),
-                              ),
-                              const PopupMenuItem(
-                                value: TaskGrouping.byProject,
-                                child: Text('Group by Project'),
-                              ),
-                              const PopupMenuItem(
-                                value: TaskGrouping.byDueDate,
-                                child: Text('Group by Due Date'),
-                              ),
-                              const PopupMenuItem(
-                                value: TaskGrouping.byPriority,
-                                child: Text('Group by Priority'),
-                              ),
-                            ],
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? AtlasColors.darkSurface
-                                    : AtlasColors.lightSurface,
-                                borderRadius: BorderRadius.circular(
-                                  AtlasSpacing.radiusSm,
+                          // View Mode Switcher (List vs Board)
+                          _buildViewModeSwitcher(isDark),
+                          const SizedBox(width: AtlasSpacing.sm),
+
+                          // Grouping Menu (for List view)
+                          if (_viewMode == 'list') ...[
+                            PopupMenuButton<TaskGrouping>(
+                              tooltip: 'Group Tasks',
+                              initialValue: _currentGrouping,
+                              onSelected: (g) =>
+                                  setState(() => _currentGrouping = g),
+                              itemBuilder: (ctx) => [
+                                const PopupMenuItem(
+                                  value: TaskGrouping.none,
+                                  child: Text('No Grouping'),
                                 ),
-                                border: Border.all(
+                                const PopupMenuItem(
+                                  value: TaskGrouping.byProject,
+                                  child: Text('Group by Project'),
+                                ),
+                                const PopupMenuItem(
+                                  value: TaskGrouping.byDueDate,
+                                  child: Text('Group by Due Date'),
+                                ),
+                                const PopupMenuItem(
+                                  value: TaskGrouping.byPriority,
+                                  child: Text('Group by Priority'),
+                                ),
+                              ],
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
                                   color: isDark
-                                      ? AtlasColors.darkBorder
-                                      : AtlasColors.lightBorder,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.sort, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    _currentGrouping == TaskGrouping.none
-                                        ? 'Group'
-                                        : _currentGrouping.name,
-                                    style: const TextStyle(fontSize: 12),
+                                      ? AtlasColors.darkSurface
+                                      : AtlasColors.lightSurface,
+                                  borderRadius: BorderRadius.circular(
+                                    AtlasSpacing.radiusSm,
                                   ),
-                                ],
+                                  border: Border.all(
+                                    color: isDark
+                                        ? AtlasColors.darkBorder
+                                        : AtlasColors.lightBorder,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.sort, size: 16),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _currentGrouping == TaskGrouping.none
+                                          ? 'Group'
+                                          : _currentGrouping.name,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: AtlasSpacing.sm),
+                            const SizedBox(width: AtlasSpacing.sm),
+                          ],
                           AtlasButton.secondary(
                             label: 'New Project',
                             icon: Icons.create_new_folder_outlined,
@@ -647,6 +678,15 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
 
                             final tasks = snapshot.data ?? [];
 
+                            if (_viewMode == 'board') {
+                              return KanbanBoardView(
+                                allTasks: tasks,
+                                projects: projects,
+                                workspaceId: workspaceId,
+                                taskRepo: taskRepo,
+                              );
+                            }
+
                             if (tasks.isEmpty) {
                               return _buildEmptyState(context, theme, isDark);
                             }
@@ -738,6 +778,74 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildViewModeSwitcher(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+        borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+        border: Border.all(
+          color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: 'List View',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => _setViewMode('list'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _viewMode == 'list'
+                      ? (isDark ? const Color(0xFF282F3E) : Colors.white)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Icon(
+                  Icons.view_list_rounded,
+                  size: 16,
+                  color: _viewMode == 'list'
+                      ? const Color(0xFF6366F1)
+                      : (isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B)),
+                ),
+              ),
+            ),
+          ),
+          Tooltip(
+            message: 'Kanban Board View',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => _setViewMode('board'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _viewMode == 'board'
+                      ? (isDark ? const Color(0xFF282F3E) : Colors.white)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Icon(
+                  Icons.view_kanban_rounded,
+                  size: 16,
+                  color: _viewMode == 'board'
+                      ? const Color(0xFF6366F1)
+                      : (isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B)),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

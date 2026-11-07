@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/ink_canvas_controller.dart';
 import 'ink_document_painter.dart';
+import 'selection_overlay_widget.dart';
 
 class InkCanvas extends StatefulWidget {
   final InkCanvasController controller;
@@ -103,6 +104,7 @@ class _InkCanvasState extends State<InkCanvas> {
               painter: InkDocumentPainter(
                 document: widget.controller.document,
                 activePoints: widget.controller.activePoints,
+                lassoPolygon: widget.controller.lassoPolygon,
                 activeTool: widget.controller.activeTool,
                 isDrawing: widget.controller.isDrawing,
                 drawBackground:
@@ -112,6 +114,12 @@ class _InkCanvasState extends State<InkCanvas> {
               ),
             ),
           ),
+          if (!widget.readOnly && widget.controller.hasSelection)
+            SelectionOverlayWidget(
+              controller: widget.controller,
+              canvasWidth: widget.width,
+              canvasHeight: widget.height,
+            ),
         ],
       ),
     );

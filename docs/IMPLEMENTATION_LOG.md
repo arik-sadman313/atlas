@@ -1080,3 +1080,116 @@ Finalized production readiness, performance tuning, and release packaging for AT
 3. **Linux Desktop Debug Build:**
    - `flutter build linux --debug`
    - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+
+---
+
+# ATLAS Implementation Log — Milestone 11: Vector Lasso Manipulation & Interactive Task Kanban
+
+**Date:** November 7, 2026  
+**Status:** Completed & Verified  
+**Milestone:** 11 (Vector Lasso Stroke Manipulation & Interactive Task Kanban Board)
+
+---
+
+## 1. Architectural Overview & Design Decisions
+
+Milestone 11 delivers two major productivity upgrades across ATLAS:
+1. **Handwriting Studio (`lib/features/handwriting/`)**: Implements Goodnotes-grade vector lasso selection, stroke transformations (translate, scale, duplicate, recolor, delete), selection bounding box with four corner handles, and a compact floating tool dock with top/bottom docking.
+2. **Productivity Studio (`lib/features/tasks/`)**: Implements an interactive, drag-and-drop Notion-style Kanban board view alongside the existing list view, with dynamic grouping by Status and Priority, fluid drag-and-drop feedback, and instant SQLite synchronization.
+
+---
+
+## 2. Implemented Components
+
+### 2.1 Database Schema Migration (Version 8) & TasksDao
+- [`TasksTable`](../lib/core/database/tables/tasks_table.dart):
+  - Added `status` column (`text().withDefault(const Constant('todo'))()`).
+- [`AppDatabase`](../lib/core/database/app_database.dart):
+  - Bumped `schemaVersion` to 8.
+  - Added safe, idempotent column addition `_safeAddColumn(m, tasks, tasks.status)` in `migration.onUpgrade`.
+- [`TasksDao`](../lib/core/database/daos/tasks_dao.dart):
+  - Added `updateTaskStatus(taskId, status)`: Updates status column, automatically synchronizes `isCompleted` and `completedAt`.
+  - Added `updateTaskPriority(taskId, priority)`.
+  - Added `reorderTaskInColumn(taskId, newSortOrder)`.
+  - Synchronized `toggleTaskCompletion` with status column.
+- [`TaskRepository`](../lib/features/tasks/data/repositories/task_repository.dart):
+  - Added `updateTaskStatus`, `updateTaskPriority`, and `reorderTaskInColumn`.
+  - Extended `createTask` with optional initial `status`.
+
+### 2.2 Vector Lasso Manipulation & Stroke Transformations
+- [`InkToolType`](../lib/features/handwriting/domain/models/ink_tool.dart):
+  - Added `InkToolType.lasso` and `bool get isLasso` getter.
+- [`StrokeTessellator`](../lib/features/handwriting/domain/math/stroke_tessellator.dart):
+  - `isPointInPolygon`: Ray-casting algorithm implementing the even-odd intersection rule for closed 2D polygon boundaries.
+  - `isStrokeSelectedByLasso`: Evaluates stroke selection if $\ge 50\%$ of points or its bounding box center fall inside the lasso polygon.
+  - `computeEnclosingBounds`: Computes the union bounding box enclosing a collection of strokes.
+  - `transformStroke`: Performs vector transformation supporting translation by `Offset(dx, dy)`, scaling with custom anchor origin, width scaling, and batch recoloring.
+- [`InkCanvasController`](../lib/features/handwriting/presentation/controllers/ink_canvas_controller.dart):
+  - Added lasso tracking state: `lassoPolygon`, `selectedStrokeIds`, `selectionBounds`, and `hasSelection`.
+  - Implemented batch transformation actions: `translateSelectedStrokes`, `scaleSelectedStrokes`, `duplicateSelectedStrokes` (with +20px offset), `recolorSelectedStrokes`, and `deleteSelectedStrokes`.
+  - Integrated with undo/redo stack (`_recordUndoSnapshot`) and static stroke cache invalidation (`_renderCache.invalidate()`).
+- [`InkDocumentPainter`](../lib/features/handwriting/presentation/widgets/ink_document_painter.dart):
+  - Added dashed outline and semi-transparent indigo polygon fill rendering while tracing with the lasso tool.
+- [`SelectionOverlayWidget`](../lib/features/handwriting/presentation/widgets/selection_overlay_widget.dart):
+  - Renders vector selection bounding box with 4 corner scale handles (using opposite corners as anchor origins), draggable interior for translation, and floating context action bar (swatches, duplicate, delete, deselect).
+- [`FloatingToolDock`](../lib/features/handwriting/presentation/widgets/floating_tool_dock.dart):
+  - Compact, pill-shaped tool dock dockable to top or bottom edge of canvas.
+  - 1-tap tool switcher: Pen, Highlighter, Eraser, Lasso.
+  - Quick stroke widths: Fine (1.5px), Medium (3.0px), Bold (6.0px).
+  - Quick colors: Obsidian Black (`#18181B`), Indigo Slate (`#6366F1`), Sage Emerald (`#10B981`).
+  - Undo, Redo, and Clear actions.
+- [`NotebookEditorScreen`](../lib/features/handwriting/presentation/screens/notebook_editor_screen.dart):
+  - Integrated `FloatingToolDock`.
+
+### 2.3 Interactive Notion-Style Task Kanban Board
+- [`TasksScreen`](../lib/features/tasks/presentation/tasks_screen.dart):
+  - Added View Mode Switcher in top header (List View vs Board View).
+  - Persisted user preference across app launches via `SharedPreferences` (`tasks_view_mode`).
+  - Dynamic responsive container constraint (`maxWidth: 880` in list view, unbounded horizontal expansion in board view).
+- [`KanbanCardWidget`](../lib/features/tasks/presentation/widgets/kanban/kanban_card_widget.dart):
+  - Fluid drag-and-drop with 2° tilt, 1.03x scale, and elevated shadow feedback (`Draggable<TaskEntry>`).
+  - Left priority color stripe (P1 Urgent `#EF4444`, P2 High `#F59E0B`, P3 Medium `#6366F1`, P4 Low `#64748B`).
+  - 1-tap completion checkbox directly on card.
+  - Due date badge with overdue alert highlighting.
+  - Project tag with colored dot and linked note badge.
+- [`KanbanColumnWidget`](../lib/features/tasks/presentation/widgets/kanban/kanban_column_widget.dart):
+  - Column header with color indicator dot, title, task count badge, and `+` quick-add button.
+  - Droppable target (`DragTarget<TaskEntry>`) with hover background tint and subtle border highlight.
+  - Card list with inter-card drop reordering targets.
+- [`KanbanBoardView`](../lib/features/tasks/presentation/widgets/kanban/kanban_board_view.dart):
+  - Horizontal scrolling layout of columns.
+  - Grouping switcher: **By Status** (To Do, In Progress, Done) vs. **By Priority** (Urgent P1, High P2, Medium P3, Low / Backlog P4).
+  - Quick-add dialog pre-filling target column status or priority.
+  - Column drag-and-drop and vertical reordering wired to `TaskRepository` with instant optimistic Drift SQLite persistence.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Automated Test Suite (183 tests):**
+   - `test/features/handwriting/lasso_selection_test.dart` (8 tests):
+     - `isPointInPolygon` ray-casting interior/exterior test.
+     - `isStrokeSelectedByLasso` selection percentage and center tests.
+     - `transformStroke` translation, scale, and recolor tests.
+     - `InkCanvasController` lasso tracing, bounds computation, translate, duplicate, recolor, delete, and undo/redo.
+   - `test/features/tasks/kanban_board_test.dart` (5 tests):
+     - `updateTaskStatus` Drift SQLite migration and completion sync test.
+     - `updateTaskPriority` priority update test.
+     - `reorderTaskInColumn` sort order update test.
+     - `KanbanBoardView` multi-column rendering and card inspection test.
+     - `KanbanBoardView` grouping toggle (By Status vs By Priority) test.
+   - All 170 existing unit, widget, and integration tests passed.
+   - **Result:** `✓ All 183 tests passed!`.
+
+3. **Code Formatting:**
+   - `dart format .`
+   - **Result:** Formatted cleanly across 198 files.
+
+4. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.
+

@@ -55,6 +55,7 @@ class StrokeTessellator {
         );
       case InkToolType.vectorEraser:
       case InkToolType.pixelEraser:
+      case InkToolType.lasso:
         return StrokeOptions(
           size: baseWidth,
           thinning: 0.0,
@@ -64,6 +65,92 @@ class StrokeTessellator {
           isComplete: true,
         );
     }
+  }
+
+  /// Evaluates whether a point is inside a polygon using ray casting (even-odd rule).
+  static bool isPointInPolygon(Offset point, List<Offset> polygon) {
+    if (polygon.length < 3) return false;
+    bool inside = false;
+    final n = polygon.length;
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+      final xi = polygon[i].dx;
+      final yi = polygon[i].dy;
+      final xj = polygon[j].dx;
+      final yj = polygon[j].dy;
+
+      final intersect =
+          ((yi > point.dy) != (yj > point.dy)) &&
+          (point.dx < (xj - xi) * (point.dy - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  /// Determines if a stroke is selected by the lasso polygon.
+  /// A stroke is selected if its bounding box center is inside,
+  /// or if >= 50% of its points are inside.
+  static bool isStrokeSelectedByLasso(InkStroke stroke, List<Offset> polygon) {
+    if (polygon.length < 3 || stroke.points.isEmpty) return false;
+    final bounds = computeBounds(stroke);
+    if (isPointInPolygon(bounds.center, polygon)) {
+      return true;
+    }
+    int insideCount = 0;
+    for (final p in stroke.points) {
+      if (isPointInPolygon(Offset(p.x, p.y), polygon)) {
+        insideCount++;
+      }
+    }
+    return (insideCount / stroke.points.length) >= 0.5;
+  }
+
+  /// Computes the union bounding box enclosing a collection of strokes.
+  static Rect computeEnclosingBounds(Iterable<InkStroke> strokes) {
+    if (strokes.isEmpty) return Rect.zero;
+    Rect? bounds;
+    for (final s in strokes) {
+      final b = computeBounds(s);
+      bounds = bounds == null ? b : bounds.expandToInclude(b);
+    }
+    return bounds ?? Rect.zero;
+  }
+
+  /// Transforms an [InkStroke] with translation, scale around origin, and optional recolor.
+  static InkStroke transformStroke(
+    InkStroke stroke, {
+    Offset delta = Offset.zero,
+    double scaleX = 1.0,
+    double scaleY = 1.0,
+    Offset? origin,
+    int? newColor,
+  }) {
+    final ox = origin?.dx ?? 0.0;
+    final oy = origin?.dy ?? 0.0;
+
+    final newPoints = stroke.points.map((p) {
+      final scaledX = ox + (p.x - ox) * scaleX;
+      final scaledY = oy + (p.y - oy) * scaleY;
+      return InkPoint(
+        x: scaledX + delta.dx,
+        y: scaledY + delta.dy,
+        pressure: p.pressure,
+        tiltAzimuth: p.tiltAzimuth,
+        tiltAltitude: p.tiltAltitude,
+        timeOffsetMs: p.timeOffsetMs,
+      );
+    }).toList();
+
+    final avgScale = ((scaleX.abs() + scaleY.abs()) / 2.0);
+    final newBaseWidth = (stroke.baseWidth * (avgScale == 0 ? 1.0 : avgScale))
+        .clamp(0.2, 50.0);
+    final newBounds = computeBoundsFromPoints(newPoints, newBaseWidth);
+
+    return stroke.copyWith(
+      points: newPoints,
+      baseWidth: newBaseWidth,
+      color: newColor ?? stroke.color,
+      bounds: newBounds,
+    );
   }
 
   /// Computes the bounding box of a list of points padded by baseWidth.

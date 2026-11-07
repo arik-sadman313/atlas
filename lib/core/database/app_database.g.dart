@@ -7701,6 +7701,16 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('todo'),
+  );
   static const VerificationMeta _priorityMeta = const VerificationMeta(
     'priority',
   );
@@ -7863,6 +7873,7 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
     title,
     description,
     isCompleted,
+    status,
     priority,
     dueDate,
     hasTime,
@@ -7950,6 +7961,12 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
           data['is_completed']!,
           _isCompletedMeta,
         ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
       );
     }
     if (data.containsKey('priority')) {
@@ -8093,6 +8110,10 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, TaskEntry> {
         DriftSqlType.bool,
         data['${effectivePrefix}is_completed'],
       )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
       priority: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}priority'],
@@ -8163,6 +8184,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
   final String title;
   final String? description;
   final bool isCompleted;
+  final String status;
   final int priority;
   final DateTime? dueDate;
   final bool hasTime;
@@ -8185,6 +8207,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     required this.title,
     this.description,
     required this.isCompleted,
+    required this.status,
     required this.priority,
     this.dueDate,
     required this.hasTime,
@@ -8218,6 +8241,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       map['description'] = Variable<String>(description);
     }
     map['is_completed'] = Variable<bool>(isCompleted);
+    map['status'] = Variable<String>(status);
     map['priority'] = Variable<int>(priority);
     if (!nullToAbsent || dueDate != null) {
       map['due_date'] = Variable<DateTime>(dueDate);
@@ -8262,6 +8286,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
           ? const Value.absent()
           : Value(description),
       isCompleted: Value(isCompleted),
+      status: Value(status),
       priority: Value(priority),
       dueDate: dueDate == null && nullToAbsent
           ? const Value.absent()
@@ -8302,6 +8327,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       title: serializer.fromJson<String>(json['title']),
       description: serializer.fromJson<String?>(json['description']),
       isCompleted: serializer.fromJson<bool>(json['isCompleted']),
+      status: serializer.fromJson<String>(json['status']),
       priority: serializer.fromJson<int>(json['priority']),
       dueDate: serializer.fromJson<DateTime?>(json['dueDate']),
       hasTime: serializer.fromJson<bool>(json['hasTime']),
@@ -8331,6 +8357,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       'title': serializer.toJson<String>(title),
       'description': serializer.toJson<String?>(description),
       'isCompleted': serializer.toJson<bool>(isCompleted),
+      'status': serializer.toJson<String>(status),
       'priority': serializer.toJson<int>(priority),
       'dueDate': serializer.toJson<DateTime?>(dueDate),
       'hasTime': serializer.toJson<bool>(hasTime),
@@ -8356,6 +8383,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     String? title,
     Value<String?> description = const Value.absent(),
     bool? isCompleted,
+    String? status,
     int? priority,
     Value<DateTime?> dueDate = const Value.absent(),
     bool? hasTime,
@@ -8378,6 +8406,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     title: title ?? this.title,
     description: description.present ? description.value : this.description,
     isCompleted: isCompleted ?? this.isCompleted,
+    status: status ?? this.status,
     priority: priority ?? this.priority,
     dueDate: dueDate.present ? dueDate.value : this.dueDate,
     hasTime: hasTime ?? this.hasTime,
@@ -8414,6 +8443,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
       isCompleted: data.isCompleted.present
           ? data.isCompleted.value
           : this.isCompleted,
+      status: data.status.present ? data.status.value : this.status,
       priority: data.priority.present ? data.priority.value : this.priority,
       dueDate: data.dueDate.present ? data.dueDate.value : this.dueDate,
       hasTime: data.hasTime.present ? data.hasTime.value : this.hasTime,
@@ -8453,6 +8483,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
           ..write('title: $title, ')
           ..write('description: $description, ')
           ..write('isCompleted: $isCompleted, ')
+          ..write('status: $status, ')
           ..write('priority: $priority, ')
           ..write('dueDate: $dueDate, ')
           ..write('hasTime: $hasTime, ')
@@ -8480,6 +8511,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
     title,
     description,
     isCompleted,
+    status,
     priority,
     dueDate,
     hasTime,
@@ -8506,6 +8538,7 @@ class TaskEntry extends DataClass implements Insertable<TaskEntry> {
           other.title == this.title &&
           other.description == this.description &&
           other.isCompleted == this.isCompleted &&
+          other.status == this.status &&
           other.priority == this.priority &&
           other.dueDate == this.dueDate &&
           other.hasTime == this.hasTime &&
@@ -8530,6 +8563,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
   final Value<String> title;
   final Value<String?> description;
   final Value<bool> isCompleted;
+  final Value<String> status;
   final Value<int> priority;
   final Value<DateTime?> dueDate;
   final Value<bool> hasTime;
@@ -8553,6 +8587,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     this.title = const Value.absent(),
     this.description = const Value.absent(),
     this.isCompleted = const Value.absent(),
+    this.status = const Value.absent(),
     this.priority = const Value.absent(),
     this.dueDate = const Value.absent(),
     this.hasTime = const Value.absent(),
@@ -8577,6 +8612,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     required String title,
     this.description = const Value.absent(),
     this.isCompleted = const Value.absent(),
+    this.status = const Value.absent(),
     this.priority = const Value.absent(),
     this.dueDate = const Value.absent(),
     this.hasTime = const Value.absent(),
@@ -8605,6 +8641,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     Expression<String>? title,
     Expression<String>? description,
     Expression<bool>? isCompleted,
+    Expression<String>? status,
     Expression<int>? priority,
     Expression<DateTime>? dueDate,
     Expression<bool>? hasTime,
@@ -8629,6 +8666,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
       if (title != null) 'title': title,
       if (description != null) 'description': description,
       if (isCompleted != null) 'is_completed': isCompleted,
+      if (status != null) 'status': status,
       if (priority != null) 'priority': priority,
       if (dueDate != null) 'due_date': dueDate,
       if (hasTime != null) 'has_time': hasTime,
@@ -8656,6 +8694,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     Value<String>? title,
     Value<String?>? description,
     Value<bool>? isCompleted,
+    Value<String>? status,
     Value<int>? priority,
     Value<DateTime?>? dueDate,
     Value<bool>? hasTime,
@@ -8680,6 +8719,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
       title: title ?? this.title,
       description: description ?? this.description,
       isCompleted: isCompleted ?? this.isCompleted,
+      status: status ?? this.status,
       priority: priority ?? this.priority,
       dueDate: dueDate ?? this.dueDate,
       hasTime: hasTime ?? this.hasTime,
@@ -8724,6 +8764,9 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
     }
     if (isCompleted.present) {
       map['is_completed'] = Variable<bool>(isCompleted.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
     }
     if (priority.present) {
       map['priority'] = Variable<int>(priority.value);
@@ -8783,6 +8826,7 @@ class TasksCompanion extends UpdateCompanion<TaskEntry> {
           ..write('title: $title, ')
           ..write('description: $description, ')
           ..write('isCompleted: $isCompleted, ')
+          ..write('status: $status, ')
           ..write('priority: $priority, ')
           ..write('dueDate: $dueDate, ')
           ..write('hasTime: $hasTime, ')
@@ -20637,6 +20681,7 @@ typedef $$TasksTableCreateCompanionBuilder = TasksCompanion Function({
   required String title,
   Value<String?> description,
   Value<bool> isCompleted,
+  Value<String> status,
   Value<int> priority,
   Value<DateTime?> dueDate,
   Value<bool> hasTime,
@@ -20661,6 +20706,7 @@ typedef $$TasksTableUpdateCompanionBuilder = TasksCompanion Function({
   Value<String> title,
   Value<String?> description,
   Value<bool> isCompleted,
+  Value<String> status,
   Value<int> priority,
   Value<DateTime?> dueDate,
   Value<bool> hasTime,
@@ -20793,6 +20839,11 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
 
   ColumnFilters<bool> get isCompleted => $composableBuilder(
     column: $table.isCompleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -21008,6 +21059,11 @@ class $$TasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get priority => $composableBuilder(
     column: $table.priority,
     builder: (column) => ColumnOrderings(column),
@@ -21190,6 +21246,9 @@ class $$TasksTableAnnotationComposer
     column: $table.isCompleted,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
 
   GeneratedColumn<int> get priority =>
       $composableBuilder(column: $table.priority, builder: (column) => column);
@@ -21402,6 +21461,7 @@ class $$TasksTableTableManager
                 Value<String> title = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<bool> isCompleted = const Value.absent(),
+                Value<String> status = const Value.absent(),
                 Value<int> priority = const Value.absent(),
                 Value<DateTime?> dueDate = const Value.absent(),
                 Value<bool> hasTime = const Value.absent(),
@@ -21425,6 +21485,7 @@ class $$TasksTableTableManager
                 title: title,
                 description: description,
                 isCompleted: isCompleted,
+                status: status,
                 priority: priority,
                 dueDate: dueDate,
                 hasTime: hasTime,
@@ -21450,6 +21511,7 @@ class $$TasksTableTableManager
                 required String title,
                 Value<String?> description = const Value.absent(),
                 Value<bool> isCompleted = const Value.absent(),
+                Value<String> status = const Value.absent(),
                 Value<int> priority = const Value.absent(),
                 Value<DateTime?> dueDate = const Value.absent(),
                 Value<bool> hasTime = const Value.absent(),
@@ -21473,6 +21535,7 @@ class $$TasksTableTableManager
                 title: title,
                 description: description,
                 isCompleted: isCompleted,
+                status: status,
                 priority: priority,
                 dueDate: dueDate,
                 hasTime: hasTime,

@@ -19,6 +19,7 @@ import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
 import '../platform/pencil_kit_bridge.dart';
+import '../widgets/floating_tool_dock.dart';
 import '../widgets/ink_canvas.dart';
 import '../widgets/ink_document_painter.dart';
 import '../widgets/ink_page_view.dart';
@@ -718,24 +719,17 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                         : _buildDesktopCanvas(isDark),
                   ),
 
-                  // --- Floating Palette on Linux & iPadOS ---
+                  // --- Floating Tool Dock on Linux & iPadOS ---
                   if (!isAndroid && _canvasController != null)
-                    Positioned(
-                      bottom: 24,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: InkToolPalette(
-                          controller: _canvasController!,
-                          onClearRequested: () {
-                            if (isIOS) {
-                              _pencilKitBridge.clear();
-                            }
-                            _hasUnsavedChanges = true;
-                            _scheduleAutosave();
-                          },
-                        ),
-                      ),
+                    FloatingToolDock(
+                      controller: _canvasController!,
+                      onClearRequested: () {
+                        if (isIOS) {
+                          _pencilKitBridge.clear();
+                        }
+                        _hasUnsavedChanges = true;
+                        _scheduleAutosave();
+                      },
                     ),
                 ],
               ),

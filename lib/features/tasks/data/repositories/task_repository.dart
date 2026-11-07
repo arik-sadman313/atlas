@@ -88,6 +88,7 @@ class TaskRepository {
     String? nodeId,
     String? parentTaskId,
     int priority = 4,
+    String status = 'todo',
     DateTime? dueDate,
     bool hasTime = false,
     String? recurrenceRule,
@@ -105,6 +106,7 @@ class TaskRepository {
       title: title.trim(),
       description: Value(description?.trim()),
       priority: Value(priority),
+      status: Value(status),
       dueDate: Value(dueDate),
       hasTime: Value(hasTime),
       recurrenceRule: Value(recurrenceRule),
@@ -185,6 +187,25 @@ class TaskRepository {
   /// Reorders tasks in batch.
   Future<void> reorderTasks(List<String> taskIds) {
     return tasksDao.batchReorderTasks(taskIds);
+  }
+
+  /// Updates task status (e.g. 'todo', 'in_progress', 'done').
+  Future<void> updateTaskStatus(String taskId, String status) async {
+    await tasksDao.updateTaskStatus(taskId, status);
+    final isDone = status == 'done' || status == 'completed';
+    if (isDone) {
+      await notificationService.cancelReminder(taskId);
+    }
+  }
+
+  /// Updates task priority level (1=Urgent, 2=High, 3=Medium, 4=Low).
+  Future<void> updateTaskPriority(String taskId, int priority) async {
+    await tasksDao.updateTaskPriority(taskId, priority);
+  }
+
+  /// Updates individual task sort order in column.
+  Future<void> reorderTaskInColumn(String taskId, int newSortOrder) {
+    return tasksDao.reorderTaskInColumn(taskId, newSortOrder);
   }
 
   // --- Projects ---

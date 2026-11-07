@@ -24,6 +24,7 @@ import 'ink_render_cache.dart';
 class InkDocumentPainter extends CustomPainter {
   final AtlasInkDocument document;
   final List<InkPoint> activePoints;
+  final List<Offset> lassoPolygon;
   final InkToolConfig? activeTool;
   final bool isDrawing;
   final bool drawBackground;
@@ -34,6 +35,7 @@ class InkDocumentPainter extends CustomPainter {
   InkDocumentPainter({
     required this.document,
     this.activePoints = const [],
+    this.lassoPolygon = const [],
     this.activeTool,
     this.isDrawing = false,
     this.drawBackground = true,
@@ -104,6 +106,45 @@ class InkDocumentPainter extends CustomPainter {
         canvas.restore();
       } else {
         _drawStroke(canvas, tempStroke, null);
+      }
+    }
+
+    // 5. Draw Active Lasso Selection Polygon
+    if (lassoPolygon.isNotEmpty) {
+      _drawLassoPolygon(canvas, lassoPolygon);
+    }
+  }
+
+  void _drawLassoPolygon(Canvas canvas, List<Offset> polygon) {
+    if (polygon.isEmpty) return;
+    final path = Path();
+    path.moveTo(polygon.first.dx, polygon.first.dy);
+    for (int i = 1; i < polygon.length; i++) {
+      path.lineTo(polygon[i].dx, polygon[i].dy);
+    }
+    // Translucent fill
+    final fillPaint = Paint()
+      ..color = const Color(0x1F6366F1)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(path, fillPaint);
+
+    // Dashed border
+    final strokePaint = Paint()
+      ..color = const Color(0xFF6366F1)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    for (final metric in path.computeMetrics()) {
+      double distance = 0.0;
+      const dashWidth = 6.0;
+      const dashSpace = 4.0;
+      while (distance < metric.length) {
+        final length = (distance + dashWidth < metric.length)
+            ? dashWidth
+            : metric.length - distance;
+        final extractPath = metric.extractPath(distance, distance + length);
+        canvas.drawPath(extractPath, strokePaint);
+        distance += dashWidth + dashSpace;
       }
     }
   }
@@ -182,7 +223,8 @@ class InkDocumentPainter extends CustomPainter {
         oldDelegate.isDrawing ||
         oldDelegate.document != document ||
         oldDelegate.revision != revision ||
-        oldDelegate.activePoints.length != activePoints.length;
+        oldDelegate.activePoints.length != activePoints.length ||
+        oldDelegate.lassoPolygon.length != lassoPolygon.length;
   }
 }
 

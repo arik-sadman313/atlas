@@ -4,7 +4,8 @@ enum InkToolType {
   highlighter,
   pencil,
   vectorEraser,
-  pixelEraser;
+  pixelEraser,
+  lasso;
 
   String toJson() => name;
 
@@ -19,6 +20,8 @@ enum InkToolType {
       this == InkToolType.vectorEraser || this == InkToolType.pixelEraser;
 
   bool get isHighlighter => this == InkToolType.highlighter;
+
+  bool get isLasso => this == InkToolType.lasso;
 }
 
 class InkToolConfig {

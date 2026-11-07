@@ -75,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withFile(File file) : super(impl.connect(overrideFile: file));
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   /// Flushes in-flight WAL journal to the main SQLite database file.
   Future<void> walCheckpoint() async {
@@ -226,6 +226,9 @@ class AppDatabase extends _$AppDatabase {
             'INTEGER NOT NULL DEFAULT 1',
           );
         }
+      }
+      if (from < 8) {
+        await _safeAddColumn(m, tasks, tasks.status);
       }
     },
     beforeOpen: (details) async {

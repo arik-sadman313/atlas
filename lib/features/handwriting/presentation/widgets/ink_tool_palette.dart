@@ -117,13 +117,28 @@ class InkToolPalette extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 4),
+                  _buildToolButton(
+                    context: context,
+                    icon: Icons.gesture,
+                    tooltip: 'Lasso Select',
+                    isSelected: activeTool.type == InkToolType.lasso,
+                    onTap: () => controller.setTool(
+                      activeTool.copyWith(
+                        type: InkToolType.lasso,
+                        baseWidth: 2.0,
+                      ),
+                    ),
+                  ),
 
                   _buildDivider(isDark),
 
                   // --- Width Selection Group ---
-                  ..._buildWidthSelectors(context, activeTool),
+                  if (!activeTool.type.isLasso)
+                    ..._buildWidthSelectors(context, activeTool),
 
-                  if (!activeTool.type.isEraser) ...[
+                  if (!activeTool.type.isEraser &&
+                      !activeTool.type.isLasso) ...[
                     _buildDivider(isDark),
 
                     // --- Color Swatches ---

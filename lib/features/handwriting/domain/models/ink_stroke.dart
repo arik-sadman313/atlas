@@ -95,4 +95,28 @@ class InkStroke {
       bounds: boundsRect,
     );
   }
+
+  InkStroke copyWith({
+    String? id,
+    InkToolType? tool,
+    int? color,
+    double? baseWidth,
+    double? opacity,
+    String? blendMode,
+    List<InkPoint>? points,
+    List<double>? transform,
+    Rect? bounds,
+  }) {
+    return InkStroke(
+      id: id ?? this.id,
+      tool: tool ?? this.tool,
+      color: color ?? this.color,
+      baseWidth: baseWidth ?? this.baseWidth,
+      opacity: opacity ?? this.opacity,
+      blendMode: blendMode ?? this.blendMode,
+      points: points ?? this.points,
+      transform: transform ?? this.transform,
+      bounds: bounds ?? this.bounds,
+    );
+  }
 }

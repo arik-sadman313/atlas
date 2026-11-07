@@ -219,8 +219,9 @@ void main() {
         ),
       );
 
-      final state =
-          tester.state<SlashCommandMenuState>(find.byType(SlashCommandMenu));
+      final state = tester.state<SlashCommandMenuState>(
+        find.byType(SlashCommandMenu),
+      );
       state.widget.onDismiss();
       expect(wasDismissed, isTrue);
     });
