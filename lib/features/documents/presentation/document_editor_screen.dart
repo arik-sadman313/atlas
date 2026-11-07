@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,17 +12,27 @@ import '../../../app/providers.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/theme/atlas_colors.dart';
 import '../../../core/theme/atlas_spacing.dart';
+import '../../handwriting/domain/models/atlas_ink_document.dart';
 import '../../journal/presentation/widgets/journal_context_day_panel.dart';
 import '../../graph/presentation/widgets/local_graph_panel.dart';
 import '../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../data/services/document_content_service.dart';
+import 'embeds/callout_embed_builder.dart';
+import 'embeds/divider_embed_builder.dart';
+import 'embeds/ink_block_embed_builder.dart';
+import 'embeds/task_embed_builder.dart';
 import 'widgets/backlinks_panel.dart';
+import 'widgets/slash_command_menu.dart';
 import 'widgets/wiki_link_dialog.dart';
 
 /// Document Editor Screen providing a Notion/Craft-like rich text editing experience.
 ///
 /// Features:
 /// - "Quiet Craft" typography and responsive layout (centered readable column on desktop/iPadOS).
+/// - Slash command popup menu (`/`) triggered on empty line or after space with keyboard navigation.
+/// - Inline Callout Box cards with customizable icons and color tints.
+/// - Embedded Vector Ink sketch canvas blocks serializing portable strokes to CAS (`.atlas_ink`).
+/// - Actionable SQLite Database Task embeds.
 /// - Block-level and inline rich-text editing (H1-H3, bullet/ordered lists, checklists, code blocks, quotes).
 /// - 1-second debounced autosave to Content Addressable Storage (CAS) with mutex and PopScope safety.
 /// - Inline [[Wiki-Links]] and bidirectional backlinks panel.
@@ -48,6 +59,15 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
   late final TextEditingController _titleController;
   final FocusNode _editorFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey<EditorState> _editorKey = GlobalKey<EditorState>();
+  final LayerLink _layerLink = LayerLink();
+
+  // Slash Command Menu Overlay State
+  OverlayEntry? _slashMenuOverlayEntry;
+  final GlobalKey<SlashCommandMenuState> _slashMenuKey =
+      GlobalKey<SlashCommandMenuState>();
+  int _slashStartIndex = -1;
+  String _slashQuery = '';
 
   late final DocumentContentService _contentService;
 
@@ -55,14 +75,17 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
   void initState() {
     super.initState();
     _titleController = TextEditingController();
+    _editorFocusNode.onKeyEvent = _handleKeyEvent;
     _loadDocumentData();
   }
 
   @override
   void dispose() {
+    _hideSlashMenu();
     _autosaveTimer?.cancel();
     _docChangeSub?.cancel();
     _titleController.dispose();
+    _quillController?.removeListener(_checkSlashCommand);
     _quillController?.dispose();
     _editorFocusNode.dispose();
     _scrollController.dispose();
@@ -104,6 +127,8 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
       _onContentChanged();
     });
 
+    controller.addListener(_checkSlashCommand);
+
     if (mounted) {
       setState(() {
         _quillController = controller;
@@ -122,6 +147,413 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
       setState(() {});
     }
   }
+
+  // =========================================================================
+  // Slash Command Trigger & Keyboard Handling
+  // =========================================================================
+
+  void _checkSlashCommand() {
+    final controller = _quillController;
+    if (controller == null) return;
+
+    final selection = controller.selection;
+    if (!selection.isCollapsed || selection.baseOffset <= 0) {
+      if (_slashMenuOverlayEntry != null) {
+        _hideSlashMenu();
+      }
+      return;
+    }
+
+    final cursorPos = selection.baseOffset;
+    final plainText = controller.document.toPlainText();
+    if (cursorPos > plainText.length) {
+      if (_slashMenuOverlayEntry != null) _hideSlashMenu();
+      return;
+    }
+
+    // Find start of current line
+    final lineStart = plainText.lastIndexOf('\n', cursorPos - 1);
+    final lineStartIndex = lineStart == -1 ? 0 : lineStart + 1;
+    final linePrefix = plainText.substring(lineStartIndex, cursorPos);
+
+    final slashIdx = linePrefix.lastIndexOf('/');
+    if (slashIdx == -1) {
+      if (_slashMenuOverlayEntry != null) {
+        _hideSlashMenu();
+      }
+      return;
+    }
+
+    // Ensure '/' is at line start or preceded by a space
+    final isAtLineStart = slashIdx == 0;
+    final isPrecededBySpace = slashIdx > 0 && linePrefix[slashIdx - 1] == ' ';
+
+    if (!isAtLineStart && !isPrecededBySpace) {
+      if (_slashMenuOverlayEntry != null) {
+        _hideSlashMenu();
+      }
+      return;
+    }
+
+    final query = linePrefix.substring(slashIdx + 1);
+    // If query contains spaces or linebreaks, dismiss slash command
+    if (query.contains(' ') || query.contains('\n')) {
+      if (_slashMenuOverlayEntry != null) {
+        _hideSlashMenu();
+      }
+      return;
+    }
+
+    _slashStartIndex = lineStartIndex + slashIdx;
+    _slashQuery = query;
+
+    if (_slashMenuOverlayEntry == null) {
+      _showSlashMenu();
+    } else {
+      _slashMenuOverlayEntry!.markNeedsBuild();
+    }
+  }
+
+  void _showSlashMenu() {
+    _hideSlashMenu();
+
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    final controller = _quillController;
+    Offset caretOffset = const Offset(0, 32);
+
+    if (controller != null) {
+      try {
+        final endpoints = _editorKey.currentState?.renderEditor
+            .getEndpointsForSelection(controller.selection);
+        if (endpoints != null && endpoints.isNotEmpty) {
+          final pt = endpoints.first.point;
+          caretOffset = Offset(pt.dx.clamp(0.0, 480.0), pt.dy + 8);
+        }
+      } catch (_) {}
+    }
+
+    _slashMenuOverlayEntry = OverlayEntry(
+      builder: (ctx) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _hideSlashMenu,
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 0,
+              child: CompositedTransformFollower(
+                link: _layerLink,
+                showWhenUnlinked: false,
+                offset: caretOffset,
+                child: SlashCommandMenu(
+                  key: _slashMenuKey,
+                  query: _slashQuery,
+                  items: _buildSlashCommands(),
+                  onDismiss: _hideSlashMenu,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    overlay.insert(_slashMenuOverlayEntry!);
+  }
+
+  void _hideSlashMenu() {
+    _slashMenuOverlayEntry?.remove();
+    _slashMenuOverlayEntry = null;
+    _slashStartIndex = -1;
+    _slashQuery = '';
+  }
+
+  /// Public accessor to dismiss the slash command popup menu.
+  void hideSlashMenu() => _hideSlashMenu();
+
+  /// Requests focus on the Quill editor.
+  void focusEditor() => _editorFocusNode.requestFocus();
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_slashMenuOverlayEntry != null) {
+      if (event is KeyDownEvent) {
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _slashMenuKey.currentState?.selectNext();
+          return KeyEventResult.handled;
+        } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          _slashMenuKey.currentState?.selectPrevious();
+          return KeyEventResult.handled;
+        } else if (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.tab) {
+          _slashMenuKey.currentState?.executeSelected();
+          return KeyEventResult.handled;
+        } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+          _hideSlashMenu();
+          return KeyEventResult.handled;
+        }
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _executeCommand(FutureOr<void> Function(int pos) action) async {
+    final controller = _quillController;
+    if (controller == null) return;
+
+    final cursor = controller.selection.baseOffset;
+    final startPos = _slashStartIndex >= 0 ? _slashStartIndex : cursor;
+    final lengthToDelete = cursor - startPos;
+
+    if (startPos >= 0 && lengthToDelete > 0) {
+      controller.replaceText(startPos, lengthToDelete, '', null);
+      controller.updateSelection(
+        TextSelection.collapsed(offset: startPos),
+        ChangeSource.local,
+      );
+    }
+
+    _hideSlashMenu();
+    await action(startPos);
+  }
+
+  List<SlashCommandItem> _buildSlashCommands() {
+    final controller = _quillController;
+    if (controller == null) return [];
+
+    return [
+      // Text Blocks
+      SlashCommandItem(
+        id: 'text',
+        label: 'Plain Text',
+        description: 'Regular paragraph text',
+        icon: Icons.text_fields,
+        keywords: const ['text', 'plain', 'p', 'paragraph', 'normal'],
+        category: SlashCommandCategory.text,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.clone(Attribute.header, null));
+          controller.formatSelection(Attribute.clone(Attribute.list, null));
+          controller.formatSelection(
+            Attribute.clone(Attribute.blockQuote, null),
+          );
+          controller.formatSelection(
+            Attribute.clone(Attribute.codeBlock, null),
+          );
+        }),
+      ),
+      SlashCommandItem(
+        id: 'h1',
+        label: 'Heading 1',
+        description: 'Large section heading',
+        icon: Icons.title,
+        keywords: const ['h1', 'heading 1', '#', 'large', 'header 1'],
+        category: SlashCommandCategory.text,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.h1);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'h2',
+        label: 'Heading 2',
+        description: 'Medium section heading',
+        icon: Icons.format_size,
+        keywords: const ['h2', 'heading 2', '##', 'medium', 'header 2'],
+        category: SlashCommandCategory.text,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.h2);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'h3',
+        label: 'Heading 3',
+        description: 'Small subsection heading',
+        icon: Icons.text_format,
+        keywords: const ['h3', 'heading 3', '###', 'small', 'header 3'],
+        category: SlashCommandCategory.text,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.h3);
+        }),
+      ),
+
+      // Lists
+      SlashCommandItem(
+        id: 'bullet_list',
+        label: 'Bulleted List',
+        description: 'Create an unordered bullet list',
+        icon: Icons.format_list_bulleted,
+        keywords: const ['bullet', 'ul', 'list', 'unordered'],
+        category: SlashCommandCategory.lists,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.ul);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'numbered_list',
+        label: 'Numbered List',
+        description: 'Create a numbered ordered list',
+        icon: Icons.format_list_numbered,
+        keywords: const ['numbered', 'ol', '1.', 'ordered', 'number'],
+        category: SlashCommandCategory.lists,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.ol);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'todo',
+        label: 'To-Do Checklist',
+        description: 'Track tasks with an inline checkbox',
+        icon: Icons.check_box_outlined,
+        keywords: const ['todo', 'checklist', 'task', 'check', 'box', '[]'],
+        category: SlashCommandCategory.lists,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.unchecked);
+        }),
+      ),
+
+      // Containers
+      SlashCommandItem(
+        id: 'quote',
+        label: 'Quote Block',
+        description: 'Capture a notable quote or callout',
+        icon: Icons.format_quote,
+        keywords: const ['quote', 'blockquote', '>', 'citation'],
+        category: SlashCommandCategory.containers,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.blockQuote);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'callout',
+        label: 'Callout Box',
+        description: 'Card container with icon and accent tint',
+        icon: Icons.info_outline,
+        keywords: const [
+          'callout',
+          'box',
+          'note',
+          'alert',
+          'info',
+          'highlight',
+        ],
+        category: SlashCommandCategory.containers,
+        onExecute: () => _executeCommand((pos) {
+          final embed = DocumentContentService.createCalloutEmbed(text: '');
+          controller.replaceText(pos, 0, embed, null);
+          controller.replaceText(pos + 1, 0, '\n', null);
+        }),
+      ),
+
+      // Dividers & Code
+      SlashCommandItem(
+        id: 'divider',
+        label: 'Horizontal Divider',
+        description: 'Visual separation line (---)',
+        icon: Icons.horizontal_rule,
+        keywords: const ['divider', 'hr', '---', 'separator', 'line'],
+        category: SlashCommandCategory.dividersAndCode,
+        onExecute: () => _executeCommand((pos) {
+          final embed = DocumentContentService.createDividerEmbed();
+          controller.replaceText(pos, 0, embed, null);
+          controller.replaceText(pos + 1, 0, '\n', null);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'code',
+        label: 'Code Block',
+        description: 'Code snippet with monospace styling',
+        icon: Icons.code,
+        keywords: const ['code', 'pre', '```', 'syntax', 'programming'],
+        category: SlashCommandCategory.dividersAndCode,
+        onExecute: () => _executeCommand((pos) {
+          controller.formatSelection(Attribute.codeBlock);
+        }),
+      ),
+
+      // ATLAS Embeds
+      SlashCommandItem(
+        id: 'link',
+        label: 'Wiki-Link ([[Note]])',
+        description: 'Link an existing document or notebook',
+        icon: Icons.link,
+        keywords: const ['link', 'wikilink', 'wiki', '[[', 'note', 'document'],
+        category: SlashCommandCategory.embeds,
+        onExecute: () => _executeCommand((pos) async {
+          await _insertWikiLink();
+        }),
+      ),
+      SlashCommandItem(
+        id: 'task',
+        label: 'Database Task',
+        description: 'Actionable task synced with SQLite tasks',
+        icon: Icons.task_alt,
+        keywords: const ['task', 'action', 'todo', 'database', 'assignment'],
+        category: SlashCommandCategory.embeds,
+        onExecute: () => _executeCommand((pos) async {
+          final taskId = 'task_${DateTime.now().millisecondsSinceEpoch}';
+          const defaultTitle = 'New Task';
+          final node = _node;
+          if (node != null) {
+            final tasksDao = ref.read(tasksDaoProvider);
+            await tasksDao.createTask(
+              TasksCompanion.insert(
+                id: taskId,
+                workspaceId: node.workspaceId,
+                title: defaultTitle,
+                createdAt: DateTime.now(),
+                updatedAt: DateTime.now(),
+                nodeId: drift.Value(widget.documentId),
+              ),
+            );
+          }
+          final taskEmbed = DocumentContentService.createTaskEmbed(
+            taskId: taskId,
+            title: defaultTitle,
+          );
+          controller.replaceText(pos, 0, taskEmbed, null);
+          controller.replaceText(pos + 1, 0, '\n', null);
+        }),
+      ),
+      SlashCommandItem(
+        id: 'ink',
+        label: 'Vector Ink Canvas',
+        description: 'Inline vector drawing and diagram sketch',
+        icon: Icons.gesture,
+        keywords: const [
+          'ink',
+          'draw',
+          'sketch',
+          'handwriting',
+          'canvas',
+          'pencil',
+        ],
+        category: SlashCommandCategory.embeds,
+        onExecute: () => _executeCommand((pos) async {
+          final inkDoc = AtlasInkDocument.empty(
+            documentId: 'sketch_${DateTime.now().millisecondsSinceEpoch}',
+            pageNumber: 1,
+            width: 760.0,
+            height: 240.0,
+          );
+          final hash = await _contentService.saveInkBlockDrawing(inkDoc);
+          final inkEmbed = DocumentContentService.createInkBlockEmbed(
+            inkHash: hash,
+            height: 240.0,
+          );
+          controller.replaceText(pos, 0, inkEmbed, null);
+          controller.replaceText(pos + 1, 0, '\n', null);
+        }),
+      ),
+    ];
+  }
+
+  // =========================================================================
+  // Persistence & Lifecycle
+  // =========================================================================
 
   /// Explicitly flushes and saves the document to CAS and database.
   Future<void> saveDocument() async {
@@ -169,8 +601,8 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
       );
 
       _hasUnsavedChanges = false;
-    } catch (e) {
-      // Avoid crashing the UI on save error, could be logged via logging service
+    } catch (_) {
+      // Avoid crashing the UI on save error
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -204,7 +636,6 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
   }
 
   void _handleLaunchUrl(String url) async {
-    // If it's an internal Atlas node link: atlas://node/:id
     final uri = Uri.tryParse(url);
     if (uri != null && uri.scheme == 'atlas' && uri.host == 'node') {
       final targetId = uri.pathSegments.isNotEmpty
@@ -498,17 +929,28 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     ),
                     const SizedBox(height: AtlasSpacing.md),
 
-                    // Quill Editor
-                    QuillEditor.basic(
-                      controller: _quillController!,
-                      config: QuillEditorConfig(
-                        placeholder:
-                            'Start typing, or insert [[Wiki-Links]]...',
-                        scrollable: false,
-                        autoFocus: false,
-                        expands: false,
-                        onLaunchUrl: _handleLaunchUrl,
-                        padding: EdgeInsets.zero,
+                    // Quill Editor with LayerLink for floating slash menu
+                    CompositedTransformTarget(
+                      link: _layerLink,
+                      child: QuillEditor.basic(
+                        controller: _quillController!,
+                        focusNode: _editorFocusNode,
+                        config: QuillEditorConfig(
+                          editorKey: _editorKey,
+                          placeholder:
+                              'Start typing, or type "/" for commands...',
+                          scrollable: false,
+                          autoFocus: false,
+                          expands: false,
+                          onLaunchUrl: _handleLaunchUrl,
+                          padding: EdgeInsets.zero,
+                          embedBuilders: const [
+                            CalloutEmbedBuilder(),
+                            InkBlockEmbedBuilder(),
+                            TaskEmbedBuilder(),
+                            DividerEmbedBuilder(),
+                          ],
+                        ),
                       ),
                     ),
 

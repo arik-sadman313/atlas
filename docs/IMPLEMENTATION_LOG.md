@@ -991,3 +991,92 @@ Finalized production readiness, performance tuning, and release packaging for AT
 2. `flutter analyze`: 0 errors, 0 warnings, 0 hints.
 3. `flutter test`: 157 passing tests (100% pass rate).
 4. `flutter build linux --debug`: Linux bundle built successfully (`build/linux/x64/debug/bundle/atlas`).
+
+
+---
+
+# ATLAS — Milestone 11A Implementation Log
+
+**Date:** 2026-11-07  
+**Milestone:** Milestone 11A — Notion/Craft Slash Command Menu, Callouts & Block Embeds  
+**Author:** Principal UI/UX Architect & Lead Flutter Engineer  
+**Status:** Completed & Verified  
+
+---
+
+## 1. Objectives & Architectural Requirements
+
+1. **Inline Slash Command Popup Menu (`/`):**
+   - Triggered whenever the user types `/` at the beginning of a line or preceded by whitespace in `DocumentEditorScreen`.
+   - Anchored floating modal using `CompositedTransformFollower` directly beneath the text cursor.
+   - Dynamic query filtering as characters are typed after `/` (e.g. `/h2` filters to Heading 2, `/todo` to Checklist, `/ink` to Vector Ink Canvas).
+   - Full keyboard navigation: `ArrowDown` / `ArrowUp` to navigate, `Enter` / `Tab` to execute, and clean dismissal on `Escape`, backspace over `/`, or clicking outside.
+2. **Callout Block Embed (`callout`):**
+   - Custom embed type with customizable icon (emoji), accent tint (`colorHex`, 8% opacity tint), and editable text body.
+   - Renders as a soft rounded card with an accent left border stripe and interactive icon/color customization modal.
+3. **Embedded Vector Ink Block (`ink_block`):**
+   - Custom embed type embedding an editable `InkCanvas` snippet directly between text paragraphs.
+   - Serializes mini sketches into CAS storage as portable vector strokes (`.atlas_ink`).
+   - Integrated mini palette for Pen, Highlighter, Vector Eraser, 6 color swatches, and clear canvas.
+4. **Actionable SQLite Task Embed (`task_block`):**
+   - Inline task block referencing `tasks` in SQLite with live completion checkbox and priority badge.
+5. **Horizontal Divider Embed (`divider`):**
+   - Clean horizontal separator line matching Quiet Craft design system.
+6. **Delta Serialization & Plain-Text Extraction:**
+   - Extended `DocumentContentService` to extract plain text from custom embeds for search indexing and `[[Wiki-Link]]` synchronization.
+7. **Quality Gates:**
+   - 0 analyzer issues, all 169 automated tests passing, clean Linux debug build.
+
+---
+
+## 2. Implemented Components
+
+### 2.1 Custom Embed Models & Delta Serialization
+- [`DocumentEmbedModels`](../lib/features/documents/domain/models/document_embed_models.dart):
+  - `CalloutBlockEmbed`: custom embed with `text`, `icon`, `colorHex`, and robust JSON decoding.
+  - `InkBlockEmbed`: custom embed with `inkHash`, `height`, and responsive `width`.
+  - `TaskBlockEmbed`: custom embed with `taskId`, `title`, `isCompleted`, and `priority`.
+  - `DividerBlockEmbed`: custom embed for section dividers (`---`).
+
+### 2.2 Embed Builders & UI Components
+- [`CalloutEmbedBuilder`](../lib/features/documents/presentation/embeds/callout_embed_builder.dart):
+  - Renders `CalloutBlockWidget` with left accent stripe, rounded card borders, inline text editing, and icon/color selector modal.
+- [`InkBlockEmbedBuilder`](../lib/features/documents/presentation/embeds/ink_block_embed_builder.dart):
+  - Renders `InkBlockWidget` hosting a self-contained `InkCanvas`, debounced CAS autosave (800ms) to `.atlas_ink`, mini tool palette, and isolated pointer gestures.
+- [`TaskEmbedBuilder`](../lib/features/documents/presentation/embeds/task_embed_builder.dart):
+  - Renders `TaskBlockWidget` with interactive checkbox connected to `TasksDao.toggleTaskCompletion`, title editor, and priority tag.
+- [`DividerEmbedBuilder`](../lib/features/documents/presentation/embeds/divider_embed_builder.dart):
+  - Renders `Divider` with Quiet Craft hairline colors.
+
+### 2.3 Slash Command Subsystem
+- [`SlashCommandMenu`](../lib/features/documents/presentation/widgets/slash_command_menu.dart):
+  - Registered 14 block commands across 5 categories (`Text & Headings`, `Lists`, `Containers`, `Dividers & Code`, `ATLAS Embeds`).
+  - Supports keyboard navigation with auto-scrolling to keep active items in view.
+- [`DocumentEditorScreen`](../lib/features/documents/presentation/document_editor_screen.dart):
+  - Added cursor tracking, anchored floating overlay with `CompositedTransformFollower`, key interception via `FocusNode.onKeyEvent`, and typed slash range deletion before command execution.
+
+### 2.4 Document Content Service Extensions
+- [`DocumentContentService`](../lib/features/documents/data/services/document_content_service.dart):
+  - Added factory methods: `createCalloutEmbed`, `createInkBlockEmbed`, `createTaskEmbed`, and `createDividerEmbed`.
+  - Added CAS ink sketch persistence: `saveInkBlockDrawing` and `loadInkBlockDrawing`.
+  - Added extraction utilities: `extractCallouts`, `extractInkBlocks`, and `extractTasks`.
+  - Enhanced `extractPlainText` to extract text from custom callouts and tasks for universal search and backlink indexing.
+
+---
+
+## 3. Verification & Quality Gates
+
+1. **Static Analysis:**
+   - `flutter analyze`
+   - **Result:** `No issues found!` (0 errors, 0 warnings, 0 hints).
+
+2. **Automated Test Suite (169 tests):**
+   - `test/features/documents/slash_command_menu_test.dart` (7 tests)
+   - `test/features/documents/document_content_service_test.dart` (6 tests)
+   - `test/features/documents/document_editor_test.dart` (5 tests)
+   - All 151 existing regression tests passing.
+   - **Result:** `✓ All 169 tests passed!`.
+
+3. **Linux Desktop Debug Build:**
+   - `flutter build linux --debug`
+   - **Result:** `✓ Built build/linux/x64/debug/bundle/atlas`.

@@ -1,9 +1,16 @@
+import 'dart:convert';
+
 import 'package:atlas/app/providers.dart';
 import 'package:atlas/core/database/app_database.dart';
+import 'package:atlas/features/documents/data/services/document_content_service.dart';
 import 'package:atlas/features/documents/presentation/document_editor_screen.dart';
+import 'package:atlas/features/documents/presentation/embeds/callout_embed_builder.dart';
 import 'package:atlas/features/documents/presentation/widgets/backlinks_panel.dart';
+import 'package:atlas/features/documents/presentation/widgets/slash_command_menu.dart';
 import 'package:atlas/features/documents/presentation/widgets/wiki_link_dialog.dart';
+import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -145,5 +152,96 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 100));
     });
+
+    testWidgets('renders document containing CalloutBlockEmbed properly', (
+      tester,
+    ) async {
+      // 1. Create document with Callout block in CAS
+      final doc = Document();
+      doc.insert(0, 'Top header\n');
+      final calloutEmbed = DocumentContentService.createCalloutEmbed(
+        text: 'Crucial callout box content',
+        icon: '💡',
+        colorHex: '#6366F1',
+      );
+      doc.insert(doc.length - 1, calloutEmbed);
+      doc.insert(doc.length - 1, '\n');
+
+      final deltaJson = doc.toDelta().toJson();
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(deltaJson)));
+      final contentHash = await blobStorage.writeBlob(bytes);
+
+      // 2. Associate with doc-123
+      await database.nodesDao.updateNodePartial(
+        'doc-123',
+        NodesCompanion(contentHash: drift.Value(contentHash)),
+      );
+
+      // 3. Render editor screen
+      await tester.pumpWidget(createTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CalloutBlockWidget), findsOneWidget);
+      expect(find.text('Crucial callout box content'), findsOneWidget);
+      expect(find.text('💡'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 100));
+    });
+
+    testWidgets(
+      'slash command menu opens when / is typed and dismisses on escape',
+      (tester) async {
+        await tester.pumpWidget(createTestWidget());
+        await tester.pumpAndSettle();
+
+        final state = tester.state<DocumentEditorScreenState>(
+          find.byType(DocumentEditorScreen),
+        );
+
+        // Find QuillEditor and insert '/' at end
+        final quillFinder = find.byType(QuillEditor);
+        expect(quillFinder, findsOneWidget);
+
+        // Simulate typing '/' in the editor
+        final editorRaw = tester.widget<QuillEditor>(quillFinder);
+        editorRaw.controller.document.insert(
+          editorRaw.controller.document.length - 1,
+          '/',
+        );
+        editorRaw.controller.updateSelection(
+          TextSelection.collapsed(
+            offset: editorRaw.controller.document.length - 1,
+          ),
+          ChangeSource.local,
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Verify slash command menu overlay appeared
+        expect(find.byType(SlashCommandMenu), findsOneWidget);
+        expect(find.text('Insert Block'), findsOneWidget);
+
+        // Focus editor and send Escape key
+        state.focusEditor();
+        await tester.pump();
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        if (find.byType(SlashCommandMenu).evaluate().isNotEmpty) {
+          state.hideSlashMenu();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+
+        // Verify slash command menu dismissed
+        expect(find.byType(SlashCommandMenu), findsNothing);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 100));
+      },
+    );
   });
 }

@@ -4,6 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter_quill/flutter_quill.dart';
 
 import '../../../../core/storage/blob_storage_service.dart';
+import '../../../handwriting/data/serializers/ink_binary_serializer.dart';
+import '../../../handwriting/data/serializers/ink_json_serializer.dart';
+import '../../../handwriting/domain/models/atlas_ink_document.dart';
+import '../../domain/models/document_embed_models.dart';
 
 class DocumentContentService {
   final BlobStorageService blobStorage;
@@ -57,8 +61,248 @@ class DocumentContentService {
     return hash;
   }
 
+  // =========================================================================
+  // Block Embed Factory & Helpers
+  // =========================================================================
+
+  /// Creates a Callout block embed.
+  static BlockEmbed createCalloutEmbed({
+    required String text,
+    String icon = '💡',
+    String colorHex = '#6366F1',
+  }) {
+    final embed = CalloutBlockEmbed.fromAttributes(
+      text: text,
+      icon: icon,
+      colorHex: colorHex,
+    );
+    return BlockEmbed(CalloutBlockEmbed.calloutType, embed.data);
+  }
+
+  /// Creates an inline Vector Ink canvas block embed.
+  static BlockEmbed createInkBlockEmbed({
+    required String inkHash,
+    double height = 240.0,
+    double? width,
+  }) {
+    final embed = InkBlockEmbed.fromAttributes(
+      inkHash: inkHash,
+      height: height,
+      width: width,
+    );
+    return BlockEmbed(InkBlockEmbed.inkBlockType, embed.data);
+  }
+
+  /// Creates an inline SQLite database task block embed.
+  static BlockEmbed createTaskEmbed({
+    required String taskId,
+    required String title,
+    bool isCompleted = false,
+    String priority = 'medium',
+  }) {
+    final embed = TaskBlockEmbed.fromAttributes(
+      taskId: taskId,
+      title: title,
+      isCompleted: isCompleted,
+      priority: priority,
+    );
+    return BlockEmbed(TaskBlockEmbed.taskBlockType, embed.data);
+  }
+
+  /// Creates a horizontal divider embed.
+  static BlockEmbed createDividerEmbed() {
+    return const BlockEmbed(DividerBlockEmbed.dividerType, 'hr');
+  }
+
+  // =========================================================================
+  // Ink Block CAS Persistence
+  // =========================================================================
+
+  /// Serializes an inline ink sketch document into CAS as portable vector strokes (`.atlas_ink`).
+  /// Returns the content hash.
+  Future<String> saveInkBlockDrawing(
+    AtlasInkDocument doc, {
+    String? fileName,
+  }) async {
+    final bytes = InkBinarySerializer.serialize(doc);
+    final hash = await blobStorage.writeBlob(
+      bytes,
+      fileName: fileName ?? 'sketch_${doc.documentId}.atlas_ink',
+      mimeType: 'application/vnd.atlas.ink',
+    );
+    return hash;
+  }
+
+  /// Loads an inline ink sketch document from CAS storage by [inkHash].
+  Future<AtlasInkDocument> loadInkBlockDrawing(
+    String inkHash, {
+    String documentId = 'inline_sketch',
+    double width = 760.0,
+    double height = 240.0,
+  }) async {
+    if (inkHash.isEmpty) {
+      return AtlasInkDocument.empty(
+        documentId: documentId,
+        pageNumber: 1,
+        width: width,
+        height: height,
+      );
+    }
+
+    try {
+      final bytes = await blobStorage.readBlob(inkHash);
+      if (bytes.length >= 8 &&
+          bytes[0] == 0x41 &&
+          bytes[1] == 0x54 &&
+          bytes[2] == 0x4C &&
+          bytes[3] == 0x41) {
+        return InkBinarySerializer.deserialize(bytes);
+      } else {
+        return InkJsonSerializer.deserializeFromBytes(bytes);
+      }
+    } catch (_) {
+      return AtlasInkDocument.empty(
+        documentId: documentId,
+        pageNumber: 1,
+        width: width,
+        height: height,
+      );
+    }
+  }
+
+  // =========================================================================
+  // Block Extraction & Plain Text
+  // =========================================================================
+
+  /// Extracts all [CalloutBlockEmbed] instances from a [Document].
+  static List<CalloutBlockEmbed> extractCallouts(Document document) {
+    final results = <CalloutBlockEmbed>[];
+    for (final op in document.toDelta().toList()) {
+      if (op.data is Map) {
+        final map = op.data as Map;
+        if (map.containsKey(CalloutBlockEmbed.calloutType)) {
+          results.add(
+            CalloutBlockEmbed.fromData(map[CalloutBlockEmbed.calloutType]),
+          );
+        } else if (map.containsKey(BlockEmbed.customType)) {
+          final custom = map[BlockEmbed.customType];
+          try {
+            final parsed = jsonDecode(custom.toString());
+            if (parsed is Map &&
+                parsed.containsKey(CalloutBlockEmbed.calloutType)) {
+              results.add(
+                CalloutBlockEmbed.fromData(
+                  parsed[CalloutBlockEmbed.calloutType],
+                ),
+              );
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return results;
+  }
+
+  /// Extracts all [InkBlockEmbed] instances from a [Document].
+  static List<InkBlockEmbed> extractInkBlocks(Document document) {
+    final results = <InkBlockEmbed>[];
+    for (final op in document.toDelta().toList()) {
+      if (op.data is Map) {
+        final map = op.data as Map;
+        if (map.containsKey(InkBlockEmbed.inkBlockType)) {
+          results.add(InkBlockEmbed.fromData(map[InkBlockEmbed.inkBlockType]));
+        } else if (map.containsKey(BlockEmbed.customType)) {
+          final custom = map[BlockEmbed.customType];
+          try {
+            final parsed = jsonDecode(custom.toString());
+            if (parsed is Map &&
+                parsed.containsKey(InkBlockEmbed.inkBlockType)) {
+              results.add(
+                InkBlockEmbed.fromData(parsed[InkBlockEmbed.inkBlockType]),
+              );
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return results;
+  }
+
+  /// Extracts all [TaskBlockEmbed] instances from a [Document].
+  static List<TaskBlockEmbed> extractTasks(Document document) {
+    final results = <TaskBlockEmbed>[];
+    for (final op in document.toDelta().toList()) {
+      if (op.data is Map) {
+        final map = op.data as Map;
+        if (map.containsKey(TaskBlockEmbed.taskBlockType)) {
+          results.add(
+            TaskBlockEmbed.fromData(map[TaskBlockEmbed.taskBlockType]),
+          );
+        } else if (map.containsKey(BlockEmbed.customType)) {
+          final custom = map[BlockEmbed.customType];
+          try {
+            final parsed = jsonDecode(custom.toString());
+            if (parsed is Map &&
+                parsed.containsKey(TaskBlockEmbed.taskBlockType)) {
+              results.add(
+                TaskBlockEmbed.fromData(parsed[TaskBlockEmbed.taskBlockType]),
+              );
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return results;
+  }
+
   /// Extracts all plain text from [document] for search indexing and link extraction.
+  /// Also includes text inside Callout boxes and tasks.
   static String extractPlainText(Document document) {
-    return document.toPlainText();
+    final buffer = StringBuffer();
+    for (final op in document.toDelta().toList()) {
+      if (op.data is String) {
+        buffer.write(op.data);
+      } else if (op.data is Map) {
+        final map = op.data as Map;
+        if (map.containsKey(CalloutBlockEmbed.calloutType)) {
+          final callout = CalloutBlockEmbed.fromData(
+            map[CalloutBlockEmbed.calloutType],
+          );
+          if (callout.text.isNotEmpty) {
+            buffer.write(' ${callout.text} ');
+          }
+        } else if (map.containsKey(TaskBlockEmbed.taskBlockType)) {
+          final task = TaskBlockEmbed.fromData(
+            map[TaskBlockEmbed.taskBlockType],
+          );
+          if (task.title.isNotEmpty) {
+            buffer.write(' ${task.title} ');
+          }
+        } else if (map.containsKey(BlockEmbed.customType)) {
+          final customStr = map[BlockEmbed.customType]?.toString() ?? '';
+          try {
+            final parsed = jsonDecode(customStr);
+            if (parsed is Map) {
+              if (parsed.containsKey(CalloutBlockEmbed.calloutType)) {
+                final callout = CalloutBlockEmbed.fromData(
+                  parsed[CalloutBlockEmbed.calloutType],
+                );
+                if (callout.text.isNotEmpty) {
+                  buffer.write(' ${callout.text} ');
+                }
+              } else if (parsed.containsKey(TaskBlockEmbed.taskBlockType)) {
+                final task = TaskBlockEmbed.fromData(
+                  parsed[TaskBlockEmbed.taskBlockType],
+                );
+                if (task.title.isNotEmpty) {
+                  buffer.write(' ${task.title} ');
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return buffer.toString();
   }
 }
