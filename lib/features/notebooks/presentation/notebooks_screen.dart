@@ -322,11 +322,10 @@ class NotebooksScreen extends ConsumerWidget {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(AtlasSpacing.xl),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isNarrow = constraints.maxWidth < 600;
+                        final titleColumn = Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
@@ -343,8 +342,10 @@ class NotebooksScreen extends ConsumerWidget {
                               ),
                             ),
                           ],
-                        ),
-                        Row(
+                        );
+
+                        final actionButtons = Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             AtlasButton.secondary(
                               label: 'Import PDF',
@@ -359,8 +360,32 @@ class NotebooksScreen extends ConsumerWidget {
                                   _showCreateNotebookDialog(context, ref),
                             ),
                           ],
-                        ),
-                      ],
+                        );
+
+                        if (isNarrow) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              titleColumn,
+                              const SizedBox(height: AtlasSpacing.md),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: actionButtons,
+                              ),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: titleColumn),
+                            const SizedBox(width: AtlasSpacing.md),
+                            actionButtons,
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),

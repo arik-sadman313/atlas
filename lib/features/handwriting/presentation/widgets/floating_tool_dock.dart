@@ -30,11 +30,14 @@ class FloatingToolDock extends StatefulWidget {
 class _FloatingToolDockState extends State<FloatingToolDock> {
   late bool _dockedTop;
 
-  static const List<double> _quickWidths = [1.5, 3.0, 6.0];
+  static const List<double> _quickWidths = [1.5, 3.0, 6.0, 12.0];
   static const List<int> _quickColors = [
-    0xFF18181B, // Obsidian Black
-    0xFF6366F1, // Indigo Slate
+    0xFF18181B, // Obsidian Charcoal
+    0xFF2563EB, // Cobalt Blue
     0xFF10B981, // Sage Emerald
+    0xFFF59E0B, // Amber Ochre
+    0xFFEF4444, // Crimson Red
+    0xFF8B5CF6, // Royal Violet
   ];
 
   @override
@@ -84,10 +87,12 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                     width: 1,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
                     // Position Toggle (Top/Bottom Dock)
                     IconButton(
                       icon: Icon(
@@ -196,6 +201,62 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       }),
                     ],
 
+                    // Lasso Selection Contextual Actions
+                    if (activeTool.type.isLasso &&
+                        widget.controller.hasSelection) ...[
+                      _buildDivider(isDark),
+
+                      // Duplicate Selection
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        tooltip: 'Duplicate Selection',
+                        color: isDark
+                            ? const Color(0xFF60A5FA)
+                            : const Color(0xFF2563EB),
+                        splashRadius: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () =>
+                            widget.controller.duplicateSelectedStrokes(),
+                      ),
+
+                      // Recolor Selection (Quick Color Swatches)
+                      ..._quickColors.take(4).map((colorVal) {
+                        return _buildColorSwatch(
+                          colorValue: colorVal,
+                          isSelected: false,
+                          onTap: () => widget.controller.recolorSelectedStrokes(
+                            colorVal,
+                          ),
+                        );
+                      }),
+
+                      // Delete Selection
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 16,
+                        ),
+                        tooltip: 'Delete Selected Strokes',
+                        color: const Color(0xFFEF4444),
+                        splashRadius: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () =>
+                            widget.controller.deleteSelectedStrokes(),
+                      ),
+
+                      // Deselect
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        tooltip: 'Deselect',
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                        splashRadius: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.controller.clearSelection(),
+                      ),
+                    ],
+
                     _buildDivider(isDark),
 
                     // Undo / Redo Actions
@@ -241,7 +302,8 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
               ),
             ),
           ),
-        );
+        ),
+      );
       },
     );
   }

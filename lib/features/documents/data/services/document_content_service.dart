@@ -41,10 +41,10 @@ class DocumentContentService {
     return createDefaultDocument(title: defaultTitle);
   }
 
-  /// Creates a standard default document.
+  /// Creates a standard default blank document.
   Document createDefaultDocument({String? title}) {
     final doc = Document();
-    if (title != null && title.trim().isNotEmpty) {
+    if (title != null && title.isNotEmpty) {
       doc.insert(0, '$title\n');
       doc.format(0, title.length, Attribute.h1);
     }

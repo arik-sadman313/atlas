@@ -27,11 +27,19 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   TaskGrouping _currentGrouping = TaskGrouping.none;
   String? _selectedProjectId;
   String _viewMode = 'list'; // 'list' or 'board'
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _loadViewMode();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadViewMode() async {
@@ -250,11 +258,12 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
         ? 'Completed tasks will appear here for review and tracking.'
         : 'Everything is caught up. Capture an action item or start planning ahead.';
 
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 520),
-        margin: const EdgeInsets.symmetric(vertical: 32),
-        padding: const EdgeInsets.all(AtlasSpacing.xl),
+    return SingleChildScrollView(
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 520),
+          margin: const EdgeInsets.symmetric(vertical: AtlasSpacing.md),
+          padding: const EdgeInsets.all(AtlasSpacing.lg),
         decoration: BoxDecoration(
           color: isDark ? AtlasColors.darkCard : AtlasColors.lightSurface,
           borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
@@ -349,7 +358,8 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   @override
@@ -373,32 +383,30 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Tasks & Planning',
-                              style: theme.textTheme.displayMedium,
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isNarrow = constraints.maxWidth < 640;
+                      final titleColumn = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Tasks & Planning',
+                            style: theme.textTheme.displayMedium,
+                          ),
+                          const SizedBox(height: AtlasSpacing.xs),
+                          Text(
+                            'Actionable task management integrated with your knowledge graph',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: isDark
+                                  ? AtlasColors.darkTextSecondary
+                                  : AtlasColors.lightTextSecondary,
                             ),
-                            const SizedBox(height: AtlasSpacing.xs),
-                            Text(
-                              'Actionable task management integrated with your knowledge graph',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: isDark
-                                    ? AtlasColors.darkTextSecondary
-                                    : AtlasColors.lightTextSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: AtlasSpacing.md),
-                      Row(
+                          ),
+                        ],
+                      );
+
+                      final actionRow = Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           // View Mode Switcher (List vs Board)
                           _buildViewModeSwitcher(isDark),
@@ -469,10 +477,79 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                             onPressed: _showNewProjectDialog,
                           ),
                         ],
-                      ),
-                    ],
+                      );
+
+                      if (isNarrow) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            titleColumn,
+                            const SizedBox(height: AtlasSpacing.md),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: actionRow,
+                            ),
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: titleColumn),
+                          const SizedBox(width: AtlasSpacing.md),
+                          actionRow,
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: AtlasSpacing.md),
+
+                  // Quick Live Task Search Bar
+                  Container(
+                    height: 38,
+                    margin: const EdgeInsets.only(bottom: AtlasSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AtlasColors.darkSurface
+                          : AtlasColors.lightSurface,
+                      borderRadius: BorderRadius.circular(
+                        AtlasSpacing.radiusSm,
+                      ),
+                      border: Border.all(
+                        color: isDark
+                            ? AtlasColors.darkBorder
+                            : AtlasColors.lightBorder,
+                      ),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: theme.textTheme.bodyMedium,
+                      decoration: InputDecoration(
+                        hintText: 'Filter tasks by title...',
+                        hintStyle: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? AtlasColors.darkTextSecondary
+                              : AtlasColors.lightTextSecondary,
+                        ),
+                        prefixIcon: const Icon(Icons.search, size: 16),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 14),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        border: InputBorder.none,
+                      ),
+                      onChanged: (val) =>
+                          setState(() => _searchQuery = val.trim()),
+                    ),
+                  ),
 
                   // Filter Chips Row
                   SingleChildScrollView(
@@ -676,7 +753,16 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                               );
                             }
 
-                            final tasks = snapshot.data ?? [];
+                            final rawTasks = snapshot.data ?? [];
+                            final tasks = _searchQuery.isEmpty
+                                ? rawTasks
+                                : rawTasks
+                                    .where(
+                                      (t) => t.title.toLowerCase().contains(
+                                        _searchQuery.toLowerCase(),
+                                      ),
+                                    )
+                                    .toList();
 
                             if (_viewMode == 'board') {
                               return KanbanBoardView(
@@ -688,6 +774,34 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                             }
 
                             if (tasks.isEmpty) {
+                              if (_searchQuery.isNotEmpty) {
+                                return Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.search_off_rounded,
+                                        size: 40,
+                                        color: isDark
+                                            ? Colors.white24
+                                            : Colors.black26,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'No tasks matching "$_searchQuery"',
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color: isDark
+                                                  ? AtlasColors
+                                                        .darkTextSecondary
+                                                  : AtlasColors
+                                                        .lightTextSecondary,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
                               return _buildEmptyState(context, theme, isDark);
                             }
 

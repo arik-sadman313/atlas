@@ -151,8 +151,26 @@ class MarkdownExportService {
     }
   }
 
+  /// Converts a [Document] to standard Markdown text.
+  static String documentToMarkdown(dynamic doc) {
+    final ops = (doc as dynamic).toDelta().toJson();
+    if (ops is List) {
+      return convertDeltaOpsToMarkdown(ops);
+    }
+    return '';
+  }
+
   /// Converts Quill Delta ops into standard Markdown.
-  String _convertDeltaOpsToMarkdown(
+  static String convertDeltaOpsToMarkdown(
+    List<dynamic> ops, [
+    Set<String>? imageHashes,
+  ]) {
+    final hashes = imageHashes ?? <String>{};
+    return _convertDeltaOpsToMarkdown(ops, hashes);
+  }
+
+  /// Internal conversion of Quill Delta ops into standard Markdown.
+  static String _convertDeltaOpsToMarkdown(
     List<dynamic> ops,
     Set<String> imageHashes,
   ) {
@@ -322,7 +340,7 @@ class MarkdownExportService {
     return sanitized;
   }
 
-  String _extractImageHash(String pathOrHash) {
+  static String _extractImageHash(String pathOrHash) {
     if (pathOrHash.contains('/')) {
       final name = pathOrHash.split('/').last;
       return name.split('.').first;

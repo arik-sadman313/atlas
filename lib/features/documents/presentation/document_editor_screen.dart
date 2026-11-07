@@ -15,6 +15,7 @@ import '../../../core/theme/atlas_spacing.dart';
 import '../../handwriting/domain/models/atlas_ink_document.dart';
 import '../../journal/presentation/widgets/journal_context_day_panel.dart';
 import '../../graph/presentation/widgets/local_graph_panel.dart';
+import '../../settings/data/markdown_export_service.dart';
 import '../../tasks/presentation/widgets/node_tasks_panel.dart';
 import '../data/services/document_content_service.dart';
 import 'embeds/callout_embed_builder.dart';
@@ -56,6 +57,7 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
 
   NodeEntry? _node;
   QuillController? _quillController;
+  QuillController? get quillController => _quillController;
   late final TextEditingController _titleController;
   final FocusNode _editorFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
@@ -115,7 +117,6 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
 
     final doc = await _contentService.loadDocument(
       node.contentHash,
-      defaultTitle: node.title,
     );
 
     final controller = QuillController(
@@ -569,7 +570,11 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     final node = _node;
     if (controller == null || node == null) return;
 
-    setState(() => _isSaving = true);
+    if (mounted) {
+      setState(() => _isSaving = true);
+    } else {
+      _isSaving = true;
+    }
 
     try {
       final doc = controller.document;
@@ -664,6 +669,291 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     return text.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).length;
   }
 
+  int _calculateCharCount({bool includeSpaces = true}) {
+    final doc = _quillController?.document;
+    if (doc == null) return 0;
+    final text = doc.toPlainText();
+    return includeSpaces
+        ? text.length
+        : text.replaceAll(RegExp(r'\s'), '').length;
+  }
+
+  int _calculateParagraphCount() {
+    final doc = _quillController?.document;
+    if (doc == null) return 0;
+    final text = doc.toPlainText().trim();
+    if (text.isEmpty) return 0;
+    return text.split('\n').where((p) => p.trim().isNotEmpty).length;
+  }
+
+  void _showDocumentStatsDialog() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final words = _calculateWordCount();
+    final charsWithSpaces = _calculateCharCount(includeSpaces: true);
+    final charsWithoutSpaces = _calculateCharCount(includeSpaces: false);
+    final paragraphs = _calculateParagraphCount();
+    final readingTimeMins = (words / 200).ceil();
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor:
+            isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
+          side: BorderSide(
+            color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+          ),
+        ),
+        title: Row(
+          children: [
+            const Icon(
+              Icons.analytics_outlined,
+              size: 20,
+              color: AtlasColors.accentBlue,
+            ),
+            const SizedBox(width: 8),
+            Text('Document Statistics', style: theme.textTheme.titleMedium),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildStatRow('Words', '$words', theme, isDark),
+            _buildStatRow(
+              'Characters (with spaces)',
+              '$charsWithSpaces',
+              theme,
+              isDark,
+            ),
+            _buildStatRow(
+              'Characters (no spaces)',
+              '$charsWithoutSpaces',
+              theme,
+              isDark,
+            ),
+            _buildStatRow('Paragraphs', '$paragraphs', theme, isDark),
+            _buildStatRow(
+              'Reading Time',
+              '~${readingTimeMins <= 1 ? "1 min" : "$readingTimeMins mins"}',
+              theme,
+              isDark,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatRow(
+    String label,
+    String value,
+    ThemeData theme,
+    bool isDark,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: isDark
+                  ? AtlasColors.darkTextSecondary
+                  : AtlasColors.lightTextSecondary,
+            ),
+          ),
+          Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _copyAsPlainText() {
+    final controller = _quillController;
+    if (controller == null) return;
+    final text = controller.document.toPlainText();
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Document copied as plain text to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _copyAsMarkdown() {
+    final controller = _quillController;
+    if (controller == null) return;
+    final md = MarkdownExportService.documentToMarkdown(controller.document);
+    Clipboard.setData(ClipboardData(text: md));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Document copied as Markdown to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showDocumentOutlineSheet() {
+    final controller = _quillController;
+    if (controller == null) return;
+
+    final headings = <({String text, int level, int offset})>[];
+
+    int currentOffset = 0;
+    String currentLineText = '';
+
+    for (final op in controller.document.toDelta().operations) {
+      final insert = op.data;
+      final attrs = op.attributes;
+
+      if (insert is String) {
+        final lines = insert.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          final line = lines[i];
+          currentLineText += line;
+
+          if (i < lines.length - 1) {
+            final headerLevel = attrs?['header'];
+            if (headerLevel is int && headerLevel >= 1 && headerLevel <= 3) {
+              final trimmed = currentLineText.trim();
+              if (trimmed.isNotEmpty) {
+                headings.add((
+                  text: trimmed,
+                  level: headerLevel,
+                  offset: currentOffset,
+                ));
+              }
+            }
+            currentOffset += currentLineText.length + 1;
+            currentLineText = '';
+          }
+        }
+      } else {
+        currentOffset += 1;
+      }
+    }
+
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor:
+          isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AtlasSpacing.radiusLg),
+        ),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AtlasSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.format_list_bulleted_rounded,
+                        size: 18,
+                        color: AtlasColors.accentBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Document Outline',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.pop(sheetCtx),
+                  ),
+                ],
+              ),
+              const Divider(),
+              if (headings.isEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Text(
+                      'No headings found.\nUse /h1, /h2, or /h3 to structure your notes.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark
+                            ? AtlasColors.darkTextSecondary
+                            : AtlasColors.lightTextSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+              ] else ...[
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: headings.length,
+                    itemBuilder: (context, index) {
+                      final h = headings[index];
+                      final indent = (h.level - 1) * 16.0;
+                      return ListTile(
+                        contentPadding: EdgeInsets.only(
+                          left: 8.0 + indent,
+                          right: 8.0,
+                        ),
+                        dense: true,
+                        leading: Icon(
+                          h.level == 1 ? Icons.title : Icons.format_size,
+                          size: 16,
+                          color: h.level == 1
+                              ? AtlasColors.accentBlue
+                              : (isDark ? Colors.white60 : Colors.black54),
+                        ),
+                        title: Text(
+                          h.text,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: h.level == 1
+                                ? FontWeight.bold
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(sheetCtx);
+                          controller.updateSelection(
+                            TextSelection.collapsed(offset: h.offset),
+                            ChangeSource.local,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -703,54 +993,104 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
             },
           ),
           titleSpacing: 0,
-          title: Row(
-            children: [
-              // Save Status Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? AtlasColors.darkElevated
-                      : AtlasColors.lightElevated,
-                  borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_isSaving) ...[
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                      ),
-                      const SizedBox(width: 6),
-                      Text('Saving...', style: theme.textTheme.labelSmall),
-                    ] else if (_hasUnsavedChanges) ...[
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Colors.orange,
-                          shape: BoxShape.circle,
+          title: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Save Status Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AtlasColors.darkElevated
+                        : AtlasColors.lightElevated,
+                    borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_isSaving) ...[
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text('Unsaved', style: theme.textTheme.labelSmall),
-                    ] else ...[
-                      const Icon(
-                        Icons.check_circle,
-                        size: 12,
-                        color: Colors.green,
-                      ),
-                      const SizedBox(width: 6),
-                      Text('Saved', style: theme.textTheme.labelSmall),
+                        const SizedBox(width: 6),
+                        Text('Saving...', style: theme.textTheme.labelSmall),
+                      ] else if (_hasUnsavedChanges) ...[
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('Unsaved', style: theme.textTheme.labelSmall),
+                      ] else ...[
+                        const Icon(
+                          Icons.check_circle,
+                          size: 12,
+                          color: Colors.green,
+                        ),
+                        const SizedBox(width: 6),
+                        Text('Saved', style: theme.textTheme.labelSmall),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+
+                // Live Word Count & Reading Time Pill
+                InkWell(
+                  borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                  onTap: _showDocumentStatsDialog,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AtlasColors.darkElevated
+                          : AtlasColors.lightElevated,
+                      borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.article_outlined,
+                          size: 12,
+                          color: isDark
+                              ? AtlasColors.darkTextSecondary
+                              : AtlasColors.lightTextSecondary,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          '${_calculateWordCount()} words • ${(_calculateWordCount() / 200).ceil() <= 1 ? "1 min" : "${(_calculateWordCount() / 200).ceil()} mins"}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: isDark
+                                ? AtlasColors.darkTextSecondary
+                                : AtlasColors.lightTextSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
+            // Document Outline Action
+            IconButton(
+              icon: const Icon(Icons.format_list_bulleted_rounded),
+              tooltip: 'Document Outline',
+              onPressed: _showDocumentOutlineSheet,
+            ),
             // Wiki-Link Insert Action
             IconButton(
               icon: const Icon(Icons.link_rounded),
@@ -768,6 +1108,56 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               icon: const Icon(Icons.redo),
               tooltip: 'Redo',
               onPressed: () => _quillController?.redo(),
+            ),
+            // Document Options Menu (Export & Stats)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded),
+              tooltip: 'Document Options',
+              onSelected: (val) {
+                switch (val) {
+                  case 'copy_plain':
+                    _copyAsPlainText();
+                    break;
+                  case 'copy_md':
+                    _copyAsMarkdown();
+                    break;
+                  case 'stats':
+                    _showDocumentStatsDialog();
+                    break;
+                }
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                  value: 'copy_plain',
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy_rounded, size: 16),
+                      SizedBox(width: 8),
+                      Text('Copy as Plain Text'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'copy_md',
+                  child: Row(
+                    children: [
+                      Icon(Icons.code_rounded, size: 16),
+                      SizedBox(width: 8),
+                      Text('Copy as Markdown'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'stats',
+                  child: Row(
+                    children: [
+                      Icon(Icons.analytics_outlined, size: 16),
+                      SizedBox(width: 8),
+                      Text('Word Count & Statistics'),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: AtlasSpacing.sm),
           ],
@@ -979,18 +1369,18 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                     // Node Tasks Panel
                     NodeTasksPanel(
                       nodeId: widget.documentId,
-                      initialExpanded: true,
+                      initialExpanded: false,
                     ),
 
-                    const SizedBox(height: AtlasSpacing.xl),
+                    const SizedBox(height: AtlasSpacing.md),
 
                     // Backlinks Panel
                     BacklinksPanel(
                       nodeId: widget.documentId,
-                      initialExpanded: true,
+                      initialExpanded: false,
                     ),
 
-                    const SizedBox(height: AtlasSpacing.xl),
+                    const SizedBox(height: AtlasSpacing.md),
 
                     // Local 1-Hop Knowledge Graph Panel
                     LocalGraphPanel(

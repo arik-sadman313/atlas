@@ -126,11 +126,10 @@ class DocumentsScreen extends ConsumerWidget {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(AtlasSpacing.xl),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isNarrow = constraints.maxWidth < 600;
+                        final titleColumn = Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
@@ -147,14 +146,36 @@ class DocumentsScreen extends ConsumerWidget {
                               ),
                             ),
                           ],
-                        ),
-                        AtlasButton.primary(
+                        );
+
+                        final actionButton = AtlasButton.primary(
                           label: 'New Document',
                           icon: Icons.add,
                           onPressed: () =>
                               _showCreateDocumentDialog(context, ref),
-                        ),
-                      ],
+                        );
+
+                        if (isNarrow) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              titleColumn,
+                              const SizedBox(height: AtlasSpacing.md),
+                              actionButton,
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: titleColumn),
+                            const SizedBox(width: AtlasSpacing.md),
+                            actionButton,
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
