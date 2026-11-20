@@ -1,12 +1,10 @@
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:atlas/features/handwriting/domain/interop/excalidraw_converter.dart';
 import 'package:atlas/features/handwriting/domain/math/rough_generator.dart';
 import 'package:atlas/features/handwriting/domain/math/smart_shape_detector.dart';
 import 'package:atlas/features/handwriting/domain/models/atlas_ink_document.dart';
 import 'package:atlas/features/handwriting/domain/models/ink_point.dart';
-import 'package:atlas/features/handwriting/domain/models/ink_stroke.dart';
 import 'package:atlas/features/handwriting/domain/models/ink_tool.dart';
 import 'package:atlas/features/handwriting/presentation/controllers/ink_canvas_controller.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/ink_document_painter.dart';
