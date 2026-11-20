@@ -3,14 +3,19 @@ import 'package:flutter/material.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
 
-/// Compact, floating tool dock widget for Goodnotes-grade ink workflows.
+/// Floating tool dock widget elevated with Excalidraw sketchy diagramming
+/// and iPad note-taking ergonomics.
 ///
 /// Features:
-/// - Dockable to top or bottom edge of canvas
-/// - 1-tap tool switcher: Pen, Highlighter, Eraser, Lasso
-/// - 3 quick stroke widths: Fine (1.5px), Medium (3.0px), Bold (6.0px)
-/// - 3 quick colors: Obsidian Black (#18181B), Indigo Slate (#6366F1), Sage Emerald (#10B981)
-/// - Undo / Redo & Clear actions
+/// - Dockable to top or bottom edge of the screen
+/// - 1-tap inking tools: Pen, Highlighter, Eraser, Lasso Select
+/// - Excalidraw hand-drawn shapes: Rectangle, Ellipse/Circle, Diamond, Arrow, Line, Text
+/// - Excalidraw style flyout: Fill styles (None, Hachure, Cross-Hatch, Solid) & Roughness (Architect, Artist, Cartoonist)
+/// - Stroke width presets: Fine (1.5px), Medium (3.0px), Bold (6.0px), Marker (12.0px)
+/// - Quiet Craft + Excalidraw color swatches
+/// - Paper stationery template picker (Ruled, Dotted, Grid, Cornell Notes, Blank)
+/// - Contextual lasso selection transformations (Duplicate, Recolor, Delete, Deselect)
+/// - Undo / Redo & Clear page actions
 class FloatingToolDock extends StatefulWidget {
   final InkCanvasController controller;
   final VoidCallback? onClearRequested;
@@ -93,218 +98,492 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                    // Position Toggle (Top/Bottom Dock)
-                    IconButton(
-                      icon: Icon(
-                        _dockedTop
-                            ? Icons.keyboard_double_arrow_down_rounded
-                            : Icons.keyboard_double_arrow_up_rounded,
-                        size: 18,
-                      ),
-                      tooltip: _dockedTop ? 'Dock at Bottom' : 'Dock at Top',
-                      color: isDark
-                          ? const Color(0xFF64748B)
-                          : const Color(0xFF94A3B8),
-                      splashRadius: 16,
-                      visualDensity: VisualDensity.compact,
-                      onPressed: _toggleDockPosition,
-                    ),
-
-                    _buildDivider(isDark),
-
-                    // 1-Tap Tool Switcher
-                    _buildToolButton(
-                      context: context,
-                      icon: Icons.edit_rounded,
-                      tooltip: 'Pen',
-                      isSelected: activeTool.type == InkToolType.ballpointPen,
-                      onTap: () => widget.controller.setTool(
-                        activeTool.copyWith(
-                          type: InkToolType.ballpointPen,
-                          baseWidth: 3.0,
-                          opacity: 1.0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    _buildToolButton(
-                      context: context,
-                      icon: Icons.highlight_rounded,
-                      tooltip: 'Highlighter',
-                      isSelected: activeTool.type == InkToolType.highlighter,
-                      onTap: () => widget.controller.setTool(
-                        activeTool.copyWith(
-                          type: InkToolType.highlighter,
-                          baseWidth: 16.0,
-                          opacity: 0.4,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    _buildToolButton(
-                      context: context,
-                      icon: Icons.auto_fix_normal_rounded,
-                      tooltip: 'Eraser',
-                      isSelected: activeTool.type.isEraser,
-                      onTap: () => widget.controller.setTool(
-                        activeTool.copyWith(
-                          type: InkToolType.vectorEraser,
-                          baseWidth: 16.0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 2),
-                    _buildToolButton(
-                      context: context,
-                      icon: Icons.gesture_rounded,
-                      tooltip: 'Lasso Select',
-                      isSelected: activeTool.type == InkToolType.lasso,
-                      onTap: () => widget.controller.setTool(
-                        activeTool.copyWith(
-                          type: InkToolType.lasso,
-                          baseWidth: 2.0,
-                        ),
-                      ),
-                    ),
-
-                    // Width & Color Selectors (shown when not in Eraser/Lasso)
-                    if (!activeTool.type.isEraser &&
-                        !activeTool.type.isLasso) ...[
-                      _buildDivider(isDark),
-
-                      // Quick Stroke Widths
-                      ..._quickWidths.map((w) {
-                        final isSelected =
-                            (activeTool.baseWidth - w).abs() < 0.5;
-                        return _buildWidthButton(
-                          widthValue: w,
-                          isSelected: isSelected,
-                          isDark: isDark,
-                          onTap: () => widget.controller.setTool(
-                            activeTool.copyWith(baseWidth: w),
-                          ),
-                        );
-                      }),
-
-                      _buildDivider(isDark),
-
-                      // Quick Colors
-                      ..._quickColors.map((colorVal) {
-                        final isSelected = activeTool.color == colorVal;
-                        return _buildColorSwatch(
-                          colorValue: colorVal,
-                          isSelected: isSelected,
-                          onTap: () => widget.controller.setTool(
-                            activeTool.copyWith(color: colorVal),
-                          ),
-                        );
-                      }),
-                    ],
-
-                    // Lasso Selection Contextual Actions
-                    if (activeTool.type.isLasso &&
-                        widget.controller.hasSelection) ...[
-                      _buildDivider(isDark),
-
-                      // Duplicate Selection
+                      // Position Toggle (Top/Bottom Dock)
                       IconButton(
-                        icon: const Icon(Icons.copy_rounded, size: 16),
-                        tooltip: 'Duplicate Selection',
-                        color: isDark
-                            ? const Color(0xFF60A5FA)
-                            : const Color(0xFF2563EB),
-                        splashRadius: 16,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () =>
-                            widget.controller.duplicateSelectedStrokes(),
-                      ),
-
-                      // Recolor Selection (Quick Color Swatches)
-                      ..._quickColors.take(4).map((colorVal) {
-                        return _buildColorSwatch(
-                          colorValue: colorVal,
-                          isSelected: false,
-                          onTap: () => widget.controller.recolorSelectedStrokes(
-                            colorVal,
-                          ),
-                        );
-                      }),
-
-                      // Delete Selection
-                      IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 16,
-                        ),
-                        tooltip: 'Delete Selected Strokes',
-                        color: const Color(0xFFEF4444),
-                        splashRadius: 16,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () =>
-                            widget.controller.deleteSelectedStrokes(),
-                      ),
-
-                      // Deselect
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 16),
-                        tooltip: 'Deselect',
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
-                        splashRadius: 16,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => widget.controller.clearSelection(),
-                      ),
-                    ],
-
-                    _buildDivider(isDark),
-
-                    // Undo / Redo Actions
-                    IconButton(
-                      icon: const Icon(Icons.undo_rounded, size: 18),
-                      tooltip: 'Undo',
-                      color: widget.controller.canUndo
-                          ? (isDark ? Colors.white70 : Colors.black87)
-                          : (isDark ? Colors.white24 : Colors.black26),
-                      onPressed: widget.controller.canUndo
-                          ? widget.controller.undo
-                          : null,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.redo_rounded, size: 18),
-                      tooltip: 'Redo',
-                      color: widget.controller.canRedo
-                          ? (isDark ? Colors.white70 : Colors.black87)
-                          : (isDark ? Colors.white24 : Colors.black26),
-                      onPressed: widget.controller.canRedo
-                          ? widget.controller.redo
-                          : null,
-                      visualDensity: VisualDensity.compact,
-                    ),
-
-                    if (widget.onClearRequested != null) ...[
-                      IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
+                        icon: Icon(
+                          _dockedTop
+                              ? Icons.keyboard_double_arrow_down_rounded
+                              : Icons.keyboard_double_arrow_up_rounded,
                           size: 18,
                         ),
-                        tooltip: 'Clear Page',
-                        color: isDark ? const Color(0xFFEF4444) : Colors.red,
-                        onPressed: widget.controller.document.isEmpty
-                            ? null
-                            : widget.onClearRequested,
+                        tooltip: _dockedTop ? 'Dock at Bottom' : 'Dock at Top',
+                        color: isDark
+                            ? const Color(0xFF64748B)
+                            : const Color(0xFF94A3B8),
+                        splashRadius: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _toggleDockPosition,
+                      ),
+
+                      _buildDivider(isDark),
+
+                      // --- Section 1: Inking & Note-Taking Tools ---
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.edit_rounded,
+                        tooltip: 'Pen',
+                        isSelected: activeTool.type == InkToolType.ballpointPen,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.ballpointPen,
+                            baseWidth: 3.0,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.highlight_rounded,
+                        tooltip: 'Highlighter',
+                        isSelected: activeTool.type == InkToolType.highlighter,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.highlighter,
+                            baseWidth: 16.0,
+                            opacity: 0.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.auto_fix_normal_rounded,
+                        tooltip: 'Eraser',
+                        isSelected: activeTool.type.isEraser,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.vectorEraser,
+                            baseWidth: 16.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.gesture_rounded,
+                        tooltip: 'Lasso Select',
+                        isSelected: activeTool.type == InkToolType.lasso,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.lasso,
+                            baseWidth: 2.0,
+                          ),
+                        ),
+                      ),
+
+                      _buildDivider(isDark),
+
+                      // --- Section 2: Excalidraw Sketch Shapes ---
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.crop_square_rounded,
+                        tooltip: 'Excalidraw Box',
+                        isSelected: activeTool.type == InkToolType.rectangle,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.rectangle,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.circle_outlined,
+                        tooltip: 'Excalidraw Ellipse',
+                        isSelected: activeTool.type == InkToolType.ellipse,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.ellipse,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.diamond_outlined,
+                        tooltip: 'Excalidraw Diamond',
+                        isSelected: activeTool.type == InkToolType.diamond,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.diamond,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.arrow_right_alt_rounded,
+                        tooltip: 'Excalidraw Arrow',
+                        isSelected: activeTool.type == InkToolType.arrow,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.arrow,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.horizontal_rule_rounded,
+                        tooltip: 'Excalidraw Line',
+                        isSelected: activeTool.type == InkToolType.line,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.line,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.text_fields_rounded,
+                        tooltip: 'Note Text',
+                        isSelected: activeTool.type == InkToolType.text,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.text,
+                            baseWidth: 1.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+
+                      // --- Section 3: Excalidraw Style & Fill Controls ---
+                      _buildDivider(isDark),
+
+                      PopupMenuButton<String>(
+                        icon: Icon(
+                          activeTool.fillStyle == 'hachure'
+                              ? Icons.texture_rounded
+                              : (activeTool.fillStyle == 'cross-hatch'
+                                  ? Icons.grid_3x3_rounded
+                                  : (activeTool.fillStyle == 'solid'
+                                      ? Icons.format_color_fill_rounded
+                                      : Icons.format_color_reset_rounded)),
+                          size: 18,
+                        ),
+                        tooltip: 'Excalidraw Fill & Roughness',
+                        onSelected: (val) {
+                          if (val.startsWith('fill:')) {
+                            final style = val.substring(5);
+                            widget.controller.setTool(
+                              activeTool.copyWith(
+                                fillStyle: style,
+                                fillColor: style == 'none'
+                                    ? null
+                                    : (activeTool.fillColor ?? activeTool.color),
+                              ),
+                            );
+                            if (widget.controller.hasSelection) {
+                              widget.controller.updateSelectedShapesStyle(
+                                fillStyle: style,
+                                fillColor: style == 'none'
+                                    ? null
+                                    : (activeTool.fillColor ?? activeTool.color),
+                              );
+                            }
+                          } else if (val.startsWith('rough:')) {
+                            final r = double.tryParse(val.substring(6)) ?? 1.0;
+                            widget.controller.setTool(
+                              activeTool.copyWith(roughness: r),
+                            );
+                            if (widget.controller.hasSelection) {
+                              widget.controller.updateSelectedShapesStyle(
+                                roughness: r,
+                              );
+                            }
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            enabled: false,
+                            child: Text(
+                              'FILL STYLE',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'fill:none',
+                            child: Row(
+                              children: [
+                                Icon(Icons.format_color_reset_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('None (Transparent)'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'fill:hachure',
+                            child: Row(
+                              children: [
+                                Icon(Icons.texture_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Hachure (Sketchy Hatch)'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'fill:cross-hatch',
+                            child: Row(
+                              children: [
+                                Icon(Icons.grid_3x3_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Cross-Hatch'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'fill:solid',
+                            child: Row(
+                              children: [
+                                Icon(Icons.format_color_fill_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Solid Fill'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            enabled: false,
+                            child: Text(
+                              'ROUGHNESS',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'rough:0.0',
+                            child: Text('Architect (Clean & Precise)'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'rough:1.0',
+                            child: Text('Artist (Classic Excalidraw Sketch)'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'rough:2.0',
+                            child: Text('Cartoonist (Playful Wobble)'),
+                          ),
+                        ],
+                      ),
+
+                      // Quick Stroke Widths
+                      if (!activeTool.type.isEraser &&
+                          !activeTool.type.isLasso) ...[
+                        ..._quickWidths.map((w) {
+                          final isSelected =
+                              (activeTool.baseWidth - w).abs() < 0.5;
+                          return _buildWidthButton(
+                            widthValue: w,
+                            isSelected: isSelected,
+                            isDark: isDark,
+                            onTap: () => widget.controller.setTool(
+                              activeTool.copyWith(baseWidth: w),
+                            ),
+                          );
+                        }),
+
+                        _buildDivider(isDark),
+
+                        // Quick Colors
+                        ..._quickColors.map((colorVal) {
+                          final isSelected = activeTool.color == colorVal;
+                          return _buildColorSwatch(
+                            colorValue: colorVal,
+                            isSelected: isSelected,
+                            onTap: () => widget.controller.setTool(
+                              activeTool.copyWith(
+                                color: colorVal,
+                                fillColor: activeTool.fillStyle != 'none'
+                                    ? colorVal
+                                    : activeTool.fillColor,
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+
+                      // Contextual Lasso Actions
+                      if (activeTool.type.isLasso &&
+                          widget.controller.hasSelection) ...[
+                        _buildDivider(isDark),
+
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          tooltip: 'Duplicate Selection',
+                          color: isDark
+                              ? const Color(0xFF60A5FA)
+                              : const Color(0xFF2563EB),
+                          onPressed: () =>
+                              widget.controller.duplicateSelectedStrokes(),
+                        ),
+                        ..._quickColors.take(4).map((colorVal) {
+                          return _buildColorSwatch(
+                            colorValue: colorVal,
+                            isSelected: false,
+                            onTap: () =>
+                                widget.controller.recolorSelectedStrokes(
+                              colorVal,
+                            ),
+                          );
+                        }),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 16,
+                          ),
+                          tooltip: 'Delete Selected',
+                          color: const Color(0xFFEF4444),
+                          onPressed: () =>
+                              widget.controller.deleteSelectedStrokes(),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 16),
+                          tooltip: 'Deselect',
+                          color: isDark
+                              ? const Color(0xFF94A3B8)
+                              : const Color(0xFF64748B),
+                          onPressed: () => widget.controller.clearSelection(),
+                        ),
+                      ],
+
+                      _buildDivider(isDark),
+
+                      // Paper Stationery Template Quick Switcher
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.view_agenda_outlined, size: 18),
+                        tooltip: 'Stationery Template',
+                        onSelected: (template) {
+                          widget.controller.setBackgroundTemplate(template);
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            value: 'ruled',
+                            child: Row(
+                              children: [
+                                Icon(Icons.format_align_justify_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Ruled / Lined'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'cornell',
+                            child: Row(
+                              children: [
+                                Icon(Icons.view_headline_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Cornell Notes'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'dotted',
+                            child: Row(
+                              children: [
+                                Icon(Icons.drag_indicator_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Dotted Grid'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'grid',
+                            child: Row(
+                              children: [
+                                Icon(Icons.grid_4x4_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Square Grid'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'blank',
+                            child: Row(
+                              children: [
+                                Icon(Icons.crop_portrait_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Blank Canvas'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      _buildDivider(isDark),
+
+                      // Undo / Redo Actions
+                      IconButton(
+                        icon: const Icon(Icons.undo_rounded, size: 18),
+                        tooltip: 'Undo',
+                        color: widget.controller.canUndo
+                            ? (isDark ? Colors.white70 : Colors.black87)
+                            : (isDark ? Colors.white24 : Colors.black26),
+                        onPressed: widget.controller.canUndo
+                            ? widget.controller.undo
+                            : null,
                         visualDensity: VisualDensity.compact,
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.redo_rounded, size: 18),
+                        tooltip: 'Redo',
+                        color: widget.controller.canRedo
+                            ? (isDark ? Colors.white70 : Colors.black87)
+                            : (isDark ? Colors.white24 : Colors.black26),
+                        onPressed: widget.controller.canRedo
+                            ? widget.controller.redo
+                            : null,
+                        visualDensity: VisualDensity.compact,
+                      ),
+
+                      if (widget.onClearRequested != null) ...[
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                          ),
+                          tooltip: 'Clear Page',
+                          color: isDark ? const Color(0xFFEF4444) : Colors.red,
+                          onPressed: widget.controller.document.isEmpty
+                              ? null
+                              : widget.onClearRequested,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      );
+        );
       },
+    );
+  }
+
+  Widget _buildDivider(bool isDark) {
+    return Container(
+      width: 1,
+      height: 20,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
     );
   }
 
@@ -316,38 +595,27 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
     required VoidCallback onTap,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final activeBg = const Color(0xFF6366F1).withValues(alpha: 0.18);
-    final activeColor = const Color(0xFF6366F1);
-    final inactiveColor = isDark
-        ? const Color(0xFF94A3B8)
-        : const Color(0xFF64748B);
 
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: isSelected ? activeBg : Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onTap,
-          child: Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              border: isSelected
-                  ? Border.all(
-                      color: activeColor.withValues(alpha: 0.5),
-                      width: 1.2,
-                    )
-                  : null,
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 19,
-              color: isSelected ? activeColor : inactiveColor,
-            ),
+        onTap: onTap,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isSelected
+                ? (isDark ? const Color(0xFF2563EB) : const Color(0xFFDBEAFE))
+                : Colors.transparent,
+          ),
+          child: Icon(
+            icon,
+            size: 17,
+            color: isSelected
+                ? (isDark ? Colors.white : const Color(0xFF1D4ED8))
+                : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
           ),
         ),
       ),
@@ -360,35 +628,33 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
     required bool isDark,
     required VoidCallback onTap,
   }) {
-    final indicatorSize = widthValue * 1.8 + 2.0;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: Tooltip(
-        message: '${widthValue}px',
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isSelected
-                  ? const Color(0xFF6366F1).withValues(alpha: 0.18)
-                  : Colors.transparent,
-              border: isSelected
-                  ? Border.all(color: const Color(0xFF6366F1), width: 1.5)
-                  : null,
-            ),
-            alignment: Alignment.center,
+    return Tooltip(
+      message: '${widthValue.toStringAsFixed(1)}px Width',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          width: 24,
+          height: 24,
+          margin: const EdgeInsets.symmetric(horizontal: 1.5),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: isSelected
+                ? Border.all(
+                    color: isDark
+                        ? const Color(0xFF60A5FA)
+                        : const Color(0xFF2563EB),
+                    width: 2,
+                  )
+                : null,
+          ),
+          child: Center(
             child: Container(
-              width: indicatorSize.clamp(3.0, 14.0),
-              height: indicatorSize.clamp(3.0, 14.0),
+              width: widthValue.clamp(2.0, 10.0),
+              height: widthValue.clamp(2.0, 10.0),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isSelected
-                    ? const Color(0xFF6366F1)
-                    : (isDark ? Colors.white60 : Colors.black54),
+                color: isDark ? Colors.white : Colors.black87,
               ),
             ),
           ),
@@ -402,27 +668,26 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
+    return Tooltip(
+      message: 'Color',
       child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
         child: Container(
           width: 22,
           height: 22,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: Color(colorValue),
             shape: BoxShape.circle,
+            color: Color(colorValue),
             border: Border.all(
-              color: isSelected
-                  ? const Color(0xFF6366F1)
-                  : Colors.white.withValues(alpha: 0.3),
-              width: isSelected ? 2.5 : 1.2,
+              color: isSelected ? Colors.white : Colors.black26,
+              width: isSelected ? 2.5 : 1,
             ),
             boxShadow: isSelected
-                ? const [
-                    BoxShadow(
-                      color: Color(0x556366F1),
+                ? [
+                    const BoxShadow(
+                      color: Colors.black38,
                       blurRadius: 4,
                       offset: Offset(0, 1),
                     ),
@@ -431,15 +696,6 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildDivider(bool isDark) {
-    return Container(
-      height: 20,
-      width: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 6),
-      color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
     );
   }
 }

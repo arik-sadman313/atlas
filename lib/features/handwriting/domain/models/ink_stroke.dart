@@ -14,6 +14,16 @@ class InkStroke {
   final List<double>? transform; // 2x3 affine matrix [a, b, c, d, tx, ty]
   final Rect? bounds;
 
+  // Excalidraw Sketch & Shape Attributes
+  final String? shapeType; // 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'text'
+  final String? fillStyle; // 'none', 'hachure', 'cross-hatch', 'solid'
+  final int? fillColor; // ARGB integer for sketchy hatching or fill
+  final double roughness; // 0.0 (clean), 1.0 (artist), 2.0 (cartoonist)
+  final String? text; // Content for text elements
+  final double? fontSize; // Font size for text elements
+  final String? strokeStyle; // 'solid', 'dashed', 'dotted'
+  final int seed; // Deterministic seed for stable Rough.js sketchy rendering
+
   const InkStroke({
     required this.id,
     required this.tool,
@@ -24,7 +34,17 @@ class InkStroke {
     required this.points,
     this.transform,
     this.bounds,
+    this.shapeType,
+    this.fillStyle,
+    this.fillColor,
+    this.roughness = 1.0,
+    this.text,
+    this.fontSize,
+    this.strokeStyle,
+    this.seed = 42,
   });
+
+  bool get isShape => tool.isShape || shapeType != null;
 
   Rect get computedBounds {
     if (bounds != null) return bounds!;
@@ -63,6 +83,14 @@ class InkStroke {
       computedBounds.right,
       computedBounds.bottom,
     ],
+    if (shapeType != null) 'shapeType': shapeType,
+    if (fillStyle != null) 'fillStyle': fillStyle,
+    if (fillColor != null) 'fillColor': fillColor,
+    'roughness': roughness,
+    if (text != null) 'text': text,
+    if (fontSize != null) 'fontSize': fontSize,
+    if (strokeStyle != null) 'strokeStyle': strokeStyle,
+    'seed': seed,
   };
 
   factory InkStroke.fromJson(Map<String, dynamic> json) {
@@ -93,6 +121,16 @@ class InkStroke {
           ?.map((e) => (e as num).toDouble())
           .toList(),
       bounds: boundsRect,
+      shapeType: json['shapeType'] as String?,
+      fillStyle: json['fillStyle'] as String?,
+      fillColor: json['fillColor'] is int
+          ? json['fillColor'] as int
+          : (json['fillColor'] != null ? int.tryParse(json['fillColor'].toString()) : null),
+      roughness: (json['roughness'] as num?)?.toDouble() ?? 1.0,
+      text: json['text'] as String?,
+      fontSize: (json['fontSize'] as num?)?.toDouble(),
+      strokeStyle: json['strokeStyle'] as String?,
+      seed: json['seed'] as int? ?? 42,
     );
   }
 
@@ -106,6 +144,14 @@ class InkStroke {
     List<InkPoint>? points,
     List<double>? transform,
     Rect? bounds,
+    String? shapeType,
+    String? fillStyle,
+    int? fillColor,
+    double? roughness,
+    String? text,
+    double? fontSize,
+    String? strokeStyle,
+    int? seed,
   }) {
     return InkStroke(
       id: id ?? this.id,
@@ -117,6 +163,14 @@ class InkStroke {
       points: points ?? this.points,
       transform: transform ?? this.transform,
       bounds: bounds ?? this.bounds,
+      shapeType: shapeType ?? this.shapeType,
+      fillStyle: fillStyle ?? this.fillStyle,
+      fillColor: fillColor ?? this.fillColor,
+      roughness: roughness ?? this.roughness,
+      text: text ?? this.text,
+      fontSize: fontSize ?? this.fontSize,
+      strokeStyle: strokeStyle ?? this.strokeStyle,
+      seed: seed ?? this.seed,
     );
   }
 }

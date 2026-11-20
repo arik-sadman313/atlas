@@ -56,6 +56,12 @@ class StrokeTessellator {
       case InkToolType.vectorEraser:
       case InkToolType.pixelEraser:
       case InkToolType.lasso:
+      case InkToolType.rectangle:
+      case InkToolType.ellipse:
+      case InkToolType.diamond:
+      case InkToolType.arrow:
+      case InkToolType.line:
+      case InkToolType.text:
         return StrokeOptions(
           size: baseWidth,
           thinning: 0.0,
@@ -181,25 +187,34 @@ class StrokeTessellator {
     return computeBoundsFromPoints(stroke.points, stroke.baseWidth);
   }
 
-  /// Converts an InkStroke into a closed vector Path using perfect_freehand
-  static Path tessellate(InkStroke stroke) {
-    if (stroke.points.isEmpty) return Path();
+  /// Converts a list of InkPoints into a closed vector Path using perfect_freehand
+  static Path tessellatePoints(
+    List<InkPoint> points,
+    InkToolType tool,
+    double baseWidth,
+  ) {
+    if (points.isEmpty) return Path();
 
-    if (stroke.points.length == 1) {
-      final p = stroke.points.first;
-      final radius = (stroke.baseWidth * (0.5 + p.pressure * 0.5)) / 2;
+    if (points.length == 1) {
+      final p = points.first;
+      final radius = (baseWidth * (0.5 + p.pressure * 0.5)) / 2;
       return Path()
         ..addOval(Rect.fromCircle(center: Offset(p.x, p.y), radius: radius));
     }
 
-    final pointVectors = stroke.points
+    final pointVectors = points
         .map((p) => PointVector(p.x, p.y, p.pressure))
         .toList();
 
-    final options = _getOptionsForTool(stroke.tool, stroke.baseWidth);
+    final options = _getOptionsForTool(tool, baseWidth);
     final outline = getStroke(pointVectors, options: options);
 
     return outlineToPath(outline);
+  }
+
+  /// Converts an InkStroke into a closed vector Path using perfect_freehand
+  static Path tessellate(InkStroke stroke) {
+    return tessellatePoints(stroke.points, stroke.tool, stroke.baseWidth);
   }
 
   /// Converts outline offsets into a smooth quadratic Bézier closed path

@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
+import '../../domain/math/smart_shape_detector.dart';
 import '../../domain/math/stroke_tessellator.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_layer.dart';
@@ -201,23 +202,135 @@ class InkCanvasController extends ChangeNotifier {
     final strokeId = 's_${DateTime.now().microsecondsSinceEpoch}';
     final isHighlighter = _activeTool.type.isHighlighter;
 
-    final strokeBounds = StrokeTessellator.computeBoundsFromPoints(
-      _activePoints,
-      _activeTool.baseWidth,
-    );
+    if (_activeTool.type.isShape && _activePoints.length >= 2) {
+      // Commit Excalidraw Shape
+      final p1 = _activePoints.first;
+      final p2 = _activePoints.last;
+      final shapeBounds = Rect.fromPoints(
+        Offset(p1.x, p1.y),
+        Offset(p2.x, p2.y),
+      );
 
+      final shapeStroke = InkStroke(
+        id: strokeId,
+        tool: _activeTool.type,
+        color: _activeTool.color,
+        baseWidth: _activeTool.baseWidth,
+        opacity: _activeTool.opacity,
+        blendMode: 'srcOver',
+        points: [
+          InkPoint(x: p1.x, y: p1.y),
+          InkPoint(x: p2.x, y: p2.y),
+        ],
+        bounds: shapeBounds,
+        shapeType: _activeTool.type.name,
+        fillStyle: _activeTool.fillStyle,
+        fillColor: _activeTool.fillColor,
+        roughness: _activeTool.roughness,
+        strokeStyle: _activeTool.strokeStyle,
+        seed: DateTime.now().microsecondsSinceEpoch % 10000,
+      );
+
+      _addStrokeToDocument(shapeStroke);
+    } else {
+      // Commit Standard Freehand Ink Stroke
+      final strokeBounds = StrokeTessellator.computeBoundsFromPoints(
+        _activePoints,
+        _activeTool.baseWidth,
+      );
+
+      final stroke = InkStroke(
+        id: strokeId,
+        tool: _activeTool.type,
+        color: _activeTool.color,
+        baseWidth: _activeTool.baseWidth,
+        opacity: isHighlighter ? 0.4 : _activeTool.opacity,
+        blendMode: isHighlighter ? 'multiply' : 'srcOver',
+        points: List.of(_activePoints),
+        bounds: strokeBounds,
+      );
+
+      _addStrokeToDocument(stroke, isHighlighter: isHighlighter);
+    }
+
+    _isDrawing = false;
+    _activePoints.clear();
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  /// Snaps the current in-flight freehand stroke to an Excalidraw sketchy
+  /// vector shape (iPad draw-and-hold feature).
+  void snapInFlightStrokeToShape(DetectedShape shape) {
+    if (!_isDrawing || _activePoints.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final strokeId = 'shape_${DateTime.now().microsecondsSinceEpoch}';
     final stroke = InkStroke(
       id: strokeId,
-      tool: _activeTool.type,
+      tool: shape.type,
       color: _activeTool.color,
       baseWidth: _activeTool.baseWidth,
-      opacity: isHighlighter ? 0.4 : _activeTool.opacity,
-      blendMode: isHighlighter ? 'multiply' : 'srcOver',
-      points: List.of(_activePoints),
-      bounds: strokeBounds,
+      opacity: _activeTool.opacity,
+      blendMode: 'srcOver',
+      points: [
+        InkPoint(x: shape.start.dx, y: shape.start.dy),
+        InkPoint(x: shape.end.dx, y: shape.end.dy),
+      ],
+      bounds: shape.bounds,
+      shapeType: shape.type.name,
+      fillStyle: _activeTool.fillStyle,
+      fillColor: _activeTool.fillColor,
+      roughness: _activeTool.roughness,
+      seed: DateTime.now().microsecondsSinceEpoch % 10000,
     );
 
-    // Commit to appropriate layer (highlighters on highlighter layer)
+    _addStrokeToDocument(stroke);
+    _isDrawing = false;
+    _activePoints.clear();
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  /// Adds a standalone handwritten-style text element to the notebook page.
+  void addTextElement(
+    Offset position,
+    String text, {
+    double fontSize = 18.0,
+    int? color,
+  }) {
+    if (text.trim().isEmpty) return;
+    _recordUndoSnapshot();
+
+    final strokeId = 'text_${DateTime.now().microsecondsSinceEpoch}';
+    final stroke = InkStroke(
+      id: strokeId,
+      tool: InkToolType.text,
+      color: color ?? _activeTool.color,
+      baseWidth: 1.5,
+      opacity: _activeTool.opacity,
+      blendMode: 'srcOver',
+      points: [InkPoint(x: position.dx, y: position.dy)],
+      bounds: Rect.fromLTWH(position.dx, position.dy, 240, 40),
+      shapeType: 'text',
+      text: text,
+      fontSize: fontSize,
+      roughness: 0.0,
+      seed: 123,
+    );
+
+    _addStrokeToDocument(stroke);
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void _addStrokeToDocument(InkStroke stroke, {bool isHighlighter = false}) {
     final targetLayerId = isHighlighter ? 'layer_highlighter' : 'layer_default';
 
     var layerFound = false;
@@ -241,11 +354,13 @@ class InkCanvasController extends ChangeNotifier {
     }
 
     _document = _document.copyWith(layers: updatedLayers);
-    _isDrawing = false;
-    _activePoints.clear();
-    _redoStack.clear();
+  }
+
+  void setBackgroundTemplate(String template) {
+    if (_document.backgroundTemplate == template) return;
+    _recordUndoSnapshot();
+    _document = _document.copyWith(backgroundTemplate: template);
     _revision++;
-    _renderCache.invalidate();
     notifyListeners();
   }
 
@@ -258,18 +373,22 @@ class InkCanvasController extends ChangeNotifier {
       for (final stroke in layer.strokes) {
         if (stroke.computedBounds.overlaps(eraserRect)) {
           // Check proximity to any point in the stroke
-          final hitsPoint = stroke.points.any((p) {
-            final dx = p.x - position.dx;
-            final dy = p.y - position.dy;
-            return (dx * dx + dy * dy) <= (radius * radius);
-          });
-
-          if (hitsPoint) {
-            mutated = true;
-            continue; // Stroke erased!
+          bool hit = false;
+          for (final pt in stroke.points) {
+            final dx = pt.x - position.dx;
+            final dy = pt.y - position.dy;
+            if (dx * dx + dy * dy <= radius * radius) {
+              hit = true;
+              mutated = true;
+              break;
+            }
           }
+          if (!hit) {
+            remainingStrokes.add(stroke);
+          }
+        } else {
+          remainingStrokes.add(stroke);
         }
-        remainingStrokes.add(stroke);
       }
       return layer.copyWith(strokes: remainingStrokes);
     }).toList();
@@ -311,11 +430,10 @@ class InkCanvasController extends ChangeNotifier {
   }
 
   void clear() {
-    if (_document.isEmpty) return;
     _recordUndoSnapshot();
-    final clearedLayers = _document.layers
-        .map((layer) => layer.copyWith(strokes: const []))
-        .toList();
+    final clearedLayers = _document.layers.map((layer) {
+      return layer.copyWith(strokes: []);
+    }).toList();
     _document = _document.copyWith(layers: clearedLayers);
     _activePoints.clear();
     _lassoPolygon.clear();
@@ -443,6 +561,37 @@ class InkCanvasController extends ChangeNotifier {
       final updatedStrokes = layer.strokes.map((stroke) {
         if (_selectedStrokeIds.contains(stroke.id)) {
           return stroke.copyWith(color: newColor);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void updateSelectedShapesStyle({
+    String? fillStyle,
+    int? fillColor,
+    double? roughness,
+    String? strokeStyle,
+  }) {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(
+            fillStyle: fillStyle ?? stroke.fillStyle,
+            fillColor: fillColor ?? stroke.fillColor,
+            roughness: roughness ?? stroke.roughness,
+            strokeStyle: strokeStyle ?? stroke.strokeStyle,
+          );
         }
         return stroke;
       }).toList();

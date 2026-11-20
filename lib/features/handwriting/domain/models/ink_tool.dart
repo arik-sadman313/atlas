@@ -5,7 +5,14 @@ enum InkToolType {
   pencil,
   vectorEraser,
   pixelEraser,
-  lasso;
+  lasso,
+  // Excalidraw Sketch Shape Tools
+  rectangle,
+  ellipse,
+  diamond,
+  arrow,
+  line,
+  text;
 
   String toJson() => name;
 
@@ -22,6 +29,14 @@ enum InkToolType {
   bool get isHighlighter => this == InkToolType.highlighter;
 
   bool get isLasso => this == InkToolType.lasso;
+
+  bool get isShape =>
+      this == InkToolType.rectangle ||
+      this == InkToolType.ellipse ||
+      this == InkToolType.diamond ||
+      this == InkToolType.arrow ||
+      this == InkToolType.line ||
+      this == InkToolType.text;
 }
 
 class InkToolConfig {
@@ -29,12 +44,26 @@ class InkToolConfig {
   final int color; // ARGB integer
   final double baseWidth;
   final double opacity;
+  // Excalidraw Styling
+  final String fillStyle; // 'none', 'hachure', 'cross-hatch', 'solid'
+  final int? fillColor; // ARGB integer
+  final double roughness; // 0.0 (architect), 1.0 (artist), 2.0 (cartoonist)
+  final String strokeStyle; // 'solid', 'dashed', 'dotted'
+
+  bool get isEraser => type.isEraser;
+  bool get isHighlighter => type.isHighlighter;
+  bool get isLasso => type.isLasso;
+  bool get isShape => type.isShape;
 
   const InkToolConfig({
     required this.type,
     required this.color,
     required this.baseWidth,
     this.opacity = 1.0,
+    this.fillStyle = 'none',
+    this.fillColor,
+    this.roughness = 1.0,
+    this.strokeStyle = 'solid',
   });
 
   InkToolConfig copyWith({
@@ -42,12 +71,20 @@ class InkToolConfig {
     int? color,
     double? baseWidth,
     double? opacity,
+    String? fillStyle,
+    int? fillColor,
+    double? roughness,
+    String? strokeStyle,
   }) {
     return InkToolConfig(
       type: type ?? this.type,
       color: color ?? this.color,
       baseWidth: baseWidth ?? this.baseWidth,
       opacity: opacity ?? this.opacity,
+      fillStyle: fillStyle ?? this.fillStyle,
+      fillColor: fillColor ?? this.fillColor,
+      roughness: roughness ?? this.roughness,
+      strokeStyle: strokeStyle ?? this.strokeStyle,
     );
   }
 }

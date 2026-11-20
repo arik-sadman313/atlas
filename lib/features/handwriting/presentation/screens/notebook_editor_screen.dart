@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:drift/drift.dart' as drift;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:pencil_kit/pencil_kit.dart';
 
 import '../../../../app/providers.dart';
@@ -15,6 +20,7 @@ import '../../../documents/presentation/widgets/backlinks_panel.dart';
 import '../../../graph/presentation/widgets/local_graph_panel.dart';
 import '../../../pdf/presentation/widgets/pdf_page_background.dart';
 import '../../../tasks/presentation/widgets/node_tasks_panel.dart';
+import '../../domain/interop/excalidraw_converter.dart';
 import '../../domain/models/atlas_ink_document.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
@@ -630,6 +636,88 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     }
   }
 
+  Future<void> _exportExcalidraw() async {
+    if (_canvasController == null) return;
+    try {
+      final doc = _canvasController!.document;
+      final excalJson = ExcalidrawConverter.exportToExcalidraw(doc);
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(excalJson);
+
+      final baseDir = await getApplicationDocumentsDirectory();
+      final sanitizedTitle = _title.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
+      final fileName =
+          '${sanitizedTitle.isEmpty ? "Notebook" : sanitizedTitle}_page_${_currentPageIndex + 1}.excalidraw';
+      final file = File(p.join(baseDir.path, fileName));
+      await file.writeAsString(jsonStr);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Excalidraw exported to: ${file.path}'),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to export Excalidraw: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _importExcalidraw() async {
+    if (_canvasController == null) return;
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['excalidraw', 'json'],
+      );
+      if (result.isEmpty) return;
+
+      final path = result.first.path;
+      if (path == null) return;
+      final file = File(path);
+      final content = await file.readAsString();
+      final decoded = jsonDecode(content) as Map<String, dynamic>;
+
+      final importedDoc = ExcalidrawConverter.importFromExcalidraw(
+        decoded,
+        documentId: _canvasController!.document.documentId,
+        pageNumber: _currentPageIndex + 1,
+      );
+
+      _canvasController!.loadDocument(importedDoc);
+      _hasUnsavedChanges = true;
+      _scheduleAutosave();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Excalidraw diagram imported successfully!'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to import Excalidraw: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    }
+  }
+
   void _popSafely() {
     if (!mounted || !context.mounted) return;
     if (GoRouter.maybeOf(context) != null) {
@@ -804,10 +892,11 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
         if (!isAndroid)
           PopupMenuButton<String>(
             icon: const Icon(Icons.grid_4x4_outlined, size: 20),
-            tooltip: 'Paper Template',
+            tooltip: 'Paper Stationery Template',
             onSelected: _changeTemplate,
             itemBuilder: (ctx) => [
               const PopupMenuItem(value: 'ruled', child: Text('Ruled / Lined')),
+              const PopupMenuItem(value: 'cornell', child: Text('Cornell Notes')),
               const PopupMenuItem(value: 'dotted', child: Text('Dotted Grid')),
               const PopupMenuItem(value: 'grid', child: Text('Square Grid')),
               const PopupMenuItem(value: 'blank', child: Text('Blank Canvas')),
@@ -834,11 +923,57 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           tooltip: 'Add Page',
           onPressed: _addNewPage,
         ),
-        // Export PDF
-        IconButton(
-          icon: const Icon(Icons.picture_as_pdf_outlined),
-          tooltip: 'Export PDF',
-          onPressed: _exportNotebookToPdf,
+
+        // Excalidraw & PDF Export/Import Menu
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.ios_share_rounded, size: 20),
+          tooltip: 'Share & Export Options',
+          onSelected: (val) {
+            switch (val) {
+              case 'export_excal':
+                _exportExcalidraw();
+                break;
+              case 'import_excal':
+                _importExcalidraw();
+                break;
+              case 'export_pdf':
+                _exportNotebookToPdf();
+                break;
+            }
+          },
+          itemBuilder: (ctx) => [
+            const PopupMenuItem(
+              value: 'export_excal',
+              child: Row(
+                children: [
+                  Icon(Icons.draw_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Text('Export Page to Excalidraw (.excalidraw)'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'import_excal',
+              child: Row(
+                children: [
+                  Icon(Icons.file_open_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Text('Import Excalidraw Diagram (.excalidraw)'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'export_pdf',
+              child: Row(
+                children: [
+                  Icon(Icons.picture_as_pdf_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Text('Export Full Notebook to PDF'),
+                ],
+              ),
+            ),
+          ],
         ),
         // Page Manager Drawer
         Builder(
