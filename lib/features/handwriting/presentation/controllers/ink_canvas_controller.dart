@@ -26,10 +26,30 @@ class InkCanvasController extends ChangeNotifier {
   int _strokeStartTime = 0;
   bool _isDrawing = false;
 
-  // Lasso selection state
+  // Lasso / Box selection state
   final List<Offset> _lassoPolygon = [];
   Set<String> _selectedStrokeIds = {};
   Rect? _selectionBounds;
+
+  // Grid & Snapping
+  bool _snapToGrid = false;
+  final double _gridSize = 20.0;
+
+  bool get snapToGrid => _snapToGrid;
+  double get gridSize => _gridSize;
+
+  void toggleSnapToGrid() {
+    _snapToGrid = !_snapToGrid;
+    notifyListeners();
+  }
+
+  Offset snapPoint(Offset pt) {
+    if (!_snapToGrid) return pt;
+    return Offset(
+      (pt.dx / _gridSize).round() * _gridSize,
+      (pt.dy / _gridSize).round() * _gridSize,
+    );
+  }
 
   InkCanvasController({
     required AtlasInkDocument document,
@@ -88,7 +108,9 @@ class InkCanvasController extends ChangeNotifier {
 
   void setTool(InkToolConfig tool) {
     _activeTool = tool;
-    if (!tool.type.isLasso && _selectedStrokeIds.isNotEmpty) {
+    if (!tool.type.isSelection &&
+        !tool.type.isLasso &&
+        _selectedStrokeIds.isNotEmpty) {
       clearSelection();
     } else {
       notifyListeners();
@@ -101,13 +123,25 @@ class InkCanvasController extends ChangeNotifier {
     double tiltAzimuth = 0.0,
     double tiltAltitude = 1.5707963,
   }) {
+    if (_activeTool.type.isPan) return;
+
     if (_activeTool.type.isEraser) {
       _recordUndoSnapshot();
       eraseAt(position, _activeTool.baseWidth * 3);
       return;
     }
 
-    if (_activeTool.type.isLasso) {
+    if (_activeTool.type.isSelection || _activeTool.type.isLasso) {
+      final hitId = hitTestStroke(position);
+      if (hitId != null) {
+        if (!_selectedStrokeIds.contains(hitId)) {
+          _selectedStrokeIds = {hitId};
+          _recomputeSelectionBounds();
+          notifyListeners();
+        }
+        return;
+      }
+
       _selectedStrokeIds = {};
       _selectionBounds = null;
       _isDrawing = true;
@@ -119,11 +153,12 @@ class InkCanvasController extends ChangeNotifier {
 
     _isDrawing = true;
     _strokeStartTime = DateTime.now().millisecondsSinceEpoch;
+    final startPt = snapPoint(position);
     _activePoints.clear();
     _activePoints.add(
       InkPoint(
-        x: position.dx,
-        y: position.dy,
+        x: startPt.dx,
+        y: startPt.dy,
         pressure: pressure,
         tiltAzimuth: tiltAzimuth,
         tiltAltitude: tiltAltitude,
@@ -139,12 +174,14 @@ class InkCanvasController extends ChangeNotifier {
     double tiltAzimuth = 0.0,
     double tiltAltitude = 1.5707963,
   }) {
+    if (_activeTool.type.isPan) return;
+
     if (_activeTool.type.isEraser) {
       eraseAt(position, _activeTool.baseWidth * 3);
       return;
     }
 
-    if (_activeTool.type.isLasso) {
+    if (_activeTool.type.isSelection || _activeTool.type.isLasso) {
       if (!_isDrawing) return;
       _lassoPolygon.add(position);
       notifyListeners();
@@ -154,10 +191,11 @@ class InkCanvasController extends ChangeNotifier {
     if (!_isDrawing) return;
 
     final now = DateTime.now().millisecondsSinceEpoch;
+    final curPt = _activeTool.type.isShape ? snapPoint(position) : position;
     _activePoints.add(
       InkPoint(
-        x: position.dx,
-        y: position.dy,
+        x: curPt.dx,
+        y: curPt.dy,
         pressure: pressure,
         tiltAzimuth: tiltAzimuth,
         tiltAltitude: tiltAltitude,
@@ -168,18 +206,29 @@ class InkCanvasController extends ChangeNotifier {
   }
 
   void endStroke() {
-    if (_activeTool.type.isLasso) {
+    if (_activeTool.type.isSelection || _activeTool.type.isLasso) {
       if (!_isDrawing) return;
       _isDrawing = false;
-      if (_lassoPolygon.length >= 3) {
+      if (_lassoPolygon.length >= 2) {
         final selected = <String>{};
-        for (final layer in _document.layers) {
-          for (final stroke in layer.strokes) {
-            if (StrokeTessellator.isStrokeSelectedByLasso(
-              stroke,
-              _lassoPolygon,
-            )) {
-              selected.add(stroke.id);
+        if (_lassoPolygon.length >= 3) {
+          for (final layer in _document.layers) {
+            for (final stroke in layer.strokes) {
+              if (StrokeTessellator.isStrokeSelectedByLasso(
+                stroke,
+                _lassoPolygon,
+              )) {
+                selected.add(stroke.id);
+              }
+            }
+          }
+        } else {
+          final box = Rect.fromPoints(_lassoPolygon.first, _lassoPolygon.last);
+          for (final layer in _document.layers) {
+            for (final stroke in layer.strokes) {
+              if (stroke.computedBounds.overlaps(box)) {
+                selected.add(stroke.id);
+              }
             }
           }
         }
@@ -228,6 +277,14 @@ class InkCanvasController extends ChangeNotifier {
         fillColor: _activeTool.fillColor,
         roughness: _activeTool.roughness,
         strokeStyle: _activeTool.strokeStyle,
+        roundness: _activeTool.roundness,
+        startArrowhead: _activeTool.startArrowhead,
+        endArrowhead: _activeTool.endArrowhead,
+        isCurved:
+            _activeTool.isCurved || _activeTool.type == InkToolType.curvedArrow,
+        fontFamily: _activeTool.fontFamily,
+        textAlign: _activeTool.textAlign,
+        fontSize: _activeTool.fontSize,
         seed: DateTime.now().microsecondsSinceEpoch % 10000,
       );
 
@@ -574,23 +631,63 @@ class InkCanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateSelectedShapesStyle({
-    String? fillStyle,
-    int? fillColor,
-    double? roughness,
-    String? strokeStyle,
-  }) {
-    if (_selectedStrokeIds.isEmpty) return;
-    _recordUndoSnapshot();
+  String? hitTestStroke(Offset position) {
+    for (final layer in _document.layers.reversed) {
+      if (!layer.visible) continue;
+      for (final stroke in layer.strokes.reversed) {
+        if (stroke.computedBounds.inflate(10.0).contains(position)) {
+          return stroke.id;
+        }
+      }
+    }
+    return null;
+  }
+
+  void selectStroke(String strokeId, {bool multiSelect = false}) {
+    if (multiSelect) {
+      if (_selectedStrokeIds.contains(strokeId)) {
+        _selectedStrokeIds.remove(strokeId);
+      } else {
+        _selectedStrokeIds.add(strokeId);
+      }
+    } else {
+      _selectedStrokeIds = {strokeId};
+    }
+    _recomputeSelectionBounds();
+    notifyListeners();
+  }
+
+  void selectAll() {
+    final allIds = <String>{};
+    for (final layer in _document.layers) {
+      for (final s in layer.strokes) {
+        allIds.add(s.id);
+      }
+    }
+    _selectedStrokeIds = allIds;
+    _recomputeSelectionBounds();
+    notifyListeners();
+  }
+
+  void resizeSelectedStrokes(Rect newBounds, {bool recordUndo = false}) {
+    if (_selectionBounds == null || _selectedStrokeIds.isEmpty) return;
+    if (_selectionBounds!.width <= 0 || _selectionBounds!.height <= 0) return;
+    if (recordUndo) _recordUndoSnapshot();
+
+    final scaleX = newBounds.width / _selectionBounds!.width;
+    final scaleY = newBounds.height / _selectionBounds!.height;
+    final origin = _selectionBounds!.topLeft;
+    final delta = newBounds.topLeft - origin;
 
     final updatedLayers = _document.layers.map((layer) {
       final updatedStrokes = layer.strokes.map((stroke) {
         if (_selectedStrokeIds.contains(stroke.id)) {
-          return stroke.copyWith(
-            fillStyle: fillStyle ?? stroke.fillStyle,
-            fillColor: fillColor ?? stroke.fillColor,
-            roughness: roughness ?? stroke.roughness,
-            strokeStyle: strokeStyle ?? stroke.strokeStyle,
+          return StrokeTessellator.transformStroke(
+            stroke,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            delta: delta,
+            origin: origin,
           );
         }
         return stroke;
@@ -599,10 +696,485 @@ class InkCanvasController extends ChangeNotifier {
     }).toList();
 
     _document = _document.copyWith(layers: updatedLayers);
-    _redoStack.clear();
+    _recomputeSelectionBounds();
     _revision++;
     _renderCache.invalidate();
     notifyListeners();
+  }
+
+  void rotateSelectedStrokes(
+    double deltaAngle,
+    Offset origin, {
+    bool recordUndo = false,
+  }) {
+    if (_selectedStrokeIds.isEmpty) return;
+    if (recordUndo) _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return StrokeTessellator.transformStroke(
+            stroke,
+            deltaAngle: deltaAngle,
+            origin: origin,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void bringToFront() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final unselected = <InkStroke>[];
+      final selected = <InkStroke>[];
+      for (final s in layer.strokes) {
+        if (_selectedStrokeIds.contains(s.id)) {
+          selected.add(s);
+        } else {
+          unselected.add(s);
+        }
+      }
+      return layer.copyWith(strokes: [...unselected, ...selected]);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void sendToBack() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final unselected = <InkStroke>[];
+      final selected = <InkStroke>[];
+      for (final s in layer.strokes) {
+        if (_selectedStrokeIds.contains(s.id)) {
+          selected.add(s);
+        } else {
+          unselected.add(s);
+        }
+      }
+      return layer.copyWith(strokes: [...selected, ...unselected]);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void bringForward() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final list = List<InkStroke>.from(layer.strokes);
+      for (int i = list.length - 2; i >= 0; i--) {
+        if (_selectedStrokeIds.contains(list[i].id) &&
+            !_selectedStrokeIds.contains(list[i + 1].id)) {
+          final temp = list[i];
+          list[i] = list[i + 1];
+          list[i + 1] = temp;
+        }
+      }
+      return layer.copyWith(strokes: list);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void sendBackward() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final list = List<InkStroke>.from(layer.strokes);
+      for (int i = 1; i < list.length; i++) {
+        if (_selectedStrokeIds.contains(list[i].id) &&
+            !_selectedStrokeIds.contains(list[i - 1].id)) {
+          final temp = list[i];
+          list[i] = list[i - 1];
+          list[i - 1] = temp;
+        }
+      }
+      return layer.copyWith(strokes: list);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void groupSelectedStrokes() {
+    if (_selectedStrokeIds.length < 2) return;
+    _recordUndoSnapshot();
+
+    final newGroupId = 'grp_${DateTime.now().microsecondsSinceEpoch}';
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(groupId: newGroupId);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void ungroupSelectedStrokes() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(clearGroupId: true);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void alignSelectedStrokes(String alignment) {
+    if (_selectedStrokeIds.length < 2 || _selectionBounds == null) return;
+    _recordUndoSnapshot();
+
+    final targetBounds = _selectionBounds!;
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (!_selectedStrokeIds.contains(stroke.id)) return stroke;
+        final b = stroke.computedBounds;
+        Offset delta = Offset.zero;
+
+        switch (alignment) {
+          case 'left':
+            delta = Offset(targetBounds.left - b.left, 0);
+            break;
+          case 'center':
+            delta = Offset(targetBounds.center.dx - b.center.dx, 0);
+            break;
+          case 'right':
+            delta = Offset(targetBounds.right - b.right, 0);
+            break;
+          case 'top':
+            delta = Offset(0, targetBounds.top - b.top);
+            break;
+          case 'middle':
+            delta = Offset(0, targetBounds.center.dy - b.center.dy);
+            break;
+          case 'bottom':
+            delta = Offset(0, targetBounds.bottom - b.bottom);
+            break;
+        }
+
+        return StrokeTessellator.transformStroke(stroke, delta: delta);
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void distributeSelectedStrokes(String direction) {
+    if (_selectedStrokeIds.length < 3) return;
+    _recordUndoSnapshot();
+
+    final selected = selectedStrokes;
+    if (direction == 'horizontal') {
+      selected.sort(
+        (a, b) => a.computedBounds.left.compareTo(b.computedBounds.left),
+      );
+      final minX = selected.first.computedBounds.left;
+      final maxX = selected.last.computedBounds.left;
+      final step = (maxX - minX) / (selected.length - 1);
+
+      final deltaMap = <String, Offset>{};
+      for (int i = 0; i < selected.length; i++) {
+        final targetX = minX + i * step;
+        final curX = selected[i].computedBounds.left;
+        deltaMap[selected[i].id] = Offset(targetX - curX, 0);
+      }
+
+      final updatedLayers = _document.layers.map((layer) {
+        final updatedStrokes = layer.strokes.map((stroke) {
+          if (deltaMap.containsKey(stroke.id)) {
+            return StrokeTessellator.transformStroke(
+              stroke,
+              delta: deltaMap[stroke.id]!,
+            );
+          }
+          return stroke;
+        }).toList();
+        return layer.copyWith(strokes: updatedStrokes);
+      }).toList();
+
+      _document = _document.copyWith(layers: updatedLayers);
+    } else {
+      selected.sort(
+        (a, b) => a.computedBounds.top.compareTo(b.computedBounds.top),
+      );
+      final minY = selected.first.computedBounds.top;
+      final maxY = selected.last.computedBounds.top;
+      final step = (maxY - minY) / (selected.length - 1);
+
+      final deltaMap = <String, Offset>{};
+      for (int i = 0; i < selected.length; i++) {
+        final targetY = minY + i * step;
+        final curY = selected[i].computedBounds.top;
+        deltaMap[selected[i].id] = Offset(0, targetY - curY);
+      }
+
+      final updatedLayers = _document.layers.map((layer) {
+        final updatedStrokes = layer.strokes.map((stroke) {
+          if (deltaMap.containsKey(stroke.id)) {
+            return StrokeTessellator.transformStroke(
+              stroke,
+              delta: deltaMap[stroke.id]!,
+            );
+          }
+          return stroke;
+        }).toList();
+        return layer.copyWith(strokes: updatedStrokes);
+      }).toList();
+
+      _document = _document.copyWith(layers: updatedLayers);
+    }
+
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void flipSelectedStrokesHorizontal() {
+    if (_selectedStrokeIds.isEmpty || _selectionBounds == null) return;
+    _recordUndoSnapshot();
+
+    final center = _selectionBounds!.center;
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return StrokeTessellator.transformStroke(
+            stroke,
+            scaleX: -1.0,
+            origin: center,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void flipSelectedStrokesVertical() {
+    if (_selectedStrokeIds.isEmpty || _selectionBounds == null) return;
+    _recordUndoSnapshot();
+
+    final center = _selectionBounds!.center;
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return StrokeTessellator.transformStroke(
+            stroke,
+            scaleY: -1.0,
+            origin: center,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void toggleLockSelectedStrokes() {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(isLocked: !stroke.isLocked);
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void addStickyNote(Offset position, String text, {int? bgColor}) {
+    _recordUndoSnapshot();
+    final strokeId = 'note_${DateTime.now().microsecondsSinceEpoch}';
+    final snapped = snapPoint(position);
+    final bounds = Rect.fromLTWH(snapped.dx, snapped.dy, 180, 180);
+
+    final stroke = InkStroke(
+      id: strokeId,
+      tool: InkToolType.stickyNote,
+      color: 0xFF18181B,
+      baseWidth: 1.5,
+      opacity: 1.0,
+      points: [
+        InkPoint(x: bounds.left, y: bounds.top),
+        InkPoint(x: bounds.right, y: bounds.bottom),
+      ],
+      bounds: bounds,
+      shapeType: 'stickyNote',
+      fillColor: bgColor ?? 0xFFFFF9B1,
+      fillStyle: 'solid',
+      roughness: 1.0,
+      text: text,
+      fontSize: 16.0,
+      seed: DateTime.now().microsecondsSinceEpoch % 10000,
+    );
+
+    _addStrokeToDocument(stroke);
+    _selectedStrokeIds = {strokeId};
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void addFrame(Rect bounds, String title) {
+    _recordUndoSnapshot();
+    final strokeId = 'frame_${DateTime.now().microsecondsSinceEpoch}';
+
+    final stroke = InkStroke(
+      id: strokeId,
+      tool: InkToolType.frame,
+      color: 0xFF6366F1,
+      baseWidth: 2.0,
+      opacity: 1.0,
+      points: [
+        InkPoint(x: bounds.left, y: bounds.top),
+        InkPoint(x: bounds.right, y: bounds.bottom),
+      ],
+      bounds: bounds,
+      shapeType: 'frame',
+      strokeStyle: 'dashed',
+      roughness: 0.5,
+      text: title,
+      seed: 888,
+    );
+
+    _addStrokeToDocument(stroke);
+    _selectedStrokeIds = {strokeId};
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void updateSelectedStrokesStyle({
+    int? color,
+    double? baseWidth,
+    double? opacity,
+    String? fillStyle,
+    int? fillColor,
+    double? roughness,
+    String? strokeStyle,
+    String? roundness,
+    String? startArrowhead,
+    String? endArrowhead,
+    String? fontFamily,
+    String? textAlign,
+    double? fontSize,
+  }) {
+    if (_selectedStrokeIds.isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (_selectedStrokeIds.contains(stroke.id)) {
+          return stroke.copyWith(
+            color: color ?? stroke.color,
+            baseWidth: baseWidth ?? stroke.baseWidth,
+            opacity: opacity ?? stroke.opacity,
+            fillStyle: fillStyle ?? stroke.fillStyle,
+            fillColor: fillColor ?? stroke.fillColor,
+            roughness: roughness ?? stroke.roughness,
+            strokeStyle: strokeStyle ?? stroke.strokeStyle,
+            roundness: roundness ?? stroke.roundness,
+            startArrowhead: startArrowhead ?? stroke.startArrowhead,
+            endArrowhead: endArrowhead ?? stroke.endArrowhead,
+            fontFamily: fontFamily ?? stroke.fontFamily,
+            textAlign: textAlign ?? stroke.textAlign,
+            fontSize: fontSize ?? stroke.fontSize,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void updateSelectedShapesStyle({
+    String? fillStyle,
+    int? fillColor,
+    double? roughness,
+    String? strokeStyle,
+  }) {
+    updateSelectedStrokesStyle(
+      fillStyle: fillStyle,
+      fillColor: fillColor,
+      roughness: roughness,
+      strokeStyle: strokeStyle,
+    );
   }
 
   void deleteSelectedStrokes() {

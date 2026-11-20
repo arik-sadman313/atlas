@@ -65,18 +65,51 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   Uint8List? _currentRawPkBytes;
   bool _isPencilKitReady = false;
 
+  final TransformationController _transformController =
+      TransformationController();
+  double _zoomLevel = 1.0;
+
   Timer? _autosaveTimer;
   bool _hasUnsavedChanges = false;
 
   @override
   void initState() {
     super.initState();
+    _transformController.addListener(_onTransformChanged);
     _loadNotebookData();
+  }
+
+  void _onTransformChanged() {
+    final scale = _transformController.value.getMaxScaleOnAxis();
+    if ((_zoomLevel - scale).abs() > 0.02) {
+      if (mounted) setState(() => _zoomLevel = scale);
+    }
+  }
+
+  void _zoomIn() {
+    final newScale = (_zoomLevel * 1.25).clamp(0.3, 3.5);
+    _setZoom(newScale);
+  }
+
+  void _zoomOut() {
+    final newScale = (_zoomLevel / 1.25).clamp(0.3, 3.5);
+    _setZoom(newScale);
+  }
+
+  void _resetZoom() {
+    _setZoom(1.0);
+  }
+
+  void _setZoom(double scale) {
+    setState(() => _zoomLevel = scale);
+    _transformController.value = Matrix4.diagonal3Values(scale, scale, 1.0);
   }
 
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _transformController.removeListener(_onTransformChanged);
+    _transformController.dispose();
     _pencilKitBridge.dispose();
     _canvasController?.removeListener(_onCanvasChanged);
     _canvasController?.dispose();
@@ -896,7 +929,10 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
             onSelected: _changeTemplate,
             itemBuilder: (ctx) => [
               const PopupMenuItem(value: 'ruled', child: Text('Ruled / Lined')),
-              const PopupMenuItem(value: 'cornell', child: Text('Cornell Notes')),
+              const PopupMenuItem(
+                value: 'cornell',
+                child: Text('Cornell Notes'),
+              ),
               const PopupMenuItem(value: 'dotted', child: Text('Dotted Grid')),
               const PopupMenuItem(value: 'grid', child: Text('Square Grid')),
               const PopupMenuItem(value: 'blank', child: Text('Blank Canvas')),
@@ -1135,40 +1171,114 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
     final isPdf =
         currentPage?.pdfSourceHash != null && currentPage?.pdfPageIndex != null;
+    final isPan = _canvasController?.activeTool.type == InkToolType.pan;
 
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(top: 24, bottom: 96),
-        child: Container(
-          width: doc.width,
-          height: doc.height,
-          decoration: BoxDecoration(
-            color: Color(doc.backgroundColor),
-            borderRadius: BorderRadius.circular(2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(isDark ? 80 : 25),
-                blurRadius: 18,
-                offset: const Offset(0, 4),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: InteractiveViewer(
+            transformationController: _transformController,
+            minScale: 0.3,
+            maxScale: 3.5,
+            panEnabled: isPan,
+            scaleEnabled: true,
+            boundaryMargin: const EdgeInsets.all(400),
+            child: Center(
+              child: Container(
+                width: doc.width,
+                height: doc.height,
+                margin: const EdgeInsets.symmetric(vertical: 40),
+                decoration: BoxDecoration(
+                  color: Color(doc.backgroundColor),
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.5 : 0.15,
+                      ),
+                      blurRadius: 20,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: ClipRect(
+                  child: InkCanvas(
+                    controller: _canvasController!,
+                    width: doc.width,
+                    height: doc.height,
+                    drawBackground: !isPdf,
+                    backgroundWidget: isPdf
+                        ? PdfPageBackground(
+                            pdfSourceHash: currentPage!.pdfSourceHash,
+                            pdfPageIndex: currentPage.pdfPageIndex,
+                            width: doc.width,
+                            height: doc.height,
+                          )
+                        : null,
+                  ),
+                ),
               ),
-            ],
-          ),
-          child: ClipRect(
-            child: InkCanvas(
-              controller: _canvasController!,
-              width: doc.width,
-              height: doc.height,
-              drawBackground: !isPdf,
-              backgroundWidget: isPdf
-                  ? PdfPageBackground(
-                      pdfSourceHash: currentPage!.pdfSourceHash,
-                      pdfPageIndex: currentPage.pdfPageIndex,
-                      width: doc.width,
-                      height: doc.height,
-                    )
-                  : null,
             ),
           ),
+        ),
+
+        // Zoom Navigation Pill (Bottom-Left)
+        Positioned(left: 16, bottom: 20, child: _buildZoomPill(isDark)),
+      ],
+    );
+  }
+
+  Widget _buildZoomPill(bool isDark) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF14171F) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.remove, size: 16),
+              tooltip: 'Zoom Out',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: _zoomOut,
+            ),
+            InkWell(
+              onTap: _resetZoom,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Text(
+                  '${(_zoomLevel * 100).round()}%',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add, size: 16),
+              tooltip: 'Zoom In',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: _zoomIn,
+            ),
+          ],
         ),
       ),
     );

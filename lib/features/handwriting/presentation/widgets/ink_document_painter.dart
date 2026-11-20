@@ -100,13 +100,22 @@ class InkDocumentPainter extends CustomPainter {
           opacity: activeTool!.opacity,
           points: activePoints,
           bounds: previewBounds,
+          shapeType: activeTool!.type.name,
           fillStyle: activeTool!.fillStyle,
           fillColor: activeTool!.fillColor,
           roughness: activeTool!.roughness,
+          strokeStyle: activeTool!.strokeStyle,
+          roundness: activeTool!.roundness,
+          startArrowhead: activeTool!.startArrowhead,
+          endArrowhead: activeTool!.endArrowhead,
+          isCurved: activeTool!.isCurved,
           seed: 777,
         );
         _drawExcalidrawShape(canvas, previewStroke);
-      } else if (!activeTool!.isEraser && !activeTool!.isLasso) {
+      } else if (!activeTool!.isEraser &&
+          !activeTool!.isLasso &&
+          !activeTool!.isSelection &&
+          !activeTool!.isPan) {
         // Freehand ink stroke
         final path = StrokeTessellator.tessellatePoints(
           activePoints,
@@ -115,7 +124,8 @@ class InkDocumentPainter extends CustomPainter {
         );
 
         final inFlightPaint = Paint()
-          ..color = Color(activeTool!.color).withValues(alpha: activeTool!.opacity)
+          ..color = Color(activeTool!.color)
+              .withValues(alpha: activeTool!.opacity)
           ..style = PaintingStyle.fill
           ..isAntiAlias = true;
 
@@ -202,6 +212,15 @@ class InkDocumentPainter extends CustomPainter {
       }
     }
 
+    final hasRotation = stroke.angle != 0.0;
+    if (hasRotation) {
+      canvas.save();
+      final center = stroke.computedBounds.center;
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(stroke.angle);
+      canvas.translate(-center.dx, -center.dy);
+    }
+
     if (stroke.isShape) {
       _drawExcalidrawShape(canvas, stroke);
     } else {
@@ -211,6 +230,10 @@ class InkDocumentPainter extends CustomPainter {
         ..style = PaintingStyle.fill
         ..isAntiAlias = true;
       canvas.drawPath(path, paint);
+    }
+
+    if (hasRotation) {
+      canvas.restore();
     }
   }
 
@@ -228,20 +251,23 @@ class InkDocumentPainter extends CustomPainter {
     final roughness = stroke.roughness;
     final seed = stroke.seed;
 
-    // 1. Draw Rough Interior Fill (Solid, Hachure, or Cross-Hatch)
+    // 1. Draw Interior Fill (Solid, Hachure, Cross-Hatch, or Dots)
     if (stroke.fillStyle != null &&
         stroke.fillStyle != 'none' &&
         stroke.fillColor != null) {
-      final fillColor = Color(stroke.fillColor!).withValues(alpha: stroke.opacity * 0.75);
+      final fillColor = Color(stroke.fillColor!)
+          .withValues(alpha: stroke.opacity * 0.75);
       final fillPaint = Paint()
         ..color = fillColor
         ..isAntiAlias = true;
 
       if (stroke.fillStyle == 'solid') {
         fillPaint.style = PaintingStyle.fill;
-        if (stroke.tool == InkToolType.ellipse || stroke.shapeType == 'ellipse') {
+        if (stroke.tool == InkToolType.ellipse ||
+            stroke.shapeType == 'ellipse') {
           canvas.drawOval(bounds, fillPaint);
-        } else if (stroke.tool == InkToolType.diamond || stroke.shapeType == 'diamond') {
+        } else if (stroke.tool == InkToolType.diamond ||
+            stroke.shapeType == 'diamond') {
           final diamondPath = Path()
             ..moveTo(bounds.center.dx, bounds.top)
             ..lineTo(bounds.right, bounds.center.dy)
@@ -250,25 +276,43 @@ class InkDocumentPainter extends CustomPainter {
             ..close();
           canvas.drawPath(diamondPath, fillPaint);
         } else {
-          canvas.drawRect(bounds, fillPaint);
+          if (stroke.roundness == 'round') {
+            final radius = math.min(
+              12.0,
+              math.min(bounds.width, bounds.height) * 0.2,
+            );
+            canvas.drawRRect(
+              RRect.fromRectAndRadius(bounds, Radius.circular(radius)),
+              fillPaint,
+            );
+          } else {
+            canvas.drawRect(bounds, fillPaint);
+          }
         }
-      } else if (stroke.fillStyle == 'hachure' || stroke.fillStyle == 'cross-hatch') {
+      } else if (stroke.fillStyle == 'hachure' ||
+          stroke.fillStyle == 'cross-hatch' ||
+          stroke.fillStyle == 'dots') {
         fillPaint
-          ..style = PaintingStyle.stroke
+          ..style = stroke.fillStyle == 'dots'
+              ? PaintingStyle.fill
+              : PaintingStyle.stroke
           ..strokeWidth = math.max(1.0, stroke.baseWidth * 0.65);
 
         final hachurePath = RoughGenerator.buildHachureLines(
           bounds,
           spacing: math.max(8.0, stroke.baseWidth * 3.5),
           crossHatch: stroke.fillStyle == 'cross-hatch',
+          dots: stroke.fillStyle == 'dots',
           roughness: roughness,
           seed: seed + 50,
         );
 
         canvas.save();
-        if (stroke.tool == InkToolType.ellipse || stroke.shapeType == 'ellipse') {
+        if (stroke.tool == InkToolType.ellipse ||
+            stroke.shapeType == 'ellipse') {
           canvas.clipPath(Path()..addOval(bounds));
-        } else if (stroke.tool == InkToolType.diamond || stroke.shapeType == 'diamond') {
+        } else if (stroke.tool == InkToolType.diamond ||
+            stroke.shapeType == 'diamond') {
           final diamondClip = Path()
             ..moveTo(bounds.center.dx, bounds.top)
             ..lineTo(bounds.right, bounds.center.dy)
@@ -277,14 +321,24 @@ class InkDocumentPainter extends CustomPainter {
             ..close();
           canvas.clipPath(diamondClip);
         } else {
-          canvas.clipRect(bounds);
+          if (stroke.roundness == 'round') {
+            final radius = math.min(
+              12.0,
+              math.min(bounds.width, bounds.height) * 0.2,
+            );
+            canvas.clipRRect(
+              RRect.fromRectAndRadius(bounds, Radius.circular(radius)),
+            );
+          } else {
+            canvas.clipRect(bounds);
+          }
         }
         canvas.drawPath(hachurePath, fillPaint);
         canvas.restore();
       }
     }
 
-    // 2. Draw Rough Shape Outlines
+    // 2. Draw Shape Outlines
     final shape = stroke.shapeType ?? stroke.tool.name;
     switch (shape) {
       case 'rectangle':
@@ -292,6 +346,8 @@ class InkDocumentPainter extends CustomPainter {
           bounds,
           roughness: roughness,
           seed: seed,
+          roundness: stroke.roundness,
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
         break;
@@ -300,6 +356,7 @@ class InkDocumentPainter extends CustomPainter {
           bounds,
           roughness: roughness,
           seed: seed,
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
         break;
@@ -308,10 +365,12 @@ class InkDocumentPainter extends CustomPainter {
           bounds,
           roughness: roughness,
           seed: seed,
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
         break;
       case 'arrow':
+      case 'curvedArrow':
         final p1 = stroke.points.isNotEmpty
             ? Offset(stroke.points.first.x, stroke.points.first.y)
             : bounds.topLeft;
@@ -323,6 +382,10 @@ class InkDocumentPainter extends CustomPainter {
           p2,
           roughness: roughness,
           seed: seed,
+          isCurved: stroke.isCurved || shape == 'curvedArrow',
+          startArrowhead: stroke.startArrowhead ?? 'none',
+          endArrowhead: stroke.endArrowhead ?? 'arrow',
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
         break;
@@ -338,22 +401,107 @@ class InkDocumentPainter extends CustomPainter {
           p2,
           roughness: roughness,
           seed: seed,
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
         break;
+      case 'stickyNote':
+        // Drop shadow
+        final shadowPaint = Paint()
+          ..color = Colors.black.withValues(alpha: 0.14)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+        canvas.drawRect(bounds.shift(const Offset(2, 3)), shadowPaint);
+
+        // Sticky note background
+        final noteBgColor = stroke.fillColor != null
+            ? Color(stroke.fillColor!).withValues(alpha: stroke.opacity)
+            : const Color(0xFFFFF9B1).withValues(alpha: stroke.opacity);
+        final bgPaint = Paint()
+          ..color = noteBgColor
+          ..style = PaintingStyle.fill;
+        canvas.drawRect(bounds, bgPaint);
+
+        // Outline with folded corner
+        final noteOutline = RoughGenerator.buildRoughStickyNote(
+          bounds,
+          roughness: roughness,
+          seed: seed,
+        );
+        canvas.drawPath(noteOutline, strokePaint);
+
+        // Note content text
+        if (stroke.text != null && stroke.text!.isNotEmpty) {
+          final tp = TextPainter(
+            text: TextSpan(
+              text: stroke.text,
+              style: TextStyle(
+                color: strokeColor,
+                fontSize: stroke.fontSize ?? 16.0,
+                fontWeight: FontWeight.w500,
+                fontFamily: stroke.fontFamily == 'Helvetica'
+                    ? null
+                    : (stroke.fontFamily == 'Cascadia' ? 'monospace' : null),
+              ),
+            ),
+            textAlign: stroke.textAlign == 'center'
+                ? TextAlign.center
+                : (stroke.textAlign == 'right'
+                      ? TextAlign.right
+                      : TextAlign.left),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: math.max(20.0, bounds.width - 24.0));
+          final textOffset = Offset(
+            bounds.left + 12.0,
+            bounds.top + math.max(8.0, (bounds.height - tp.height) / 2),
+          );
+          tp.paint(canvas, textOffset);
+        }
+        break;
+      case 'frame':
+        // Frame dashed outline + banner
+        final framePath = RoughGenerator.buildRoughFrame(
+          bounds,
+          roughness: roughness,
+          seed: seed,
+        );
+        canvas.drawPath(framePath, strokePaint);
+
+        final frameTitle = stroke.text ?? 'Frame';
+        final tp = TextPainter(
+          text: TextSpan(
+            text: frameTitle,
+            style: TextStyle(
+              color: strokeColor,
+              fontSize: 12.0,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: 160.0);
+        tp.paint(canvas, Offset(bounds.left + 8.0, bounds.top - 20.0));
+        break;
       case 'text':
         if (stroke.text != null && stroke.text!.isNotEmpty) {
+          final textAlign = stroke.textAlign == 'center'
+              ? TextAlign.center
+              : (stroke.textAlign == 'right'
+                    ? TextAlign.right
+                    : TextAlign.left);
           final textSpan = TextSpan(
             text: stroke.text,
             style: TextStyle(
               color: strokeColor,
               fontSize: stroke.fontSize ?? 18.0,
               fontWeight: FontWeight.w600,
+              fontFamily: stroke.fontFamily == 'Helvetica'
+                  ? null
+                  : (stroke.fontFamily == 'Cascadia' ? 'monospace' : null),
               letterSpacing: 0.5,
             ),
           );
           final textPainter = TextPainter(
             text: textSpan,
+            textAlign: textAlign,
             textDirection: TextDirection.ltr,
           )..layout(maxWidth: bounds.width > 20 ? bounds.width : 400);
           textPainter.paint(canvas, bounds.topLeft);
@@ -364,8 +512,19 @@ class InkDocumentPainter extends CustomPainter {
           bounds,
           roughness: roughness,
           seed: seed,
+          roundness: stroke.roundness,
+          strokeStyle: stroke.strokeStyle,
         );
         canvas.drawPath(path, strokePaint);
+    }
+
+    // 3. Draw Lock indicator if element is locked
+    if (stroke.isLocked) {
+      final lockPos = Offset(bounds.right - 12, bounds.top + 12);
+      final lockPaint = Paint()
+        ..color = const Color(0xFFF59E0B)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(lockPos, 5, lockPaint);
     }
   }
 
@@ -448,11 +607,23 @@ class PaperPatternPainter extends CustomPainter {
         ..style = PaintingStyle.stroke;
 
       // Header rule
-      canvas.drawLine(Offset(0, headerY), Offset(size.width, headerY), majorLinePaint);
+      canvas.drawLine(
+        Offset(0, headerY),
+        Offset(size.width, headerY),
+        majorLinePaint,
+      );
       // Cue column vertical divider
-      canvas.drawLine(Offset(cueX, headerY), Offset(cueX, summaryY), majorLinePaint);
+      canvas.drawLine(
+        Offset(cueX, headerY),
+        Offset(cueX, summaryY),
+        majorLinePaint,
+      );
       // Bottom summary rule
-      canvas.drawLine(Offset(0, summaryY), Offset(size.width, summaryY), majorLinePaint);
+      canvas.drawLine(
+        Offset(0, summaryY),
+        Offset(size.width, summaryY),
+        majorLinePaint,
+      );
 
       // Ruled lines in main notes section
       for (double y = headerY + s; y < summaryY; y += s) {

@@ -56,12 +56,17 @@ class StrokeTessellator {
       case InkToolType.vectorEraser:
       case InkToolType.pixelEraser:
       case InkToolType.lasso:
+      case InkToolType.selection:
+      case InkToolType.pan:
       case InkToolType.rectangle:
       case InkToolType.ellipse:
       case InkToolType.diamond:
       case InkToolType.arrow:
+      case InkToolType.curvedArrow:
       case InkToolType.line:
       case InkToolType.text:
+      case InkToolType.stickyNote:
+      case InkToolType.frame:
         return StrokeOptions(
           size: baseWidth,
           thinning: 0.0,
@@ -121,12 +126,13 @@ class StrokeTessellator {
     return bounds ?? Rect.zero;
   }
 
-  /// Transforms an [InkStroke] with translation, scale around origin, and optional recolor.
+  /// Transforms an [InkStroke] with translation, scale around origin, rotation, and optional recolor.
   static InkStroke transformStroke(
     InkStroke stroke, {
     Offset delta = Offset.zero,
     double scaleX = 1.0,
     double scaleY = 1.0,
+    double deltaAngle = 0.0,
     Offset? origin,
     int? newColor,
   }) {
@@ -156,6 +162,7 @@ class StrokeTessellator {
       baseWidth: newBaseWidth,
       color: newColor ?? stroke.color,
       bounds: newBounds,
+      angle: stroke.angle + deltaAngle,
     );
   }
 

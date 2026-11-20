@@ -3,18 +3,18 @@ import 'package:flutter/material.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
 
-/// Floating tool dock widget elevated with Excalidraw sketchy diagramming
+/// Floating tool dock widget elevated with the complete Excalidraw toolset
 /// and iPad note-taking ergonomics.
 ///
 /// Features:
 /// - Dockable to top or bottom edge of the screen
-/// - 1-tap inking tools: Pen, Highlighter, Eraser, Lasso Select
-/// - Excalidraw hand-drawn shapes: Rectangle, Ellipse/Circle, Diamond, Arrow, Line, Text
-/// - Excalidraw style flyout: Fill styles (None, Hachure, Cross-Hatch, Solid) & Roughness (Architect, Artist, Cartoonist)
-/// - Stroke width presets: Fine (1.5px), Medium (3.0px), Bold (6.0px), Marker (12.0px)
-/// - Quiet Craft + Excalidraw color swatches
-/// - Paper stationery template picker (Ruled, Dotted, Grid, Cornell Notes, Blank)
-/// - Contextual lasso selection transformations (Duplicate, Recolor, Delete, Deselect)
+/// - Canvas navigation: Selection tool, Hand/Pan tool
+/// - Inking tools: Pen, Highlighter, Eraser, Lasso
+/// - Sketch Shapes: Rectangle, Diamond, Ellipse, Arrow, Curved Arrow, Line, Text, Sticky Note, Frame
+/// - Excalidraw style flyout: Fill styles, Stroke styles, Roughness, Round corners, Arrowheads
+/// - Grid Snapping toggle (20px alignment)
+/// - Stroke width presets & Quick color swatches
+/// - Paper stationery template picker (Ruled, Cornell, Dotted, Grid, Blank)
 /// - Undo / Redo & Clear page actions
 class FloatingToolDock extends StatefulWidget {
   final InkCanvasController controller;
@@ -35,7 +35,7 @@ class FloatingToolDock extends StatefulWidget {
 class _FloatingToolDockState extends State<FloatingToolDock> {
   late bool _dockedTop;
 
-  static const List<double> _quickWidths = [1.5, 3.0, 6.0, 12.0];
+  static const List<double> _quickWidths = [1.5, 3.0, 5.0, 8.0];
   static const List<int> _quickColors = [
     0xFF18181B, // Obsidian Charcoal
     0xFF2563EB, // Cobalt Blue
@@ -117,11 +117,34 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
 
                       _buildDivider(isDark),
 
+                      // --- Section 0: Canvas Navigation & Selection ---
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.near_me_rounded,
+                        tooltip: 'Selection Tool (V)',
+                        isSelected: activeTool.type == InkToolType.selection,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(type: InkToolType.selection),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.pan_tool_rounded,
+                        tooltip: 'Hand / Pan Canvas (H)',
+                        isSelected: activeTool.type == InkToolType.pan,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(type: InkToolType.pan),
+                        ),
+                      ),
+
+                      _buildDivider(isDark),
+
                       // --- Section 1: Inking & Note-Taking Tools ---
                       _buildToolButton(
                         context: context,
                         icon: Icons.edit_rounded,
-                        tooltip: 'Pen',
+                        tooltip: 'Pen (P)',
                         isSelected: activeTool.type == InkToolType.ballpointPen,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -149,7 +172,7 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       _buildToolButton(
                         context: context,
                         icon: Icons.auto_fix_normal_rounded,
-                        tooltip: 'Eraser',
+                        tooltip: 'Eraser (E)',
                         isSelected: activeTool.type.isEraser,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -174,11 +197,11 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
 
                       _buildDivider(isDark),
 
-                      // --- Section 2: Excalidraw Sketch Shapes ---
+                      // --- Section 2: Excalidraw Sketch Shapes & Elements ---
                       _buildToolButton(
                         context: context,
                         icon: Icons.crop_square_rounded,
-                        tooltip: 'Excalidraw Box',
+                        tooltip: 'Excalidraw Box (R)',
                         isSelected: activeTool.type == InkToolType.rectangle,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -191,22 +214,8 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       const SizedBox(width: 2),
                       _buildToolButton(
                         context: context,
-                        icon: Icons.circle_outlined,
-                        tooltip: 'Excalidraw Ellipse',
-                        isSelected: activeTool.type == InkToolType.ellipse,
-                        onTap: () => widget.controller.setTool(
-                          activeTool.copyWith(
-                            type: InkToolType.ellipse,
-                            baseWidth: 2.5,
-                            opacity: 1.0,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      _buildToolButton(
-                        context: context,
                         icon: Icons.diamond_outlined,
-                        tooltip: 'Excalidraw Diamond',
+                        tooltip: 'Excalidraw Diamond (D)',
                         isSelected: activeTool.type == InkToolType.diamond,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -219,12 +228,12 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       const SizedBox(width: 2),
                       _buildToolButton(
                         context: context,
-                        icon: Icons.arrow_right_alt_rounded,
-                        tooltip: 'Excalidraw Arrow',
-                        isSelected: activeTool.type == InkToolType.arrow,
+                        icon: Icons.circle_outlined,
+                        tooltip: 'Excalidraw Ellipse (O)',
+                        isSelected: activeTool.type == InkToolType.ellipse,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
-                            type: InkToolType.arrow,
+                            type: InkToolType.ellipse,
                             baseWidth: 2.5,
                             opacity: 1.0,
                           ),
@@ -233,8 +242,38 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       const SizedBox(width: 2),
                       _buildToolButton(
                         context: context,
+                        icon: Icons.arrow_right_alt_rounded,
+                        tooltip: 'Excalidraw Arrow (A)',
+                        isSelected: activeTool.type == InkToolType.arrow,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.arrow,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                            isCurved: false,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.turn_right_rounded,
+                        tooltip: 'Curved / Elbow Arrow',
+                        isSelected: activeTool.type == InkToolType.curvedArrow,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.curvedArrow,
+                            baseWidth: 2.5,
+                            opacity: 1.0,
+                            isCurved: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
                         icon: Icons.horizontal_rule_rounded,
-                        tooltip: 'Excalidraw Line',
+                        tooltip: 'Excalidraw Line (L)',
                         isSelected: activeTool.type == InkToolType.line,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -248,7 +287,7 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                       _buildToolButton(
                         context: context,
                         icon: Icons.text_fields_rounded,
-                        tooltip: 'Note Text',
+                        tooltip: 'Text (T)',
                         isSelected: activeTool.type == InkToolType.text,
                         onTap: () => widget.controller.setTool(
                           activeTool.copyWith(
@@ -258,19 +297,51 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                           ),
                         ),
                       ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.sticky_note_2_outlined,
+                        tooltip: 'Sticky Note (N)',
+                        isSelected: activeTool.type == InkToolType.stickyNote,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.stickyNote,
+                            baseWidth: 1.5,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      _buildToolButton(
+                        context: context,
+                        icon: Icons.crop_free_rounded,
+                        tooltip: 'Frame Container (F)',
+                        isSelected: activeTool.type == InkToolType.frame,
+                        onTap: () => widget.controller.setTool(
+                          activeTool.copyWith(
+                            type: InkToolType.frame,
+                            baseWidth: 2.0,
+                            opacity: 1.0,
+                          ),
+                        ),
+                      ),
 
                       // --- Section 3: Excalidraw Style & Fill Controls ---
                       _buildDivider(isDark),
 
+                      // Style Flyout
                       PopupMenuButton<String>(
                         icon: Icon(
                           activeTool.fillStyle == 'hachure'
                               ? Icons.texture_rounded
                               : (activeTool.fillStyle == 'cross-hatch'
-                                  ? Icons.grid_3x3_rounded
-                                  : (activeTool.fillStyle == 'solid'
-                                      ? Icons.format_color_fill_rounded
-                                      : Icons.format_color_reset_rounded)),
+                                    ? Icons.grid_3x3_rounded
+                                    : (activeTool.fillStyle == 'solid'
+                                          ? Icons.format_color_fill_rounded
+                                          : (activeTool.fillStyle == 'dots'
+                                                ? Icons.grain_rounded
+                                                : Icons
+                                                      .format_color_reset_rounded))),
                           size: 18,
                         ),
                         tooltip: 'Excalidraw Fill & Roughness',
@@ -282,15 +353,17 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                                 fillStyle: style,
                                 fillColor: style == 'none'
                                     ? null
-                                    : (activeTool.fillColor ?? activeTool.color),
+                                    : (activeTool.fillColor ??
+                                          activeTool.color),
                               ),
                             );
                             if (widget.controller.hasSelection) {
-                              widget.controller.updateSelectedShapesStyle(
+                              widget.controller.updateSelectedStrokesStyle(
                                 fillStyle: style,
                                 fillColor: style == 'none'
                                     ? null
-                                    : (activeTool.fillColor ?? activeTool.color),
+                                    : (activeTool.fillColor ??
+                                          activeTool.color),
                               );
                             }
                           } else if (val.startsWith('rough:')) {
@@ -299,8 +372,28 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                               activeTool.copyWith(roughness: r),
                             );
                             if (widget.controller.hasSelection) {
-                              widget.controller.updateSelectedShapesStyle(
+                              widget.controller.updateSelectedStrokesStyle(
                                 roughness: r,
+                              );
+                            }
+                          } else if (val.startsWith('stroke:')) {
+                            final s = val.substring(7);
+                            widget.controller.setTool(
+                              activeTool.copyWith(strokeStyle: s),
+                            );
+                            if (widget.controller.hasSelection) {
+                              widget.controller.updateSelectedStrokesStyle(
+                                strokeStyle: s,
+                              );
+                            }
+                          } else if (val.startsWith('round:')) {
+                            final r = val.substring(6);
+                            widget.controller.setTool(
+                              activeTool.copyWith(roundness: r),
+                            );
+                            if (widget.controller.hasSelection) {
+                              widget.controller.updateSelectedStrokesStyle(
+                                roundness: r,
                               );
                             }
                           }
@@ -321,7 +414,10 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                             value: 'fill:none',
                             child: Row(
                               children: [
-                                Icon(Icons.format_color_reset_rounded, size: 16),
+                                Icon(
+                                  Icons.format_color_reset_rounded,
+                                  size: 16,
+                                ),
                                 SizedBox(width: 8),
                                 Text('None (Transparent)'),
                               ],
@@ -357,11 +453,21 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                               ],
                             ),
                           ),
+                          const PopupMenuItem(
+                            value: 'fill:dots',
+                            child: Row(
+                              children: [
+                                Icon(Icons.grain_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Sketchy Dots'),
+                              ],
+                            ),
+                          ),
                           const PopupMenuDivider(),
                           const PopupMenuItem(
                             enabled: false,
                             child: Text(
-                              'ROUGHNESS',
+                              'SLOPPINESS / ROUGHNESS',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
@@ -375,18 +481,75 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                           ),
                           const PopupMenuItem(
                             value: 'rough:1.0',
-                            child: Text('Artist (Classic Excalidraw Sketch)'),
+                            child: Text('Artist (Classic Excalidraw)'),
                           ),
                           const PopupMenuItem(
                             value: 'rough:2.0',
                             child: Text('Cartoonist (Playful Wobble)'),
                           ),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            enabled: false,
+                            child: Text(
+                              'STROKE & CORNERS',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'stroke:solid',
+                            child: Text('Solid Outline'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'stroke:dashed',
+                            child: Text('Dashed Outline'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'stroke:dotted',
+                            child: Text('Dotted Outline'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'round:sharp',
+                            child: Text('Sharp Corners'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'round:round',
+                            child: Text('Round Corners'),
+                          ),
                         ],
+                      ),
+
+                      // Grid Snapping Toggle
+                      IconButton(
+                        icon: Icon(
+                          widget.controller.snapToGrid
+                              ? Icons.grid_on_rounded
+                              : Icons.grid_off_rounded,
+                          size: 18,
+                        ),
+                        tooltip: widget.controller.snapToGrid
+                            ? 'Snap to Grid: ON'
+                            : 'Snap to Grid: OFF',
+                        color: widget.controller.snapToGrid
+                            ? (isDark
+                                  ? const Color(0xFF60A5FA)
+                                  : const Color(0xFF2563EB))
+                            : (isDark
+                                  ? const Color(0xFF64748B)
+                                  : const Color(0xFF94A3B8)),
+                        splashRadius: 16,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.controller.toggleSnapToGrid(),
                       ),
 
                       // Quick Stroke Widths
                       if (!activeTool.type.isEraser &&
-                          !activeTool.type.isLasso) ...[
+                          !activeTool.type.isLasso &&
+                          !activeTool.type.isSelection &&
+                          !activeTool.type.isPan) ...[
                         ..._quickWidths.map((w) {
                           final isSelected =
                               (activeTool.baseWidth - w).abs() < 0.5;
@@ -420,50 +583,6 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                         }),
                       ],
 
-                      // Contextual Lasso Actions
-                      if (activeTool.type.isLasso &&
-                          widget.controller.hasSelection) ...[
-                        _buildDivider(isDark),
-
-                        IconButton(
-                          icon: const Icon(Icons.copy_rounded, size: 16),
-                          tooltip: 'Duplicate Selection',
-                          color: isDark
-                              ? const Color(0xFF60A5FA)
-                              : const Color(0xFF2563EB),
-                          onPressed: () =>
-                              widget.controller.duplicateSelectedStrokes(),
-                        ),
-                        ..._quickColors.take(4).map((colorVal) {
-                          return _buildColorSwatch(
-                            colorValue: colorVal,
-                            isSelected: false,
-                            onTap: () =>
-                                widget.controller.recolorSelectedStrokes(
-                              colorVal,
-                            ),
-                          );
-                        }),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline_rounded,
-                            size: 16,
-                          ),
-                          tooltip: 'Delete Selected',
-                          color: const Color(0xFFEF4444),
-                          onPressed: () =>
-                              widget.controller.deleteSelectedStrokes(),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 16),
-                          tooltip: 'Deselect',
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : const Color(0xFF64748B),
-                          onPressed: () => widget.controller.clearSelection(),
-                        ),
-                      ],
-
                       _buildDivider(isDark),
 
                       // Paper Stationery Template Quick Switcher
@@ -478,7 +597,10 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                             value: 'ruled',
                             child: Row(
                               children: [
-                                Icon(Icons.format_align_justify_rounded, size: 16),
+                                Icon(
+                                  Icons.format_align_justify_rounded,
+                                  size: 16,
+                                ),
                                 SizedBox(width: 8),
                                 Text('Ruled / Lined'),
                               ],

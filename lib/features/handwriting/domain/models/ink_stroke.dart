@@ -15,13 +15,22 @@ class InkStroke {
   final Rect? bounds;
 
   // Excalidraw Sketch & Shape Attributes
-  final String? shapeType; // 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'text'
-  final String? fillStyle; // 'none', 'hachure', 'cross-hatch', 'solid'
+  final String? shapeType; // 'rectangle', 'ellipse', 'diamond', 'arrow', 'curvedArrow', 'line', 'text', 'stickyNote', 'frame'
+  final String? fillStyle; // 'none', 'hachure', 'cross-hatch', 'solid', 'dots'
   final int? fillColor; // ARGB integer for sketchy hatching or fill
   final double roughness; // 0.0 (clean), 1.0 (artist), 2.0 (cartoonist)
-  final String? text; // Content for text elements
+  final String? text; // Content for text & sticky note elements
   final double? fontSize; // Font size for text elements
   final String? strokeStyle; // 'solid', 'dashed', 'dotted'
+  final String? roundness; // 'sharp', 'round'
+  final String? startArrowhead; // 'none', 'arrow', 'dot', 'bar'
+  final String? endArrowhead; // 'arrow', 'none', 'dot', 'bar'
+  final double angle; // Rotation angle in radians
+  final String? fontFamily; // 'Virgil', 'Helvetica', 'Cascadia'
+  final String? textAlign; // 'left', 'center', 'right'
+  final bool isLocked; // Prevent accidental editing
+  final String? groupId; // Group identifier
+  final bool isCurved; // Curved arrow or spline line
   final int seed; // Deterministic seed for stable Rough.js sketchy rendering
 
   const InkStroke({
@@ -41,6 +50,15 @@ class InkStroke {
     this.text,
     this.fontSize,
     this.strokeStyle,
+    this.roundness,
+    this.startArrowhead,
+    this.endArrowhead,
+    this.angle = 0.0,
+    this.fontFamily,
+    this.textAlign,
+    this.isLocked = false,
+    this.groupId,
+    this.isCurved = false,
     this.seed = 42,
   });
 
@@ -90,6 +108,15 @@ class InkStroke {
     if (text != null) 'text': text,
     if (fontSize != null) 'fontSize': fontSize,
     if (strokeStyle != null) 'strokeStyle': strokeStyle,
+    if (roundness != null) 'roundness': roundness,
+    if (startArrowhead != null) 'startArrowhead': startArrowhead,
+    if (endArrowhead != null) 'endArrowhead': endArrowhead,
+    'angle': angle,
+    if (fontFamily != null) 'fontFamily': fontFamily,
+    if (textAlign != null) 'textAlign': textAlign,
+    'isLocked': isLocked,
+    if (groupId != null) 'groupId': groupId,
+    'isCurved': isCurved,
     'seed': seed,
   };
 
@@ -125,11 +152,22 @@ class InkStroke {
       fillStyle: json['fillStyle'] as String?,
       fillColor: json['fillColor'] is int
           ? json['fillColor'] as int
-          : (json['fillColor'] != null ? int.tryParse(json['fillColor'].toString()) : null),
+          : (json['fillColor'] != null
+                ? int.tryParse(json['fillColor'].toString())
+                : null),
       roughness: (json['roughness'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       fontSize: (json['fontSize'] as num?)?.toDouble(),
       strokeStyle: json['strokeStyle'] as String?,
+      roundness: json['roundness'] as String?,
+      startArrowhead: json['startArrowhead'] as String?,
+      endArrowhead: json['endArrowhead'] as String?,
+      angle: (json['angle'] as num?)?.toDouble() ?? 0.0,
+      fontFamily: json['fontFamily'] as String?,
+      textAlign: json['textAlign'] as String?,
+      isLocked: json['isLocked'] as bool? ?? false,
+      groupId: json['groupId'] as String?,
+      isCurved: json['isCurved'] as bool? ?? false,
       seed: json['seed'] as int? ?? 42,
     );
   }
@@ -151,6 +189,16 @@ class InkStroke {
     String? text,
     double? fontSize,
     String? strokeStyle,
+    String? roundness,
+    String? startArrowhead,
+    String? endArrowhead,
+    double? angle,
+    String? fontFamily,
+    String? textAlign,
+    bool? isLocked,
+    String? groupId,
+    bool clearGroupId = false,
+    bool? isCurved,
     int? seed,
   }) {
     return InkStroke(
@@ -170,6 +218,15 @@ class InkStroke {
       text: text ?? this.text,
       fontSize: fontSize ?? this.fontSize,
       strokeStyle: strokeStyle ?? this.strokeStyle,
+      roundness: roundness ?? this.roundness,
+      startArrowhead: startArrowhead ?? this.startArrowhead,
+      endArrowhead: endArrowhead ?? this.endArrowhead,
+      angle: angle ?? this.angle,
+      fontFamily: fontFamily ?? this.fontFamily,
+      textAlign: textAlign ?? this.textAlign,
+      isLocked: isLocked ?? this.isLocked,
+      groupId: clearGroupId ? null : (groupId ?? this.groupId),
+      isCurved: isCurved ?? this.isCurved,
       seed: seed ?? this.seed,
     );
   }

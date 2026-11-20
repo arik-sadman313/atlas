@@ -115,9 +115,7 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     _node = node;
     _titleController.text = node.title;
 
-    final doc = await _contentService.loadDocument(
-      node.contentHash,
-    );
+    final doc = await _contentService.loadDocument(node.contentHash);
 
     final controller = QuillController(
       document: doc,
@@ -698,8 +696,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        backgroundColor:
-            isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+        backgroundColor: isDark
+            ? AtlasColors.darkSurface
+            : AtlasColors.lightSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AtlasSpacing.radiusMd),
           side: BorderSide(
@@ -853,8 +852,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor:
-          isDark ? AtlasColors.darkSurface : AtlasColors.lightSurface,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(AtlasSpacing.radiusLg),
@@ -1000,7 +1000,10 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               children: [
                 // Save Status Badge
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: isDark
                         ? AtlasColors.darkElevated
@@ -1056,7 +1059,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                       color: isDark
                           ? AtlasColors.darkElevated
                           : AtlasColors.lightElevated,
-                      borderRadius: BorderRadius.circular(AtlasSpacing.radiusSm),
+                      borderRadius: BorderRadius.circular(
+                        AtlasSpacing.radiusSm,
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,

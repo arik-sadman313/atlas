@@ -27,12 +27,17 @@ class PencilKitConverter {
       case InkToolType.vectorEraser:
       case InkToolType.pixelEraser:
       case InkToolType.lasso:
+      case InkToolType.selection:
+      case InkToolType.pan:
       case InkToolType.rectangle:
       case InkToolType.ellipse:
       case InkToolType.diamond:
       case InkToolType.arrow:
+      case InkToolType.curvedArrow:
       case InkToolType.line:
       case InkToolType.text:
+      case InkToolType.stickyNote:
+      case InkToolType.frame:
         return 'ballpointPen'; // Erasers, lasso and shapes fallback safely to pen stroke
     }
   }

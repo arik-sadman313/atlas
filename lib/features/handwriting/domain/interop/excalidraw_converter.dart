@@ -6,11 +6,14 @@ import '../models/ink_point.dart';
 import '../models/ink_stroke.dart';
 import '../models/ink_tool.dart';
 
-/// Bi-directional converter between ATLAS Notebooks and the official
+/// Comprehensive bi-directional converter between ATLAS Notebooks and the official
 /// Excalidraw JSON schema (v2).
 ///
-/// Enables importing diagrams from excalidraw.com and exporting handwritten
-/// notes & sketchy diagrams for web collaboration.
+/// Supports all Excalidraw element types:
+/// - Shapes: Rectangle, Ellipse, Diamond, Line, Arrow (Straight & Curved)
+/// - Typography: Text (Virgil, Helvetica, Cascadia), Sticky Notes, Frames
+/// - Styling: Roundness, Hachure/Cross-hatch/Dots/Solid fills, Arrowhead markers,
+///   Dashed/Dotted strokes, Opacity, Rotation, Locking, Grouping.
 class ExcalidrawConverter {
   /// Converts an [AtlasInkDocument] page into an official Excalidraw v2 document.
   static Map<String, dynamic> exportToExcalidraw(AtlasInkDocument doc) {
@@ -48,9 +51,12 @@ class ExcalidrawConverter {
 
     for (final raw in elements) {
       if (raw is Map<String, dynamic>) {
-        final stroke = _convertExcalidrawElementToStroke(raw);
-        if (stroke != null) {
-          strokes.add(stroke);
+        final isDeleted = raw['isDeleted'] as bool? ?? false;
+        if (!isDeleted) {
+          final stroke = _convertExcalidrawElementToStroke(raw);
+          if (stroke != null) {
+            strokes.add(stroke);
+          }
         }
       }
     }
@@ -101,19 +107,35 @@ class ExcalidrawConverter {
         stroke.shapeType == 'diamond') {
       type = 'diamond';
     } else if (stroke.tool == InkToolType.arrow ||
+        stroke.tool == InkToolType.curvedArrow ||
         stroke.shapeType == 'arrow') {
       type = 'arrow';
     } else if (stroke.tool == InkToolType.line || stroke.shapeType == 'line') {
       type = 'line';
     } else if (stroke.tool == InkToolType.text || stroke.shapeType == 'text') {
       type = 'text';
+    } else if (stroke.tool == InkToolType.stickyNote ||
+        stroke.shapeType == 'stickyNote') {
+      type = 'note';
+    } else if (stroke.tool == InkToolType.frame ||
+        stroke.shapeType == 'frame') {
+      type = 'frame';
     }
 
     final points = <List<double>>[];
     for (final pt in stroke.points) {
-      // Relative offset to element origin (x, y)
       points.add([pt.x - bounds.left, pt.y - bounds.top]);
     }
+
+    int fontFamilyCode = 1; // Virgil
+    if (stroke.fontFamily == 'Helvetica') fontFamilyCode = 2;
+    if (stroke.fontFamily == 'Cascadia') fontFamilyCode = 3;
+
+    final isArrowCurved =
+        stroke.isCurved || stroke.tool == InkToolType.curvedArrow;
+    final roundnessObj = (stroke.roundness == 'round' || isArrowCurved)
+        ? {'type': 3}
+        : null;
 
     return {
       'id': stroke.id,
@@ -122,7 +144,7 @@ class ExcalidrawConverter {
       'y': bounds.top,
       'width': bounds.width,
       'height': bounds.height,
-      'angle': 0,
+      'angle': stroke.angle,
       'strokeColor': strokeColorHex,
       'backgroundColor': fillColorHex,
       'fillStyle': fillStyle,
@@ -131,9 +153,19 @@ class ExcalidrawConverter {
       'roughness': stroke.roughness.toInt(),
       'opacity': (stroke.opacity * 100).toInt(),
       'seed': stroke.seed,
+      'locked': stroke.isLocked,
+      if (stroke.groupId != null) 'groupIds': [stroke.groupId],
+      'roundness': ?roundnessObj,
       'points': points,
+      if (stroke.startArrowhead != null && stroke.startArrowhead != 'none')
+        'startArrowhead': stroke.startArrowhead,
+      if (stroke.endArrowhead != null && stroke.endArrowhead != 'none')
+        'endArrowhead': stroke.endArrowhead,
       if (stroke.text != null) 'text': stroke.text,
       if (stroke.fontSize != null) 'fontSize': stroke.fontSize,
+      if (stroke.text != null) 'fontFamily': fontFamilyCode,
+      if (stroke.textAlign != null) 'textAlign': stroke.textAlign,
+      if (type == 'frame') 'name': stroke.text ?? 'Frame',
     };
   }
 
@@ -141,11 +173,14 @@ class ExcalidrawConverter {
     Map<String, dynamic> raw,
   ) {
     final type = raw['type'] as String? ?? 'freedraw';
-    final id = raw['id'] as String? ?? 'excal_${DateTime.now().microsecondsSinceEpoch}';
+    final id =
+        raw['id'] as String? ??
+        'excal_${DateTime.now().microsecondsSinceEpoch}';
     final x = (raw['x'] as num?)?.toDouble() ?? 0.0;
     final y = (raw['y'] as num?)?.toDouble() ?? 0.0;
     final w = (raw['width'] as num?)?.toDouble() ?? 100.0;
     final h = (raw['height'] as num?)?.toDouble() ?? 100.0;
+    final angle = (raw['angle'] as num?)?.toDouble() ?? 0.0;
 
     final strokeColorStr = raw['strokeColor'] as String? ?? '#18181b';
     final strokeColor = _hexColorToInt(strokeColorStr);
@@ -157,10 +192,26 @@ class ExcalidrawConverter {
 
     final fillStyle = raw['fillStyle'] as String? ?? 'none';
     final strokeWidth = (raw['strokeWidth'] as num?)?.toDouble() ?? 2.0;
+    final strokeStyle = raw['strokeStyle'] as String? ?? 'solid';
     final roughness = (raw['roughness'] as num?)?.toDouble() ?? 1.0;
     final opacity = ((raw['opacity'] as num?)?.toDouble() ?? 100.0) / 100.0;
     final seed = raw['seed'] as int? ?? 42;
     final rawPoints = raw['points'] as List<dynamic>? ?? [];
+    final locked = raw['locked'] as bool? ?? false;
+    final roundness = raw['roundness'] != null ? 'round' : 'sharp';
+    final startArrow = raw['startArrowhead'] as String?;
+    final endArrow =
+        raw['endArrowhead'] as String? ?? (type == 'arrow' ? 'arrow' : null);
+    final groupIds = raw['groupIds'] as List<dynamic>?;
+    final groupId = groupIds != null && groupIds.isNotEmpty
+        ? groupIds.first.toString()
+        : null;
+
+    final fontCode = raw['fontFamily'] as int? ?? 1;
+    String fontFamily = 'Virgil';
+    if (fontCode == 2) fontFamily = 'Helvetica';
+    if (fontCode == 3) fontFamily = 'Cascadia';
+    final textAlign = raw['textAlign'] as String? ?? 'left';
 
     final points = <InkPoint>[];
     if (rawPoints.isNotEmpty) {
@@ -193,8 +244,9 @@ class ExcalidrawConverter {
         shapeType = 'diamond';
         break;
       case 'arrow':
-        toolType = InkToolType.arrow;
-        shapeType = 'arrow';
+        final isCurved = raw['roundness'] != null || (raw['elbowed'] == true);
+        toolType = isCurved ? InkToolType.curvedArrow : InkToolType.arrow;
+        shapeType = isCurved ? 'curvedArrow' : 'arrow';
         break;
       case 'line':
         toolType = InkToolType.line;
@@ -203,6 +255,14 @@ class ExcalidrawConverter {
       case 'text':
         toolType = InkToolType.text;
         shapeType = 'text';
+        break;
+      case 'note':
+        toolType = InkToolType.stickyNote;
+        shapeType = 'stickyNote';
+        break;
+      case 'frame':
+        toolType = InkToolType.frame;
+        shapeType = 'frame';
         break;
       default:
         toolType = InkToolType.ballpointPen;
@@ -221,8 +281,20 @@ class ExcalidrawConverter {
       fillStyle: fillStyle,
       fillColor: fillColor,
       roughness: roughness,
-      text: raw['text'] as String?,
-      fontSize: (raw['fontSize'] as num?)?.toDouble(),
+      strokeStyle: strokeStyle,
+      roundness: roundness,
+      startArrowhead: startArrow,
+      endArrowhead: endArrow,
+      angle: angle,
+      fontFamily: fontFamily,
+      textAlign: textAlign,
+      isLocked: locked,
+      groupId: groupId,
+      isCurved: toolType == InkToolType.curvedArrow || raw['roundness'] != null,
+      text: (type == 'frame' ? raw['name'] : raw['text']) as String?,
+      fontSize:
+          (raw['fontSize'] as num?)?.toDouble() ??
+          (type == 'note' ? 16.0 : 20.0),
       seed: seed,
     );
   }

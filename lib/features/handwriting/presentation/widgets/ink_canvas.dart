@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -63,8 +64,24 @@ class _InkCanvasState extends State<InkCanvas> {
     if (widget.readOnly) return;
     _drawAndHoldTimer?.cancel();
 
+    // iPad Palm Rejection: discard accidental palm contact (large touch radius)
+    if (event.kind == ui.PointerDeviceKind.touch &&
+        (event.radiusMajor > 32.0 || event.radiusMinor > 32.0)) {
+      return;
+    }
+
     if (widget.controller.activeTool.type == InkToolType.text) {
       _showTextInputDialog(event.localPosition);
+      return;
+    }
+
+    if (widget.controller.activeTool.type == InkToolType.stickyNote) {
+      _showStickyNoteDialog(event.localPosition);
+      return;
+    }
+
+    if (widget.controller.activeTool.type == InkToolType.frame) {
+      _showFrameDialog(event.localPosition);
       return;
     }
 
@@ -74,6 +91,147 @@ class _InkCanvasState extends State<InkCanvas> {
       pressure: pressure,
       tiltAzimuth: event.orientation,
       tiltAltitude: event.tilt,
+    );
+  }
+
+  void _showStickyNoteDialog(Offset position) {
+    final textCtrl = TextEditingController();
+    int selectedColor = 0xFFFFF9B1; // Classic canary yellow
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(
+                Icons.sticky_note_2_rounded,
+                size: 20,
+                color: Color(0xFFF59E0B),
+              ),
+              SizedBox(width: 8),
+              Text('New Sticky Note'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: textCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Type note thoughts...',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 4,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Note Color',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children:
+                    [
+                      0xFFFFF9B1, // Canary Yellow
+                      0xFFE0F2FE, // Sky Blue
+                      0xFFDCFCE7, // Mint Green
+                      0xFFFCE7F3, // Soft Pink
+                      0xFFEDE9FE, // Lavender
+                    ].map((color) {
+                      final isSelected = selectedColor == color;
+                      return GestureDetector(
+                        onTap: () => setDlgState(() => selectedColor = color),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: Color(color),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected
+                                  ? const Color(0xFF2563EB)
+                                  : Colors.black26,
+                              width: isSelected ? 2.5 : 1.0,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (textCtrl.text.trim().isNotEmpty) {
+                  widget.controller.addStickyNote(
+                    position,
+                    textCtrl.text.trim(),
+                    bgColor: selectedColor,
+                  );
+                }
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Create Note'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFrameDialog(Offset position) {
+    final titleCtrl = TextEditingController(text: 'Section');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.crop_free_rounded, size: 20, color: Color(0xFF6366F1)),
+            SizedBox(width: 8),
+            Text('Create Frame Container'),
+          ],
+        ),
+        content: TextField(
+          controller: titleCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Frame Title',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final title = titleCtrl.text.trim().isEmpty
+                  ? 'Frame'
+                  : titleCtrl.text.trim();
+              final snapped = widget.controller.snapPoint(position);
+              final frameBounds = Rect.fromLTWH(
+                snapped.dx,
+                snapped.dy,
+                320,
+                240,
+              );
+              widget.controller.addFrame(frameBounds, title);
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Create Frame'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -90,7 +248,8 @@ class _InkCanvasState extends State<InkCanvas> {
     // iPad Draw-and-Hold Shape Recognition:
     // If drawing freehand and user pauses at the end of the stroke for 450ms without lifting
     final tool = widget.controller.activeTool.type;
-    final isFreehand = tool == InkToolType.ballpointPen ||
+    final isFreehand =
+        tool == InkToolType.ballpointPen ||
         tool == InkToolType.fountainPen ||
         tool == InkToolType.pencil;
 
@@ -157,7 +316,10 @@ class _InkCanvasState extends State<InkCanvas> {
           FilledButton(
             onPressed: () {
               if (textCtrl.text.trim().isNotEmpty) {
-                widget.controller.addTextElement(position, textCtrl.text.trim());
+                widget.controller.addTextElement(
+                  position,
+                  textCtrl.text.trim(),
+                );
               }
               Navigator.of(ctx).pop();
             },

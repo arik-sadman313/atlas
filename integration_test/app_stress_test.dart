@@ -111,7 +111,9 @@ void main() {
             id: 'task-stress-$i',
             workspaceId: defaultWs.id,
             title: 'Chaos Stress Task #$i',
-            status: drift.Value(i <= 2 ? 'todo' : (i <= 4 ? 'in_progress' : 'done')),
+            status: drift.Value(
+              i <= 2 ? 'todo' : (i <= 4 ? 'in_progress' : 'done'),
+            ),
             isCompleted: drift.Value(i == 5),
             priority: drift.Value(i % 4 + 1),
             sortOrder: drift.Value(i),
@@ -139,7 +141,9 @@ void main() {
           blobStorageServiceProvider.overrideWithValue(blobStorage),
           notificationServiceProvider.overrideWithValue(notificationService),
           appRouterProvider.overrideWithValue(testRouter),
-          currentWorkspaceProvider.overrideWith((ref) => Future.value(defaultWs)),
+          currentWorkspaceProvider.overrideWith(
+            (ref) => Future.value(defaultWs),
+          ),
         ],
         child: AtlasApp(routerOverride: testRouter),
       );
@@ -207,300 +211,325 @@ void main() {
 
       // Zero lingering modal dialogs
       expect(find.byType(CommandPaletteModal), findsNothing);
-      expect(platformErrors, isEmpty, reason: 'PlatformDispatcher errors logged');
+      expect(
+        platformErrors,
+        isEmpty,
+        reason: 'PlatformDispatcher errors logged',
+      );
     });
 
     // =========================================================================
     // SCENARIO 2: Autosave Interruption & Rapid Pop Test
     // =========================================================================
-    testWidgets('Scenario 2: Autosave interruption & rapid pop on Document and Notebook editors', (
-      tester,
-    ) async {
-      await tester.pumpWidget(createTestApp());
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+    testWidgets(
+      'Scenario 2: Autosave interruption & rapid pop on Document and Notebook editors',
+      (tester) async {
+        await tester.pumpWidget(createTestApp());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      // --- Part A: Document Editor Rapid Pop Mid-Debounce ---
-      testRouter.go('/documents/$testDocId');
-      await tester.pump();
-      for (int i = 0; i < 20; i++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        if (find.byType(DocumentEditorScreen).evaluate().isNotEmpty) {
-          final s = tester.state<DocumentEditorScreenState>(
-            find.byType(DocumentEditorScreen),
-          );
-          if (s.quillController != null) break;
+        // --- Part A: Document Editor Rapid Pop Mid-Debounce ---
+        testRouter.go('/documents/$testDocId');
+        await tester.pump();
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          if (find.byType(DocumentEditorScreen).evaluate().isNotEmpty) {
+            final s = tester.state<DocumentEditorScreenState>(
+              find.byType(DocumentEditorScreen),
+            );
+            if (s.quillController != null) break;
+          }
         }
-      }
 
-      expect(find.byType(DocumentEditorScreen), findsOneWidget);
-      final docState = tester.state<DocumentEditorScreenState>(
-        find.byType(DocumentEditorScreen),
-      );
+        expect(find.byType(DocumentEditorScreen), findsOneWidget);
+        final docState = tester.state<DocumentEditorScreenState>(
+          find.byType(DocumentEditorScreen),
+        );
 
-      // Type 500 characters
-      final text500 = 'Atlas resilient architecture stress testing ' * 12;
-      docState.quillController?.document.insert(0, text500);
-      await tester.pump(const Duration(milliseconds: 30));
+        // Type 500 characters
+        final text500 = 'Atlas resilient architecture stress testing ' * 12;
+        docState.quillController?.document.insert(0, text500);
+        await tester.pump(const Duration(milliseconds: 30));
 
-      // Mid-debounce rapid pop (within 30ms, well below the 1000ms debounce)
-      testRouter.go(AtlasRoutes.documents);
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.pump(const Duration(milliseconds: 100));
-
-      expect(find.byType(DocumentEditorScreen), findsNothing);
-
-      // --- Part B: Notebook Editor Rapid Pop During In-Flight Ink ---
-      testRouter.go('/notebooks/$testNotebookId');
-      await tester.pump();
-      for (int i = 0; i < 20; i++) {
+        // Mid-debounce rapid pop (within 30ms, well below the 1000ms debounce)
+        testRouter.go(AtlasRoutes.documents);
         await tester.pump(const Duration(milliseconds: 50));
-        if (find.byType(InkCanvas).evaluate().isNotEmpty) break;
-      }
+        await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.byType(InkCanvas), findsOneWidget);
-      final inkCanvas = tester.widget<InkCanvas>(find.byType(InkCanvas));
-      final controller = inkCanvas.controller;
+        expect(find.byType(DocumentEditorScreen), findsNothing);
 
-      // Tessellate 20 rapid ink strokes
-      for (int s = 0; s < 20; s++) {
-        final origin = Offset(20.0 + s * 4, 30.0 + s * 4);
-        controller.startStroke(origin);
-        for (int p = 1; p <= 5; p++) {
-          controller.updateStroke(Offset(origin.dx + p * 3, origin.dy + p * 3));
+        // --- Part B: Notebook Editor Rapid Pop During In-Flight Ink ---
+        testRouter.go('/notebooks/$testNotebookId');
+        await tester.pump();
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          if (find.byType(InkCanvas).evaluate().isNotEmpty) break;
         }
-        controller.endStroke();
-      }
-      await tester.pump(const Duration(milliseconds: 20));
 
-      // Pop immediately while serialization or autosave may be in flight
-      testRouter.go(AtlasRoutes.notebooks);
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.pump(const Duration(milliseconds: 100));
+        expect(find.byType(InkCanvas), findsOneWidget);
+        final inkCanvas = tester.widget<InkCanvas>(find.byType(InkCanvas));
+        final controller = inkCanvas.controller;
 
-      expect(find.byType(InkCanvas), findsNothing);
-      expect(platformErrors, isEmpty);
-    });
+        // Tessellate 20 rapid ink strokes
+        for (int s = 0; s < 20; s++) {
+          final origin = Offset(20.0 + s * 4, 30.0 + s * 4);
+          controller.startStroke(origin);
+          for (int p = 1; p <= 5; p++) {
+            controller.updateStroke(
+              Offset(origin.dx + p * 3, origin.dy + p * 3),
+            );
+          }
+          controller.endStroke();
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+
+        // Pop immediately while serialization or autosave may be in flight
+        testRouter.go(AtlasRoutes.notebooks);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(find.byType(InkCanvas), findsNothing);
+        expect(platformErrors, isEmpty);
+      },
+    );
 
     // =========================================================================
     // SCENARIO 3: Window Resize & Overflow Stress Test
     // =========================================================================
-    testWidgets('Scenario 3: Surface resizing across 400x800, 800x1000, 1920x1080 without RenderFlex overflows', (
-      tester,
-    ) async {
-      await tester.pumpWidget(createTestApp());
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+    testWidgets(
+      'Scenario 3: Surface resizing across 400x800, 800x1000, 1920x1080 without RenderFlex overflows',
+      (tester) async {
+        await tester.pumpWidget(createTestApp());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      final sizes = [
-        const Size(400, 800),   // Compact Mobile / Minimum Desktop
-        const Size(800, 1000),  // Standard Tablet / Narrow Desktop
-        const Size(1920, 1080), // Ultrawide Desktop
-      ];
+        final sizes = [
+          const Size(400, 800), // Compact Mobile / Minimum Desktop
+          const Size(800, 1000), // Standard Tablet / Narrow Desktop
+          const Size(1920, 1080), // Ultrawide Desktop
+        ];
 
-      final screensToTest = [
-        AtlasRoutes.tasks,
-        AtlasRoutes.calendar,
-        AtlasRoutes.graph,
-        '/notebooks/$testNotebookId',
-        '/documents/$testDocId',
-      ];
+        final screensToTest = [
+          AtlasRoutes.tasks,
+          AtlasRoutes.calendar,
+          AtlasRoutes.graph,
+          '/notebooks/$testNotebookId',
+          '/documents/$testDocId',
+        ];
 
-      for (final size in sizes) {
-        tester.view.physicalSize = size;
-        tester.view.devicePixelRatio = 1.0;
+        for (final size in sizes) {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1.0;
 
-        for (final route in screensToTest) {
-          testRouter.go(route);
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 80));
+          for (final route in screensToTest) {
+            testRouter.go(route);
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 80));
+          }
         }
-      }
 
-      // Reset test surface size and return to dashboard
-      testRouter.go(AtlasRoutes.dashboard);
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-      await tester.pump(const Duration(milliseconds: 100));
+        // Reset test surface size and return to dashboard
+        testRouter.go(AtlasRoutes.dashboard);
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      // Assert ZERO RenderFlex overflow errors occurred
-      expect(
-        overflowMessages,
-        isEmpty,
-        reason: 'RenderFlex overflows detected:\n${overflowMessages.join("\n---\n")}',
-      );
-    });
+        // Assert ZERO RenderFlex overflow errors occurred
+        expect(
+          overflowMessages,
+          isEmpty,
+          reason:
+              'RenderFlex overflows detected:\n${overflowMessages.join("\n---\n")}',
+        );
+      },
+    );
 
     // =========================================================================
     // SCENARIO 4: Rapid Kanban Drag-and-Drop Stress
     // =========================================================================
-    testWidgets('Scenario 4: Rapid Kanban drag-and-drop & reordering with SQLite concurrency mutex', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1.0;
+    testWidgets(
+      'Scenario 4: Rapid Kanban drag-and-drop & reordering with SQLite concurrency mutex',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
 
-      await tester.pumpWidget(createTestApp());
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+        await tester.pumpWidget(createTestApp());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      // Navigate to Tasks Screen
-      testRouter.go(AtlasRoutes.tasks);
-      await tester.pump();
-      for (int i = 0; i < 20; i++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        if (find.byType(KanbanBoardView).evaluate().isNotEmpty) break;
-        final boardBtn = find.byTooltip('Kanban Board View');
-        if (boardBtn.evaluate().isNotEmpty) {
-          await tester.tap(boardBtn);
+        // Navigate to Tasks Screen
+        testRouter.go(AtlasRoutes.tasks);
+        await tester.pump();
+        for (int i = 0; i < 20; i++) {
           await tester.pump(const Duration(milliseconds: 50));
-          break;
+          if (find.byType(KanbanBoardView).evaluate().isNotEmpty) break;
+          final boardBtn = find.byTooltip('Kanban Board View');
+          if (boardBtn.evaluate().isNotEmpty) {
+            await tester.tap(boardBtn);
+            await tester.pump(const Duration(milliseconds: 50));
+            break;
+          }
         }
-      }
 
-      for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          if (find.byType(KanbanBoardView).evaluate().isNotEmpty) break;
+        }
+
+        expect(find.byType(KanbanBoardView), findsOneWidget);
+
+        for (int i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          if (find.byType(KanbanCardWidget).evaluate().isNotEmpty) break;
+        }
+        final cardFinder = find.byType(KanbanCardWidget);
+        expect(cardFinder, findsWidgets);
+
+        // Simulate dragging card to adjacent column
+        final gesture = await tester.startGesture(
+          tester.getCenter(cardFinder.first),
+        );
         await tester.pump(const Duration(milliseconds: 50));
-        if (find.byType(KanbanBoardView).evaluate().isNotEmpty) break;
-      }
-
-      expect(find.byType(KanbanBoardView), findsOneWidget);
-
-      for (int i = 0; i < 20; i++) {
+        await gesture.moveBy(const Offset(280, 0));
         await tester.pump(const Duration(milliseconds: 50));
-        if (find.byType(KanbanCardWidget).evaluate().isNotEmpty) break;
-      }
-      final cardFinder = find.byType(KanbanCardWidget);
-      expect(cardFinder, findsWidgets);
+        await gesture.up();
+        await tester.pump(const Duration(milliseconds: 50));
 
-      // Simulate dragging card to adjacent column
-      final gesture = await tester.startGesture(tester.getCenter(cardFinder.first));
-      await tester.pump(const Duration(milliseconds: 50));
-      await gesture.moveBy(const Offset(280, 0));
-      await tester.pump(const Duration(milliseconds: 50));
-      await gesture.up();
-      await tester.pump(const Duration(milliseconds: 50));
+        // Rapidly simulate concurrent status and reordering transactions
+        final taskRepo = ProviderScope.containerOf(
+          tester.element(find.byType(AtlasApp)),
+        ).read(taskRepositoryProvider);
 
-      // Rapidly simulate concurrent status and reordering transactions
-      final taskRepo = ProviderScope.containerOf(
-        tester.element(find.byType(AtlasApp)),
-      ).read(taskRepositoryProvider);
+        final futures = <Future>[];
+        for (int i = 1; i <= 5; i++) {
+          final targetStatus = i % 2 == 0 ? 'in_progress' : 'done';
+          futures.add(
+            taskRepo.updateTaskStatus('task-stress-$i', targetStatus),
+          );
+          futures.add(
+            taskRepo.updateTaskPriority('task-stress-$i', (i % 4) + 1),
+          );
+        }
+        await Future.wait(futures);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
 
-      final futures = <Future>[];
-      for (int i = 1; i <= 5; i++) {
-        final targetStatus = i % 2 == 0 ? 'in_progress' : 'done';
-        futures.add(taskRepo.updateTaskStatus('task-stress-$i', targetStatus));
-        futures.add(taskRepo.updateTaskPriority('task-stress-$i', (i % 4) + 1));
-      }
-      await Future.wait(futures);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+        // Verify database integrity: exactly 5 tasks exist, no duplicate records
+        final allTasks = await database.tasksDao.getTasksForWorkspace(
+          defaultWs.id,
+        );
+        expect(allTasks.length, equals(5));
+        expect(platformErrors, isEmpty);
 
-      // Verify database integrity: exactly 5 tasks exist, no duplicate records
-      final allTasks = await database.tasksDao.getTasksForWorkspace(defaultWs.id);
-      expect(allTasks.length, equals(5));
-      expect(platformErrors, isEmpty);
-
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-      await tester.pump(const Duration(milliseconds: 50));
-    });
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        await tester.pump(const Duration(milliseconds: 50));
+      },
+    );
 
     // =========================================================================
     // SCENARIO 5: Lasso Selection Edge Cases & Transformation Undo/Redo Loop
     // =========================================================================
-    testWidgets('Scenario 5: Lasso selection edge cases, blank selection, 100+ strokes, 10x undo/redo spam', (
-      tester,
-    ) async {
-      // Create empty document
-      final emptyDoc = AtlasInkDocument.empty(
-        documentId: 'doc_lasso_chaos',
-        pageNumber: 1,
-        width: 1000,
-        height: 1000,
-      );
+    testWidgets(
+      'Scenario 5: Lasso selection edge cases, blank selection, 100+ strokes, 10x undo/redo spam',
+      (tester) async {
+        // Create empty document
+        final emptyDoc = AtlasInkDocument.empty(
+          documentId: 'doc_lasso_chaos',
+          pageNumber: 1,
+          width: 1000,
+          height: 1000,
+        );
 
-      final controller = InkCanvasController(document: emptyDoc);
+        final controller = InkCanvasController(document: emptyDoc);
 
-      // 1. Empty lasso selection on blank space
-      controller.setTool(
-        const InkToolConfig(
-          type: InkToolType.lasso,
-          color: 0xFF2563EB,
-          baseWidth: 2.0,
-        ),
-      );
-      controller.startStroke(const Offset(400, 400));
-      controller.updateStroke(const Offset(500, 400));
-      controller.updateStroke(const Offset(500, 500));
-      controller.updateStroke(const Offset(400, 500));
-      controller.endStroke();
-
-      expect(controller.hasSelection, isFalse);
-      expect(controller.selectedStrokeIds, isEmpty);
-      expect(controller.selectionBounds, isNull);
-
-      // 2. Populate 120 dense strokes inside region (50, 50) to (250, 250)
-      controller.setTool(
-        const InkToolConfig(
-          type: InkToolType.ballpointPen,
-          color: 0xFF18181B,
-          baseWidth: 3.0,
-        ),
-      );
-      for (int i = 0; i < 120; i++) {
-        final x = 60.0 + (i % 15) * 10;
-        final y = 60.0 + (i ~/ 15) * 20;
-        controller.startStroke(Offset(x, y));
-        controller.updateStroke(Offset(x + 5, y + 5));
-        controller.updateStroke(Offset(x + 10, y + 10));
+        // 1. Empty lasso selection on blank space
+        controller.setTool(
+          const InkToolConfig(
+            type: InkToolType.lasso,
+            color: 0xFF2563EB,
+            baseWidth: 2.0,
+          ),
+        );
+        controller.startStroke(const Offset(400, 400));
+        controller.updateStroke(const Offset(500, 400));
+        controller.updateStroke(const Offset(500, 500));
+        controller.updateStroke(const Offset(400, 500));
         controller.endStroke();
-      }
 
-      expect(controller.document.totalStrokeCount, equals(120));
+        expect(controller.hasSelection, isFalse);
+        expect(controller.selectedStrokeIds, isEmpty);
+        expect(controller.selectionBounds, isNull);
 
-      // 3. Lasso select enclosing all 120 strokes
-      controller.setTool(
-        const InkToolConfig(
-          type: InkToolType.lasso,
-          color: 0xFF2563EB,
-          baseWidth: 2.0,
-        ),
-      );
-      controller.startStroke(const Offset(40, 40));
-      controller.updateStroke(const Offset(280, 40));
-      controller.updateStroke(const Offset(280, 280));
-      controller.updateStroke(const Offset(40, 280));
-      controller.endStroke();
+        // 2. Populate 120 dense strokes inside region (50, 50) to (250, 250)
+        controller.setTool(
+          const InkToolConfig(
+            type: InkToolType.ballpointPen,
+            color: 0xFF18181B,
+            baseWidth: 3.0,
+          ),
+        );
+        for (int i = 0; i < 120; i++) {
+          final x = 60.0 + (i % 15) * 10;
+          final y = 60.0 + (i ~/ 15) * 20;
+          controller.startStroke(Offset(x, y));
+          controller.updateStroke(Offset(x + 5, y + 5));
+          controller.updateStroke(Offset(x + 10, y + 10));
+          controller.endStroke();
+        }
 
-      expect(controller.hasSelection, isTrue);
-      expect(controller.selectedStrokeIds.length, equals(120));
-      final initialBounds = controller.selectionBounds;
-      expect(initialBounds, isNotNull);
+        expect(controller.document.totalStrokeCount, equals(120));
 
-      // 4. Translate selected strokes by delta (40, 60)
-      const delta = Offset(40, 60);
-      controller.translateSelectedStrokes(delta, recordUndo: true);
+        // 3. Lasso select enclosing all 120 strokes
+        controller.setTool(
+          const InkToolConfig(
+            type: InkToolType.lasso,
+            color: 0xFF2563EB,
+            baseWidth: 2.0,
+          ),
+        );
+        controller.startStroke(const Offset(40, 40));
+        controller.updateStroke(const Offset(280, 40));
+        controller.updateStroke(const Offset(280, 280));
+        controller.updateStroke(const Offset(40, 280));
+        controller.endStroke();
 
-      final translatedBounds = controller.selectionBounds;
-      expect(translatedBounds, isNotNull);
-      expect(translatedBounds!.left, closeTo(initialBounds!.left + delta.dx, 1.0));
-      expect(translatedBounds.top, closeTo(initialBounds.top + delta.dy, 1.0));
+        expect(controller.hasSelection, isTrue);
+        expect(controller.selectedStrokeIds.length, equals(120));
+        final initialBounds = controller.selectionBounds;
+        expect(initialBounds, isNotNull);
 
-      // 5. Rapidly spam 10x undo then 10x redo
-      for (int i = 0; i < 10; i++) {
-        controller.undo();
-      }
-      expect(controller.document.totalStrokeCount, isNonZero);
+        // 4. Translate selected strokes by delta (40, 60)
+        const delta = Offset(40, 60);
+        controller.translateSelectedStrokes(delta, recordUndo: true);
 
-      for (int i = 0; i < 10; i++) {
-        controller.redo();
-      }
+        final translatedBounds = controller.selectionBounds;
+        expect(translatedBounds, isNotNull);
+        expect(
+          translatedBounds!.left,
+          closeTo(initialBounds!.left + delta.dx, 1.0),
+        );
+        expect(
+          translatedBounds.top,
+          closeTo(initialBounds.top + delta.dy, 1.0),
+        );
 
-      // Verify stroke count remained consistent without index or state corruption
-      expect(controller.document.totalStrokeCount, equals(120));
-      expect(platformErrors, isEmpty);
+        // 5. Rapidly spam 10x undo then 10x redo
+        for (int i = 0; i < 10; i++) {
+          controller.undo();
+        }
+        expect(controller.document.totalStrokeCount, isNonZero);
 
-      controller.dispose();
-    });
+        for (int i = 0; i < 10; i++) {
+          controller.redo();
+        }
+
+        // Verify stroke count remained consistent without index or state corruption
+        expect(controller.document.totalStrokeCount, equals(120));
+        expect(platformErrors, isEmpty);
+
+        controller.dispose();
+      },
+    );
   });
 }

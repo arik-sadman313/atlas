@@ -147,7 +147,9 @@ class SmartShapeDetector {
     for (int i = 1; i < pts.length - 1; i++) {
       final p = pts[i];
       // Perpendicular distance from p to line(first, last)
-      final num = ((dy * p.dx - dx * p.dy + last.dx * first.dy - last.dy * first.dx)).abs();
+      final num =
+          ((dy * p.dx - dx * p.dy + last.dx * first.dy - last.dy * first.dx))
+              .abs();
       final dist = num / chordLen;
       if (dist > maxDeviation) {
         maxDeviation = dist;
@@ -181,7 +183,12 @@ class SmartShapeDetector {
         double shaftMaxDev = 0.0;
         for (int i = 1; i < shaftEndIndex; i++) {
           final p = pts[i];
-          final num = ((sdy * p.dx - sdx * p.dy + shaftLast.dx * shaftFirst.dy - shaftLast.dy * shaftFirst.dx)).abs();
+          final num =
+              ((sdy * p.dx -
+                      sdx * p.dy +
+                      shaftLast.dx * shaftFirst.dy -
+                      shaftLast.dy * shaftFirst.dx))
+                  .abs();
           final dist = num / shaftChord;
           if (dist > shaftMaxDev) shaftMaxDev = dist;
         }

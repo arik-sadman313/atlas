@@ -264,102 +264,102 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
           constraints: const BoxConstraints(maxWidth: 520),
           margin: const EdgeInsets.symmetric(vertical: AtlasSpacing.md),
           padding: const EdgeInsets.all(AtlasSpacing.lg),
-        decoration: BoxDecoration(
-          color: isDark ? AtlasColors.darkCard : AtlasColors.lightSurface,
-          borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
-          border: Border.all(
-            color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
-            width: 1.0,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
+          decoration: BoxDecoration(
+            color: isDark ? AtlasColors.darkCard : AtlasColors.lightSurface,
+            borderRadius: BorderRadius.circular(AtlasSpacing.radiusXl),
+            border: Border.all(
+              color: isDark ? AtlasColors.darkBorder : AtlasColors.lightBorder,
+              width: 1.0,
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: AtlasColors.accentSage.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle_outline,
-                size: 28,
-                color: AtlasColors.accentSage,
-              ),
-            ),
-            const SizedBox(height: AtlasSpacing.md),
-            Text(
-              title,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AtlasSpacing.xs),
-            Text(
-              subtitle,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: isDark
-                    ? AtlasColors.darkTextSecondary
-                    : AtlasColors.lightTextSecondary,
-                height: 1.4,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            if (!isCompleted) ...[
-              const SizedBox(height: AtlasSpacing.lg),
-              Divider(
-                height: 1,
-                color: isDark
-                    ? AtlasColors.darkBorder
-                    : AtlasColors.lightBorder,
-              ),
-              const SizedBox(height: AtlasSpacing.md),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Quick Start Suggestions',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? AtlasColors.darkTextMuted
-                        : AtlasColors.lightTextMuted,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AtlasSpacing.sm),
-              _SuggestionRow(
-                icon: Icons.school_outlined,
-                label: 'Create a study task',
-                onTap: () => _createSuggestedTask('Create a study task'),
-              ),
-              const SizedBox(height: 6),
-              _SuggestionRow(
-                icon: Icons.calendar_view_week_outlined,
-                label: 'Plan your week',
-                onTap: () => _createSuggestedTask('Plan your week'),
-              ),
-              const SizedBox(height: 6),
-              _SuggestionRow(
-                icon: Icons.flag_outlined,
-                label: 'Review project goals',
-                onTap: () => _createSuggestedTask('Review project goals'),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                blurRadius: 20,
+                offset: const Offset(0, 4),
               ),
             ],
-          ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AtlasColors.accentSage.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_outline,
+                  size: 28,
+                  color: AtlasColors.accentSage,
+                ),
+              ),
+              const SizedBox(height: AtlasSpacing.md),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AtlasSpacing.xs),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: isDark
+                      ? AtlasColors.darkTextSecondary
+                      : AtlasColors.lightTextSecondary,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (!isCompleted) ...[
+                const SizedBox(height: AtlasSpacing.lg),
+                Divider(
+                  height: 1,
+                  color: isDark
+                      ? AtlasColors.darkBorder
+                      : AtlasColors.lightBorder,
+                ),
+                const SizedBox(height: AtlasSpacing.md),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Quick Start Suggestions',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? AtlasColors.darkTextMuted
+                          : AtlasColors.lightTextMuted,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AtlasSpacing.sm),
+                _SuggestionRow(
+                  icon: Icons.school_outlined,
+                  label: 'Create a study task',
+                  onTap: () => _createSuggestedTask('Create a study task'),
+                ),
+                const SizedBox(height: 6),
+                _SuggestionRow(
+                  icon: Icons.calendar_view_week_outlined,
+                  label: 'Plan your week',
+                  onTap: () => _createSuggestedTask('Plan your week'),
+                ),
+                const SizedBox(height: 6),
+                _SuggestionRow(
+                  icon: Icons.flag_outlined,
+                  label: 'Review project goals',
+                  onTap: () => _createSuggestedTask('Review project goals'),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   @override
@@ -757,12 +757,12 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                             final tasks = _searchQuery.isEmpty
                                 ? rawTasks
                                 : rawTasks
-                                    .where(
-                                      (t) => t.title.toLowerCase().contains(
-                                        _searchQuery.toLowerCase(),
-                                      ),
-                                    )
-                                    .toList();
+                                      .where(
+                                        (t) => t.title.toLowerCase().contains(
+                                          _searchQuery.toLowerCase(),
+                                        ),
+                                      )
+                                      .toList();
 
                             if (_viewMode == 'board') {
                               return KanbanBoardView(
