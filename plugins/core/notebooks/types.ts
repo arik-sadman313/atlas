@@ -7,13 +7,29 @@ export interface InkPoint {
   time?: number
 }
 
+export type InkToolType =
+  | "fountain"
+  | "ballpoint"
+  | "brush"
+  | "highlighter"
+  | "eraser"
+  | "lasso"
+  | "shape"
+  | "textbox"
+  | "stickynote"
+  | "image"
+
+export type ShapePrimitive = "line" | "arrow" | "rect" | "ellipse" | "triangle"
+
 export interface InkStroke {
   id: string
-  tool: "pen" | "fountain" | "highlighter" | "eraser"
+  tool: "pen" | "fountain" | "ballpoint" | "brush" | "highlighter" | "eraser" | "shape"
   color: string
   size: number
   points: InkPoint[]
   createdAt: number
+  shapeType?: ShapePrimitive
+  fill?: string
 }
 
 export interface InkTextBox {
@@ -27,16 +43,40 @@ export interface InkTextBox {
   color: string
   backgroundColor?: string
   isStickyNote?: boolean
+  bold?: boolean
+  italic?: boolean
+  fontFamily?: "sans" | "serif" | "mono" | "handwriting"
 }
 
-export type PageTemplate = "blank" | "ruled" | "grid" | "dotted"
+export interface NotebookImage {
+  id: string
+  url: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation?: number
+}
+
+export type PageTemplate =
+  | "blank"
+  | "ruled"
+  | "ruled-wide"
+  | "grid"
+  | "dotted"
+  | "cornell"
+
+export type PaperColor = "white" | "cream" | "dark"
 
 export interface NotebookPage {
   id: string
   pageNumber: number
   template: PageTemplate
+  paperColor?: PaperColor
   strokes: InkStroke[]
   textBoxes: InkTextBox[]
+  images?: NotebookImage[]
+  bookmarked?: boolean
   width: number
   height: number
   pdfSource?: string
@@ -51,13 +91,16 @@ export interface NotebookDocument {
   pages: NotebookPage[]
 }
 
-export function createEmptyPage(pageNumber: number, template: PageTemplate = "ruled"): NotebookPage {
+export function createEmptyPage(pageNumber: number, template: PageTemplate = "ruled", paperColor: PaperColor = "white"): NotebookPage {
   return {
     id: `page_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     pageNumber,
     template,
+    paperColor,
     strokes: [],
     textBoxes: [],
+    images: [],
+    bookmarked: false,
     width: 800,
     height: 1100,
   }
@@ -70,6 +113,6 @@ export function createEmptyNotebook(title = "Untitled Notebook"): NotebookDocume
     title,
     createdAt: now,
     updatedAt: now,
-    pages: [createEmptyPage(1, "ruled")],
+    pages: [createEmptyPage(1, "ruled", "white")],
   }
 }
