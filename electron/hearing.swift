@@ -115,6 +115,7 @@ protocol Engine: AnyObject {
 }
 extension Engine { func cancel() {}; var hearsAll: Bool { false } }
 
+#if false
 /// Apple's DictationTranscriber (macOS 26, iOS 26): volatile results are the pending words, final ones the text.
 @available(macOS 26.0, iOS 26.0, *)
 final class Apple: Engine {
@@ -186,6 +187,7 @@ final class Apple: Engine {
         }
     }
 }
+#endif
 
 /// A cloud recognizer in Soniox's real-time protocol at `url` (Soniox, or a server's relay): a pause or the stop asks
 /// it to finalize. Failing, the device's engine (`local`) hears again what it hadn't settled.

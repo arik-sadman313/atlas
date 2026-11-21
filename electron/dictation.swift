@@ -442,8 +442,12 @@ func makeLocal(engine: String, language: String, model: String, words: [String])
             throw Failure(code: "unsupported", message: "This build has no Parakeet")
             #endif
         }
+        #if false
         guard #available(macOS 26.0, *) else { throw Failure(code: "unsupported", message: "Apple's dictation needs macOS 26") }
         return try await Apple(language: language, words: words, tell: emit)
+        #else
+        throw Failure(code: "unsupported", message: "Apple's dictation needs macOS 26")
+        #endif
     }
 }
 
@@ -454,6 +458,7 @@ func check(_ language: String) async -> [String: Any] {
     #else
     o["parakeet"] = false
     #endif
+    #if false
     if #available(macOS 26.0, *) {
         let loc = await Apple.locale(language)
         o["apple"] = loc != nil
@@ -461,6 +466,9 @@ func check(_ language: String) async -> [String: Any] {
     } else {
         o["apple"] = false
     }
+    #else
+    o["apple"] = false
+    #endif
     return o
 }
 
