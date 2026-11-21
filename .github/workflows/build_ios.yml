@@ -33,10 +33,12 @@ jobs:
         run: |
           npx cap sync ios
           sed -i '' 's/swift-tools-version: 6.2/swift-tools-version: 6.0/g' ios/App/CapApp-SPM/Package.swift || true
-          sed -i '' 's/\.v26/\.v17/g' ios/App/CapApp-SPM/Package.swift || true
-          sed -i '' 's/\.v16/\.v17/g' ios/App/CapApp-SPM/Package.swift || true
-          sed -i '' 's/26\.0/17.0/g' ios/App/App.xcodeproj/project.pbxproj || true
-          sed -i '' 's/16\.0/17.0/g' ios/App/App.xcodeproj/project.pbxproj || true
+          sed -i '' 's/\.v26/\.v18/g' ios/App/CapApp-SPM/Package.swift || true
+          sed -i '' 's/\.v17/\.v18/g' ios/App/CapApp-SPM/Package.swift || true
+          sed -i '' 's/\.v16/\.v18/g' ios/App/CapApp-SPM/Package.swift || true
+          sed -i '' 's/26\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
+          sed -i '' 's/17\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
+          sed -i '' 's/16\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
 
       - name: Archive iOS Application
         run: |
