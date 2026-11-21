@@ -8,6 +8,7 @@ import '../../core/theme/atlas_spacing.dart';
 import '../../core/theme/theme_provider.dart';
 import '../models/navigation_item.dart';
 import '../presentation/command_palette/command_palette_modal.dart';
+import 'atlas_scaffold.dart';
 
 class AtlasSidebar extends ConsumerWidget {
   final String currentRoute;
@@ -97,6 +98,14 @@ class AtlasSidebar extends ConsumerWidget {
                     error: (_, _) =>
                         Text('ATLAS', style: theme.textTheme.titleMedium),
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.menu_open_rounded, size: 20),
+                  tooltip: 'Collapse Sidebar (Ctrl+\\)',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    ref.read(sidebarExpandedProvider.notifier).state = false;
+                  },
                 ),
               ],
             ),

@@ -1,9 +1,14 @@
+import 'package:atlas/core/database/app_database.dart';
 import 'package:atlas/features/handwriting/domain/math/stroke_tessellator.dart';
 import 'package:atlas/features/handwriting/domain/models/atlas_ink_document.dart';
+import 'package:atlas/features/handwriting/domain/models/ink_tool.dart';
 import 'package:atlas/features/handwriting/presentation/controllers/ink_canvas_controller.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/floating_tool_dock.dart';
 import 'package:atlas/features/handwriting/presentation/widgets/ink_canvas.dart';
+import 'package:atlas/features/handwriting/presentation/widgets/notebook_page_grid_dialog.dart';
+import 'package:atlas/shared/widgets/atlas_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -223,6 +228,348 @@ void main() {
 
         // Verify "Edit Text" action button is rendered in the action bar
         expect(find.byIcon(Icons.edit_note_rounded), findsOneWidget);
+      },
+    );
+
+    test('Erase Highlighter Only preserves regular ink and only erases highlighter', () {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_erase_hl',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(document: doc);
+
+      // Add regular pen stroke at (100, 100)
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 2.0,
+        ),
+      );
+      controller.startStroke(const Offset(100, 100), pressure: 0.5);
+      controller.updateStroke(const Offset(120, 100), pressure: 0.5);
+      controller.endStroke();
+
+      // Add highlighter stroke at (200, 100)
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.highlighter,
+          color: 0xFFFFFF00,
+          baseWidth: 20.0,
+          opacity: 0.4,
+        ),
+      );
+      controller.startStroke(const Offset(200, 100), pressure: 0.5);
+      controller.updateStroke(const Offset(220, 100), pressure: 0.5);
+      controller.endStroke();
+
+      expect(controller.document.totalStrokeCount, equals(2));
+
+      // Enable Erase Highlighter Only
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.vectorEraser,
+          color: 0x00000000,
+          baseWidth: 22.0,
+        ),
+      );
+      controller.eraseHighlighterOnly = true;
+
+      // Try erasing regular pen stroke at (110, 100)
+      controller.eraseAt(const Offset(110, 100), 15.0);
+      expect(
+        controller.document.totalStrokeCount,
+        equals(2),
+      ); // Pen stroke preserved!
+
+      // Erase highlighter stroke at (210, 100)
+      controller.eraseAt(const Offset(210, 100), 15.0);
+      expect(
+        controller.document.totalStrokeCount,
+        equals(1),
+      ); // Highlighter erased!
+
+      // Turn off Erase Highlighter Only and erase pen stroke
+      controller.eraseHighlighterOnly = false;
+      controller.eraseAt(const Offset(110, 100), 15.0);
+      expect(
+        controller.document.totalStrokeCount,
+        equals(0),
+      ); // Pen stroke erased!
+    });
+
+    test('Auto-Deselect Eraser returns to previous writing tool upon stroke completion', () {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_auto_deselect',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(document: doc);
+
+      // User was using pencil
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.pencil,
+          color: 0xFF333333,
+          baseWidth: 1.5,
+        ),
+      );
+      expect(controller.activeTool.type, equals(InkToolType.pencil));
+
+      // Switch to eraser and enable auto-deselect
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.vectorEraser,
+          color: 0x00000000,
+          baseWidth: 22.0,
+        ),
+      );
+      controller.autoDeselectEraser = true;
+      expect(controller.activeTool.type, equals(InkToolType.vectorEraser));
+
+      // Erase gesture
+      controller.startStroke(const Offset(50, 50), pressure: 0.5);
+      controller.updateStroke(const Offset(60, 50), pressure: 0.5);
+      controller.endStroke();
+
+      // Tool should automatically revert back to pencil
+      expect(controller.activeTool.type, equals(InkToolType.pencil));
+    });
+
+    test('Eraser perpendicular segment distance detects fast strokes between sampled points', () {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_segment_erase',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(document: doc);
+
+      // Create a fast stroke with only two distant points: (100, 100) and (300, 100)
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 2.0,
+        ),
+      );
+      controller.startStroke(const Offset(100, 100), pressure: 0.5);
+      controller.updateStroke(const Offset(300, 100), pressure: 0.5);
+      controller.endStroke();
+
+      expect(controller.document.totalStrokeCount, equals(1));
+
+      // Erase at (200, 100) which has no discrete point, using 10px radius
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.vectorEraser,
+          color: 0x00000000,
+          baseWidth: 22.0,
+        ),
+      );
+      controller.eraseAt(const Offset(200, 100), 10.0);
+
+      // Segment projection should catch it and erase
+      expect(controller.document.totalStrokeCount, equals(0));
+    });
+
+    test('Lasso filters selectively include or exclude handwriting, text, notes, and shapes', () {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_lasso_filters',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(document: doc);
+
+      // 1. Handwriting stroke at (150, 150)
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 2.0,
+        ),
+      );
+      controller.startStroke(const Offset(140, 150), pressure: 0.5);
+      controller.updateStroke(const Offset(160, 150), pressure: 0.5);
+      controller.endStroke();
+
+      // 2. Text element at (200, 200)
+      controller.addTextElement(const Offset(200, 200), 'Lasso Filter Text');
+
+      // Clear selection from text addition
+      controller.clearSelection();
+
+      // Disable text selection in lasso
+      controller.lassoText = false;
+      controller.lassoHandwriting = true;
+
+      // Draw lasso encircling both elements (bounding box roughly 100..300, 100..300)
+      controller.setTool(
+        const InkToolConfig(
+          type: InkToolType.lasso,
+          color: 0xFF2563EB,
+          baseWidth: 1.0,
+        ),
+      );
+      controller.startStroke(const Offset(100, 100), pressure: 0.5);
+      controller.updateStroke(const Offset(350, 100), pressure: 0.5);
+      controller.updateStroke(const Offset(350, 350), pressure: 0.5);
+      controller.updateStroke(const Offset(100, 350), pressure: 0.5);
+      controller.updateStroke(const Offset(100, 100), pressure: 0.5);
+      controller.endStroke();
+
+      // Only handwriting should be selected; text element is excluded by filter
+      expect(controller.hasSelection, isTrue);
+      expect(controller.selectedStrokes.length, equals(1));
+      expect(controller.selectedStrokes.first.shapeType, isNull); // pen stroke
+    });
+
+    test('SidebarExpandedNotifier toggles and sets state correctly', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      expect(container.read(sidebarExpandedProvider), isTrue);
+
+      container.read(sidebarExpandedProvider.notifier).state = false;
+      expect(container.read(sidebarExpandedProvider), isFalse);
+
+      container.read(sidebarExpandedProvider.notifier).toggle();
+      expect(container.read(sidebarExpandedProvider), isTrue);
+
+      container.read(sidebarExpandedProvider.notifier).setExpanded(false);
+      expect(container.read(sidebarExpandedProvider), isFalse);
+    });
+
+    testWidgets(
+      'NotebookPageGridDialog renders pages, active badge, and triggers page selection',
+      (tester) async {
+        final now = DateTime.now();
+        final pages = [
+          InkPageEntry(
+            id: 'page_1',
+            documentId: 'doc_pages',
+            pageNumber: 1,
+            width: 800.0,
+            height: 1000.0,
+            templateType: 'ruled',
+            templateSpacing: 28.35,
+            backgroundColor: 0xFFFFFFFF,
+            createdAt: now,
+            updatedAt: now,
+            clientModifiedAt: now,
+            modifiedDeviceId: 'device-1',
+            syncVersion: 1,
+          ),
+          InkPageEntry(
+            id: 'page_2',
+            documentId: 'doc_pages',
+            pageNumber: 2,
+            width: 800.0,
+            height: 1000.0,
+            templateType: 'cornell',
+            templateSpacing: 28.35,
+            backgroundColor: 0xFFFFFFFF,
+            createdAt: now,
+            updatedAt: now,
+            clientModifiedAt: now,
+            modifiedDeviceId: 'device-1',
+            syncVersion: 1,
+          ),
+        ];
+
+        int? selectedPageIndex;
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: NotebookPageGridDialog(
+                  pages: pages,
+                  currentPageIndex: 0,
+                  onPageSelected: (index) => selectedPageIndex = index,
+                  onAddPage: () {},
+                  onInsertPageBelow: (_) {},
+                  onDuplicatePage: (_) {},
+                  onDeletePage: (_) {},
+                  onMovePage: (from, to) {},
+                  onChangeTemplate: (idx, template) {},
+                ),
+              ),
+            ),
+          ),
+        );
+
+        // Verify Header
+        expect(find.textContaining('Page Overview'), findsOneWidget);
+
+        // Verify Page Number indicators & templates
+        expect(find.text('1'), findsWidgets);
+        expect(find.text('2'), findsWidgets);
+        expect(find.text('Ruled Paper'), findsWidgets);
+        expect(find.text('Cornell Notes'), findsWidgets);
+
+        // Verify Add Page filled button exists
+        final addBtn = find.widgetWithText(FilledButton, 'Add Page');
+        expect(addBtn, findsOneWidget);
+
+        // Tap on Page 2 card (Cornell Notes)
+        await tester.tap(find.text('Cornell Notes').first);
+        await tester.pumpAndSettle();
+
+        expect(selectedPageIndex, equals(1));
+      },
+    );
+
+    testWidgets(
+      'NotebookPageGridDialog triggers onAddPage when Add Page button is tapped',
+      (tester) async {
+        final now = DateTime.now();
+        final pages = [
+          InkPageEntry(
+            id: 'page_1',
+            documentId: 'doc_pages',
+            pageNumber: 1,
+            width: 800.0,
+            height: 1000.0,
+            templateType: 'ruled',
+            templateSpacing: 28.35,
+            backgroundColor: 0xFFFFFFFF,
+            createdAt: now,
+            updatedAt: now,
+            clientModifiedAt: now,
+            modifiedDeviceId: 'device-1',
+            syncVersion: 1,
+          ),
+        ];
+
+        bool addPageClicked = false;
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: NotebookPageGridDialog(
+                  pages: pages,
+                  currentPageIndex: 0,
+                  onPageSelected: (_) {},
+                  onAddPage: () => addPageClicked = true,
+                  onInsertPageBelow: (_) {},
+                  onDuplicatePage: (_) {},
+                  onDeletePage: (_) {},
+                  onMovePage: (from, to) {},
+                  onChangeTemplate: (idx, template) {},
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final addBtn = find.widgetWithText(FilledButton, 'Add Page');
+        expect(addBtn, findsOneWidget);
+        await tester.tap(addBtn);
+        await tester.pumpAndSettle();
+
+        expect(addPageClicked, isTrue);
       },
     );
   });

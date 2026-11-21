@@ -30,6 +30,8 @@ import '../widgets/ink_canvas.dart';
 import '../widgets/ink_page_view.dart';
 import '../widgets/ink_tool_palette.dart';
 import '../widgets/notebook_page_drawer.dart';
+import '../widgets/notebook_page_grid_dialog.dart';
+import '../../../../shared/widgets/atlas_scaffold.dart';
 
 /// Full-featured Notebook Editor integrating the Atlas Ink Engine.
 ///
@@ -76,6 +78,14 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     _pencilKitBridge.initializeMethodChannel();
     _transformController.addListener(_onTransformChanged);
     _loadNotebookData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final width = MediaQuery.of(context).size.width;
+      // On iPads and tablets (width <= 1180), collapse sidebar by default to maximize note-taking area
+      if (width <= 1180 && ref.read(sidebarExpandedProvider)) {
+        ref.read(sidebarExpandedProvider.notifier).state = false;
+      }
+    });
   }
 
   void _onTransformChanged() {
@@ -847,6 +857,27 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
         ],
       ),
       actions: [
+        // Sidebar Toggle for Wide/Fullscreen Canvas
+        Consumer(
+          builder: (context, ref, _) {
+            final isSidebarExpanded = ref.watch(sidebarExpandedProvider);
+            return IconButton(
+              icon: Icon(
+                isSidebarExpanded
+                    ? Icons.fullscreen_rounded
+                    : Icons.fullscreen_exit_rounded,
+                size: 22,
+              ),
+              tooltip: isSidebarExpanded
+                  ? 'Collapse Sidebar (Full-Width Canvas)'
+                  : 'Expand Sidebar',
+              onPressed: () {
+                ref.read(sidebarExpandedProvider.notifier).update((v) => !v);
+              },
+            );
+          },
+        ),
+
         // Save Status Indicator
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -906,6 +937,11 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           icon: const Icon(Icons.note_add_outlined),
           tooltip: 'Add Page',
           onPressed: _addNewPage,
+        ),
+        IconButton(
+          icon: const Icon(Icons.grid_view_rounded, size: 20),
+          tooltip: 'All Pages Overview',
+          onPressed: _showPageGridOverview,
         ),
 
         // Excalidraw & PDF Export/Import Menu
@@ -1314,6 +1350,21 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     );
   }
 
+  void _showPageGridOverview() {
+    NotebookPageGridDialog.show(
+      context: context,
+      pages: _pages,
+      currentPageIndex: _currentPageIndex,
+      onPageSelected: (idx) => _switchPage(idx),
+      onAddPage: _addNewPage,
+      onInsertPageBelow: _insertPageBelow,
+      onDuplicatePage: _duplicatePage,
+      onDeletePage: _deletePage,
+      onMovePage: _movePage,
+      onChangeTemplate: _changePageTemplate,
+    );
+  }
+
   Widget _buildPageNavPill(bool isDark) {
     return Material(
       color: Colors.transparent,
@@ -1343,34 +1394,29 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                   ? () => _switchPage(_currentPageIndex - 1)
                   : null,
             ),
-            Builder(
-              builder: (ctx) => InkWell(
-                onTap: () => Scaffold.of(ctx).openEndDrawer(),
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Page ${_currentPageIndex + 1} of ${_pages.length}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                        ),
+            InkWell(
+              onTap: _showPageGridOverview,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Page ${_currentPageIndex + 1} of ${_pages.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black87,
                       ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.auto_stories_outlined,
-                        size: 14,
-                        color: isDark ? Colors.white54 : Colors.black54,
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.grid_view_rounded,
+                      size: 14,
+                      color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+                  ],
                 ),
               ),
             ),

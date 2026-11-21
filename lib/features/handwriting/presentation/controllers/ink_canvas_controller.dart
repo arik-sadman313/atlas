@@ -70,6 +70,75 @@ class InkCanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Eraser Options (GoodNotes Role Model)
+  bool _eraseHighlighterOnly = false;
+  bool get eraseHighlighterOnly => _eraseHighlighterOnly;
+  set eraseHighlighterOnly(bool val) {
+    if (_eraseHighlighterOnly != val) {
+      _eraseHighlighterOnly = val;
+      notifyListeners();
+    }
+  }
+
+  void toggleEraseHighlighterOnly([bool? value]) {
+    _eraseHighlighterOnly = value ?? !_eraseHighlighterOnly;
+    notifyListeners();
+  }
+
+  bool _autoDeselectEraser = false;
+  bool get autoDeselectEraser => _autoDeselectEraser;
+  set autoDeselectEraser(bool val) {
+    if (_autoDeselectEraser != val) {
+      _autoDeselectEraser = val;
+      notifyListeners();
+    }
+  }
+
+  void toggleAutoDeselectEraser([bool? value]) {
+    _autoDeselectEraser = value ?? !_autoDeselectEraser;
+    notifyListeners();
+  }
+
+  InkToolConfig? _previousNonEraserTool;
+
+  // Lasso Filter Options (GoodNotes Role Model)
+  bool _lassoHandwriting = true;
+  bool _lassoShapes = true;
+  bool _lassoText = true;
+  bool _lassoStickyNotes = true;
+
+  bool get lassoHandwriting => _lassoHandwriting;
+  set lassoHandwriting(bool v) {
+    if (_lassoHandwriting != v) {
+      _lassoHandwriting = v;
+      notifyListeners();
+    }
+  }
+
+  bool get lassoShapes => _lassoShapes;
+  set lassoShapes(bool v) {
+    if (_lassoShapes != v) {
+      _lassoShapes = v;
+      notifyListeners();
+    }
+  }
+
+  bool get lassoText => _lassoText;
+  set lassoText(bool v) {
+    if (_lassoText != v) {
+      _lassoText = v;
+      notifyListeners();
+    }
+  }
+
+  bool get lassoStickyNotes => _lassoStickyNotes;
+  set lassoStickyNotes(bool v) {
+    if (_lassoStickyNotes != v) {
+      _lassoStickyNotes = v;
+      notifyListeners();
+    }
+  }
+
   InkCanvasController({
     required AtlasInkDocument document,
     InkToolConfig? initialTool,
@@ -127,6 +196,9 @@ class InkCanvasController extends ChangeNotifier {
   }
 
   void setTool(InkToolConfig tool) {
+    if (!_activeTool.type.isEraser) {
+      _previousNonEraserTool = _activeTool;
+    }
     _activeTool = tool;
     if (!tool.type.isSelection &&
         !tool.type.isLasso &&
@@ -147,6 +219,7 @@ class InkCanvasController extends ChangeNotifier {
 
     if (_activeTool.type.isEraser) {
       _recordUndoSnapshot();
+      _isDrawing = true;
       eraseAt(position, _activeTool.baseWidth * 3);
       return;
     }
@@ -226,26 +299,49 @@ class InkCanvasController extends ChangeNotifier {
   }
 
   void endStroke() {
+    if (_activeTool.type.isEraser) {
+      if (_isDrawing) {
+        _isDrawing = false;
+        if (_autoDeselectEraser && _previousNonEraserTool != null) {
+          _activeTool = _previousNonEraserTool!;
+          notifyListeners();
+        }
+      }
+      return;
+    }
+
     if (_activeTool.type.isSelection || _activeTool.type.isLasso) {
       if (!_isDrawing) return;
       _isDrawing = false;
       if (_lassoPolygon.length >= 2) {
         final selected = <String>{};
-        if (_lassoPolygon.length >= 3) {
-          for (final layer in _document.layers) {
-            for (final stroke in layer.strokes) {
+        for (final layer in _document.layers) {
+          for (final stroke in layer.strokes) {
+            final isText =
+                stroke.shapeType == 'text' || stroke.tool == InkToolType.text;
+            final isSticky =
+                stroke.shapeType == 'stickyNote' ||
+                stroke.tool == InkToolType.stickyNote;
+            final isShape = stroke.tool.isShape && !isText && !isSticky;
+            final isHandwriting = !isText && !isSticky && !isShape;
+
+            if (isText && !_lassoText) continue;
+            if (isSticky && !_lassoStickyNotes) continue;
+            if (isShape && !_lassoShapes) continue;
+            if (isHandwriting && !_lassoHandwriting) continue;
+
+            if (_lassoPolygon.length >= 3) {
               if (StrokeTessellator.isStrokeSelectedByLasso(
                 stroke,
                 _lassoPolygon,
               )) {
                 selected.add(stroke.id);
               }
-            }
-          }
-        } else {
-          final box = Rect.fromPoints(_lassoPolygon.first, _lassoPolygon.last);
-          for (final layer in _document.layers) {
-            for (final stroke in layer.strokes) {
+            } else {
+              final box = Rect.fromPoints(
+                _lassoPolygon.first,
+                _lassoPolygon.last,
+              );
               if (stroke.computedBounds.overlaps(box)) {
                 selected.add(stroke.id);
               }
@@ -557,21 +653,18 @@ class InkCanvasController extends ChangeNotifier {
     final updatedLayers = _document.layers.map((layer) {
       final remainingStrokes = <InkStroke>[];
       for (final stroke in layer.strokes) {
-        if (stroke.computedBounds.overlaps(eraserRect)) {
-          // Check proximity to any point in the stroke
-          bool hit = false;
-          for (final pt in stroke.points) {
-            final dx = pt.x - position.dx;
-            final dy = pt.y - position.dy;
-            if (dx * dx + dy * dy <= radius * radius) {
-              hit = true;
-              mutated = true;
-              break;
-            }
-          }
-          if (!hit) {
-            remainingStrokes.add(stroke);
-          }
+        // If "Erase Highlighter Only" is enabled, preserve all non-highlighter ink
+        final isHighlighter =
+            stroke.tool == InkToolType.highlighter ||
+            stroke.tool.isHighlighter ||
+            stroke.opacity < 0.8;
+        if (_eraseHighlighterOnly && !isHighlighter) {
+          remainingStrokes.add(stroke);
+          continue;
+        }
+
+        if (_isStrokeHitByEraser(stroke, position, radius, eraserRect)) {
+          mutated = true;
         } else {
           remainingStrokes.add(stroke);
         }
@@ -585,6 +678,83 @@ class InkCanvasController extends ChangeNotifier {
       _renderCache.invalidate();
       notifyListeners();
     }
+  }
+
+  bool _isStrokeHitByEraser(
+    InkStroke stroke,
+    Offset position,
+    double radius,
+    Rect eraserRect,
+  ) {
+    final effectiveRadius = radius + (stroke.baseWidth / 2.0);
+    final r2 = effectiveRadius * effectiveRadius;
+
+    // 1. Defined bounds elements (Text boxes, Sticky notes, Frames, Shapes)
+    if (stroke.bounds != null) {
+      if (stroke.bounds!.inflate(effectiveRadius).contains(position) ||
+          stroke.bounds!.overlaps(eraserRect)) {
+        return true;
+      }
+    }
+
+    if (stroke.points.isEmpty) return false;
+
+    // 2. Single-point stroke (Dot)
+    if (stroke.points.length == 1) {
+      final p = stroke.points.first;
+      final dx = p.x - position.dx;
+      final dy = p.y - position.dy;
+      return (dx * dx + dy * dy) <= r2;
+    }
+
+    // 3. Multi-point stroke: check line segment proximity with perpendicular projection
+    for (int i = 0; i < stroke.points.length - 1; i++) {
+      final p1 = Offset(stroke.points[i].x, stroke.points[i].y);
+      final p2 = Offset(stroke.points[i + 1].x, stroke.points[i + 1].y);
+      if (_distToSegmentSquared(position, p1, p2) <= r2) {
+        return true;
+      }
+    }
+
+    // Also check last point
+    final last = stroke.points.last;
+    final ldx = last.x - position.dx;
+    final ldy = last.y - position.dy;
+    return (ldx * ldx + ldy * ldy) <= r2;
+  }
+
+  static double _distToSegmentSquared(Offset p, Offset a, Offset b) {
+    final l2 = (b.dx - a.dx) * (b.dx - a.dx) + (b.dy - a.dy) * (b.dy - a.dy);
+    if (l2 == 0) {
+      return (p.dx - a.dx) * (p.dx - a.dx) + (p.dy - a.dy) * (p.dy - a.dy);
+    }
+    final t = math.max(
+      0.0,
+      math.min(
+        1.0,
+        ((p.dx - a.dx) * (b.dx - a.dx) + (p.dy - a.dy) * (b.dy - a.dy)) / l2,
+      ),
+    );
+    final projX = a.dx + t * (b.dx - a.dx);
+    final projY = a.dy + t * (b.dy - a.dy);
+    final dx = p.dx - projX;
+    final dy = p.dy - projY;
+    return dx * dx + dy * dy;
+  }
+
+  /// Wipes all ink strokes from the current page with full undo support.
+  void clearPage() {
+    if (_document.isEmpty) return;
+    _recordUndoSnapshot();
+    final clearedLayers = _document.layers
+        .map((l) => l.copyWith(strokes: []))
+        .toList();
+    _document = _document.copyWith(layers: clearedLayers);
+    _selectedStrokeIds = {};
+    _selectionBounds = null;
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
   }
 
   void undo() {

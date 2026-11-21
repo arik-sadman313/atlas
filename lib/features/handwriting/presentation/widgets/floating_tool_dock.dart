@@ -225,27 +225,43 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                             _buildToolButton(
                               context: context,
                               icon: Icons.auto_fix_normal_rounded,
-                              tooltip: 'Eraser (E)',
+                              tooltip: 'Eraser (E) - Tap again for settings',
                               isSelected: activeTool.type.isEraser,
-                              onTap: () => widget.controller.setTool(
-                                activeTool.copyWith(
-                                  type: InkToolType.vectorEraser,
-                                  baseWidth: 16.0,
-                                ),
-                              ),
+                              onTap: () {
+                                if (!activeTool.type.isEraser) {
+                                  widget.controller.setTool(
+                                    activeTool.copyWith(
+                                      type: InkToolType.vectorEraser,
+                                      baseWidth: 16.0,
+                                    ),
+                                  );
+                                } else {
+                                  _showEraserSettingsModal(context, isDark);
+                                }
+                              },
+                              onLongPress: () =>
+                                  _showEraserSettingsModal(context, isDark),
                             ),
                             const SizedBox(width: 2),
                             _buildToolButton(
                               context: context,
                               icon: Icons.gesture_rounded,
-                              tooltip: 'Lasso Select',
+                              tooltip: 'Lasso Select - Tap again for filters',
                               isSelected: activeTool.type == InkToolType.lasso,
-                              onTap: () => widget.controller.setTool(
-                                activeTool.copyWith(
-                                  type: InkToolType.lasso,
-                                  baseWidth: 2.0,
-                                ),
-                              ),
+                              onTap: () {
+                                if (activeTool.type != InkToolType.lasso) {
+                                  widget.controller.setTool(
+                                    activeTool.copyWith(
+                                      type: InkToolType.lasso,
+                                      baseWidth: 2.0,
+                                    ),
+                                  );
+                                } else {
+                                  _showLassoSettingsModal(context, isDark);
+                                }
+                              },
+                              onLongPress: () =>
+                                  _showLassoSettingsModal(context, isDark),
                             ),
 
                             _buildDivider(isDark),
@@ -800,6 +816,7 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
     required String tooltip,
     required bool isSelected,
     required VoidCallback onTap,
+    VoidCallback? onLongPress,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -808,6 +825,7 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           width: 32,
           height: 32,
@@ -1007,6 +1025,291 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
           visualDensity: VisualDensity.compact,
         ),
       ],
+    );
+  }
+
+  void _showEraserSettingsModal(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF181B24) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final activeTool = widget.controller.activeTool;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.auto_fix_normal_rounded,
+                          size: 20,
+                          color: Color(0xFF2563EB),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Eraser Settings (GoodNotes Style)',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 20),
+                    // Erase Highlighter Only Switch
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.highlight_rounded),
+                      title: const Text('Erase Highlighter Only'),
+                      subtitle: const Text(
+                        'Preserve handwritten ink and only erase highlighter strokes',
+                      ),
+                      value: widget.controller.eraseHighlighterOnly,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.toggleEraseHighlighterOnly(val);
+                        });
+                      },
+                    ),
+                    // Auto-Deselect Switch
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.undo_rounded),
+                      title: const Text('Auto-Deselect'),
+                      subtitle: const Text(
+                        'Automatically switch back to Pen after lifting stylus',
+                      ),
+                      value: widget.controller.autoDeselectEraser,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.toggleAutoDeselectEraser(val);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    // Eraser Size Chips
+                    Text(
+                      'ERASER SIZE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _buildEraserSizeChip(
+                          'Small (10px)',
+                          10.0,
+                          activeTool,
+                          setModalState,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildEraserSizeChip(
+                          'Medium (22px)',
+                          22.0,
+                          activeTool,
+                          setModalState,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildEraserSizeChip(
+                          'Large (42px)',
+                          42.0,
+                          activeTool,
+                          setModalState,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Clear Page Button
+                    OutlinedButton.icon(
+                      icon: const Icon(
+                        Icons.delete_sweep_rounded,
+                        color: Colors.red,
+                        size: 18,
+                      ),
+                      label: const Text(
+                        'Clear Entire Page',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        widget.controller.clearPage();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Page cleared'),
+                            action: SnackBarAction(
+                              label: 'Undo',
+                              onPressed: widget.controller.undo,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEraserSizeChip(
+    String label,
+    double size,
+    InkToolConfig activeTool,
+    StateSetter setModalState,
+  ) {
+    final isSelected = activeTool.type.isEraser && activeTool.baseWidth == size;
+    return Expanded(
+      child: FilterChip(
+        label: Text(label, style: const TextStyle(fontSize: 11)),
+        selected: isSelected,
+        onSelected: (_) {
+          widget.controller.setTool(
+            activeTool.copyWith(
+              type: InkToolType.vectorEraser,
+              baseWidth: size,
+            ),
+          );
+          setModalState(() {});
+        },
+      ),
+    );
+  }
+
+  void _showLassoSettingsModal(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF181B24) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.gesture_rounded,
+                          size: 20,
+                          color: Color(0xFF2563EB),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Lasso Selection Filters',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Select what the lasso includes when you circle elements on the canvas:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const Divider(height: 20),
+                    CheckboxListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.edit_rounded),
+                      title: const Text('Handwriting & Drawing'),
+                      value: widget.controller.lassoHandwriting,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.lassoHandwriting = val ?? true;
+                        });
+                      },
+                    ),
+                    CheckboxListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.text_fields_rounded),
+                      title: const Text('Text Boxes'),
+                      value: widget.controller.lassoText,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.lassoText = val ?? true;
+                        });
+                      },
+                    ),
+                    CheckboxListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.sticky_note_2_outlined),
+                      title: const Text('Sticky Notes'),
+                      value: widget.controller.lassoStickyNotes,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.lassoStickyNotes = val ?? true;
+                        });
+                      },
+                    ),
+                    CheckboxListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.crop_square_rounded),
+                      title: const Text('Shapes & Containers'),
+                      value: widget.controller.lassoShapes,
+                      onChanged: (val) {
+                        setModalState(() {
+                          widget.controller.lassoShapes = val ?? true;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

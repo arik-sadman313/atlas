@@ -11,6 +11,23 @@ import '../models/navigation_item.dart';
 import '../presentation/command_palette/command_palette_modal.dart';
 import 'atlas_sidebar.dart';
 
+/// Global notifier to control sidebar expansion across the application
+class SidebarExpandedNotifier extends Notifier<bool> {
+  @override
+  bool build() => true;
+
+  void toggle() => state = !state;
+  void setExpanded(bool value) => state = value;
+  void update(bool Function(bool) updater) => state = updater(state);
+
+  @override
+  set state(bool value) => super.state = value;
+}
+
+final sidebarExpandedProvider = NotifierProvider<SidebarExpandedNotifier, bool>(
+  SidebarExpandedNotifier.new,
+);
+
 class AtlasScaffold extends ConsumerStatefulWidget {
   final Widget child;
   final String currentRoute;
@@ -28,12 +45,8 @@ class AtlasScaffold extends ConsumerStatefulWidget {
 }
 
 class _AtlasScaffoldState extends ConsumerState<AtlasScaffold> {
-  bool _sidebarExpanded = true;
-
   void _toggleSidebar() {
-    setState(() {
-      _sidebarExpanded = !_sidebarExpanded;
-    });
+    ref.read(sidebarExpandedProvider.notifier).update((v) => !v);
   }
 
   void _showQuickCreateDialog(BuildContext context) {
@@ -211,15 +224,19 @@ class _AtlasScaffoldState extends ConsumerState<AtlasScaffold> {
   Widget _buildDesktopLayout(BuildContext context, {required bool isTablet}) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final sidebarExpanded = ref.watch(sidebarExpandedProvider);
+    final isNotebookEditor =
+        widget.currentRoute.startsWith('/notebooks/') &&
+        widget.currentRoute != '/notebooks';
 
     return Scaffold(
       body: Row(
         children: [
           // Collapsible Left Navigation Sidebar
-          if (_sidebarExpanded) AtlasSidebar(currentRoute: widget.currentRoute),
+          if (sidebarExpanded) AtlasSidebar(currentRoute: widget.currentRoute),
 
-          // Collapsed Rail Toggle Button when sidebar is hidden
-          if (!_sidebarExpanded)
+          // Collapsed Rail Toggle Button when sidebar is hidden (hidden in notebook editor for 100% canvas)
+          if (!sidebarExpanded && !isNotebookEditor)
             Container(
               width: 48,
               decoration: BoxDecoration(

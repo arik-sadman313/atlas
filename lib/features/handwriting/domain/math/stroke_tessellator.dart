@@ -99,21 +99,68 @@ class StrokeTessellator {
   }
 
   /// Determines if a stroke is selected by the lasso polygon.
-  /// A stroke is selected if its bounding box center is inside,
-  /// or if >= 50% of its points are inside.
+  /// Matches GoodNotes selection ergonomics:
+  /// A stroke is selected if its center is inside, or ANY point is inside,
+  /// or if any line segment intersects the lasso polygon, or if the lasso
+  /// loop encloses the bounding box.
   static bool isStrokeSelectedByLasso(InkStroke stroke, List<Offset> polygon) {
-    if (polygon.length < 3 || stroke.points.isEmpty) return false;
+    if (polygon.length < 3) return false;
     final bounds = computeBounds(stroke);
+
+    // 1. Center point inside
     if (isPointInPolygon(bounds.center, polygon)) {
       return true;
     }
-    int insideCount = 0;
+
+    // 2. Any corner of bounding box inside
+    if (isPointInPolygon(bounds.topLeft, polygon) ||
+        isPointInPolygon(bounds.topRight, polygon) ||
+        isPointInPolygon(bounds.bottomLeft, polygon) ||
+        isPointInPolygon(bounds.bottomRight, polygon)) {
+      return true;
+    }
+
+    if (stroke.points.isEmpty) return false;
+
+    // 3. Any discrete stroke point inside
     for (final p in stroke.points) {
       if (isPointInPolygon(Offset(p.x, p.y), polygon)) {
-        insideCount++;
+        return true;
       }
     }
-    return (insideCount / stroke.points.length) >= 0.5;
+
+    // 4. Line segment intersection between stroke segments and polygon edges
+    final polyLen = polygon.length;
+    for (int i = 0; i < stroke.points.length - 1; i++) {
+      final s1 = Offset(stroke.points[i].x, stroke.points[i].y);
+      final s2 = Offset(stroke.points[i + 1].x, stroke.points[i + 1].y);
+      for (int j = 0, k = polyLen - 1; j < polyLen; k = j++) {
+        final p1 = polygon[k];
+        final p2 = polygon[j];
+        if (_segmentsIntersect(s1, s2, p1, p2)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  static bool _segmentsIntersect(Offset p1, Offset p2, Offset p3, Offset p4) {
+    final d1 = _crossProduct(p3, p4, p1);
+    final d2 = _crossProduct(p3, p4, p2);
+    final d3 = _crossProduct(p1, p2, p3);
+    final d4 = _crossProduct(p1, p2, p4);
+
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+      return true;
+    }
+    return false;
+  }
+
+  static double _crossProduct(Offset a, Offset b, Offset c) {
+    return (b.dx - a.dx) * (c.dy - a.dy) - (b.dy - a.dy) * (c.dx - a.dx);
   }
 
   /// Computes the union bounding box enclosing a collection of strokes.
