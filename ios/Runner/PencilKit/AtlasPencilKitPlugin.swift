@@ -140,7 +140,9 @@ public enum AtlasPencilKitInterop {
 
         for stroke in drawing.strokes {
             var points: [[String: Any]] = []
+            var detectedWidth: Double = 3.0
             for pt in stroke.path {
+                detectedWidth = Double(pt.size.width)
                 points.append([
                     "x": Double(pt.location.x),
                     "y": Double(pt.location.y),
@@ -158,7 +160,7 @@ public enum AtlasPencilKitInterop {
                 "id": UUID().uuidString,
                 "tool": toolStr,
                 "color": colorInt,
-                "baseWidth": Double(stroke.ink.weight),
+                "baseWidth": detectedWidth,
                 "opacity": 1.0,
                 "blendMode": toolStr == "highlighter" ? "multiply" : "srcOver",
                 "points": points
