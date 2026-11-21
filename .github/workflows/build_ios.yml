@@ -39,6 +39,16 @@ jobs:
           sed -i '' 's/26\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
           sed -i '' 's/17\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
           sed -i '' 's/16\.0/18.0/g' ios/App/App.xcodeproj/project.pbxproj || true
+          python3 -c "
+          p = 'ios/App/App.xcodeproj/project.pbxproj'
+          s = open(p).read()
+          s = s.replace('A1B2C3D40000000000000018 /* Embed Foundation Extensions */,', '')
+          s = s.replace('A1B2C3D40000000000000049 /* Embed Watch Content */,', '')
+          s = s.replace('A1B2C3D40000000000000019 /* PBXTargetDependency */,', '')
+          s = s.replace('A1B2C3D4000000000000004B /* PBXTargetDependency */,', '')
+          s = s.replace('A1B2C3D4000000000000007E /* PBXTargetDependency */,', '')
+          open(p, 'w').write(s)
+          " || true
 
       - name: Archive iOS Application
         run: |
