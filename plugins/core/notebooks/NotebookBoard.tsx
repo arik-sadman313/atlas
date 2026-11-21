@@ -37,6 +37,7 @@ import {
   Palette,
   Sliders,
   Feather,
+  X,
 } from "lucide-react"
 import {
   type NotebookDocument,
@@ -63,10 +64,13 @@ import {
 import {
   renderStrokeToPath,
   isPointNearStroke,
+  isSegmentNearStroke,
+  eraseStrokeAtPoint,
   isPointNearTape,
   isStrokeInLasso,
   isBoxInLasso,
   translateStroke,
+  scaleStroke,
   detectGeometricShape,
   snapToStraightLine,
   snapPointToRuler,
@@ -290,6 +294,16 @@ export default function NotebookBoard({
   const currentStrokeRef = useRef<InkStroke | null>(null)
   currentStrokeRef.current = currentStroke
 
+  // Advanced selection and tool state refs
+  const initialSelectionSnapshotRef = useRef<{
+    strokes: Map<string, InkStroke>
+    boxes: Map<string, InkTextBox>
+    images: Map<string, NotebookImage>
+    startPt: { x: number; y: number }
+  } | null>(null)
+  const lastEraserPointRef = useRef<{ x: number; y: number } | null>(null)
+  const [laserPopoverOpen, setLaserPopoverOpen] = useState(false)
+
   // Undo / Redo history stacks
   const [history, setHistory] = useState<NotebookPage[]>([])
   const [redoStack, setRedoStack] = useState<NotebookPage[]>([])
@@ -504,7 +518,7 @@ export default function NotebookBoard({
         ...prev,
         active: true,
         current: pt,
-        trail: [{ x: pt.x, y: pt.y, time: Date.now() }],
+        trail: [...(prev.trail || []).slice(-30), { x: pt.x, y: pt.y, time: Date.now() }],
       }))
       return
     }
@@ -512,21 +526,37 @@ export default function NotebookBoard({
     // 2. Eraser Tool
     if (activeTool === "eraser") {
       pushHistory()
-      const threshold = eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24
-      const filtered = currentPage.strokes.filter((s) => {
-        if (eraseHighlighterOnly && s.tool !== "highlighter") return true
-        return !isPointNearStroke(pt, s, threshold)
-      })
+      lastEraserPointRef.current = pt
+      const threshold = eraserMode === "precision" ? 8 : eraserMode === "standard" ? 18 : 28
+
+      let changed = false
+      let newStrokes: InkStroke[] = []
+
+      for (const s of currentPage.strokes) {
+        if (eraseHighlighterOnly && s.tool !== "highlighter") {
+          newStrokes.push(s)
+          continue
+        }
+        if (isPointNearStroke(pt, s, threshold)) {
+          changed = true
+          const result = eraseStrokeAtPoint(s, pt, threshold, eraserMode)
+          newStrokes.push(...result)
+        } else {
+          newStrokes.push(s)
+        }
+      }
+
       let tapeFiltered = currentPage.tapeStrips || []
       if (!eraseHighlighterOnly && tapeFiltered.length > 0) {
         tapeFiltered = tapeFiltered.filter((tape) => !isPointNearTape(pt, tape, threshold))
+        if (tapeFiltered.length !== (currentPage.tapeStrips || []).length) {
+          changed = true
+        }
       }
-      if (
-        filtered.length !== currentPage.strokes.length ||
-        tapeFiltered.length !== (currentPage.tapeStrips || []).length
-      ) {
+
+      if (changed) {
         const updatedPages = [...doc.pages]
-        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered, tapeStrips: tapeFiltered }
+        updatedPages[currentPageIndex] = { ...currentPage, strokes: newStrokes, tapeStrips: tapeFiltered }
         commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       }
       return
@@ -544,6 +574,24 @@ export default function NotebookBoard({
           pt.y >= computedSelectionBounds.minY - 15 &&
           pt.y <= computedSelectionBounds.maxY + 15
         ) {
+          const strokeMap = new Map<string, InkStroke>()
+          currentPage.strokes.forEach((s) => {
+            if (selectedStrokeIds.has(s.id)) strokeMap.set(s.id, s)
+          })
+          const boxMap = new Map<string, InkTextBox>()
+          ;(currentPage.textBoxes || []).forEach((b) => {
+            if (selectedBoxIds.has(b.id)) boxMap.set(b.id, b)
+          })
+          const imageMap = new Map<string, NotebookImage>()
+          ;(currentPage.images || []).forEach((img) => {
+            if (selectedImageIds.has(img.id)) imageMap.set(img.id, img)
+          })
+          initialSelectionSnapshotRef.current = {
+            strokes: strokeMap,
+            boxes: boxMap,
+            images: imageMap,
+            startPt: pt,
+          }
           setIsDraggingSelection(true)
           dragStartPointRef.current = { x: pt.x, y: pt.y }
           pushHistory()
@@ -556,6 +604,7 @@ export default function NotebookBoard({
       setSelectedStrokeIds(new Set())
       setSelectedBoxIds(new Set())
       setSelectedImageIds(new Set())
+      initialSelectionSnapshotRef.current = null
       return
     }
 
@@ -670,34 +719,54 @@ export default function NotebookBoard({
     setCanvasPointerPos(pt)
 
     // Laser pointer movement
-    if (activeTool === "laser" && laserState.active) {
+    if (activeTool === "laser") {
       setLaserState((prev) => ({
         ...prev,
         current: pt,
-        trail: [...prev.trail.slice(-15), { x: pt.x, y: pt.y, time: Date.now() }],
+        trail: isDrawingRef.current
+          ? [...(prev.trail || []).slice(-30), { x: pt.x, y: pt.y, time: Date.now() }]
+          : prev.trail,
       }))
-      return
+      if (!isDrawingRef.current) return
     }
 
     if (!isDrawingRef.current) return
 
     // Eraser dragging (Strokes and Study Tape)
     if (activeTool === "eraser") {
-      const threshold = eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24
-      const filtered = currentPage.strokes.filter((s) => {
-        if (eraseHighlighterOnly && s.tool !== "highlighter") return true
-        return !isPointNearStroke(pt, s, threshold)
-      })
+      const threshold = eraserMode === "precision" ? 8 : eraserMode === "standard" ? 18 : 28
+      const p1 = lastEraserPointRef.current || pt
+      const p2 = pt
+      lastEraserPointRef.current = pt
+
+      let changed = false
+      let newStrokes: InkStroke[] = []
+
+      for (const s of currentPage.strokes) {
+        if (eraseHighlighterOnly && s.tool !== "highlighter") {
+          newStrokes.push(s)
+          continue
+        }
+        if (isSegmentNearStroke(p1, p2, s, threshold)) {
+          changed = true
+          const result = eraseStrokeAtPoint(s, pt, threshold, eraserMode)
+          newStrokes.push(...result)
+        } else {
+          newStrokes.push(s)
+        }
+      }
+
       let tapeFiltered = currentPage.tapeStrips || []
       if (!eraseHighlighterOnly && tapeFiltered.length > 0) {
         tapeFiltered = tapeFiltered.filter((tape) => !isPointNearTape(pt, tape, threshold))
+        if (tapeFiltered.length !== (currentPage.tapeStrips || []).length) {
+          changed = true
+        }
       }
-      if (
-        filtered.length !== currentPage.strokes.length ||
-        tapeFiltered.length !== (currentPage.tapeStrips || []).length
-      ) {
+
+      if (changed) {
         const updatedPages = [...doc.pages]
-        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered, tapeStrips: tapeFiltered }
+        updatedPages[currentPageIndex] = { ...currentPage, strokes: newStrokes, tapeStrips: tapeFiltered }
         commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       }
       return
@@ -712,20 +781,24 @@ export default function NotebookBoard({
 
     // Lasso loop dragging
     if (activeTool === "lasso") {
-      if (isDraggingSelection && dragStartPointRef.current) {
-        const dx = pt.x - dragStartPointRef.current.x
-        const dy = pt.y - dragStartPointRef.current.y
-        dragStartPointRef.current = { x: pt.x, y: pt.y }
+      if (isDraggingSelection && initialSelectionSnapshotRef.current) {
+        const { strokes: origStrokes, boxes: origBoxes, images: origImages, startPt } = initialSelectionSnapshotRef.current
+        const totalDx = pt.x - startPt.x
+        const totalDy = pt.y - startPt.y
 
-        const updatedStrokes = currentPage.strokes.map((s) =>
-          selectedStrokeIds.has(s.id) ? translateStroke(s, dx, dy) : s
-        )
-        const updatedBoxes = (currentPage.textBoxes || []).map((b) =>
-          selectedBoxIds.has(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
-        )
-        const updatedImages = (currentPage.images || []).map((img) =>
-          selectedImageIds.has(img.id) ? { ...img, x: img.x + dx, y: img.y + dy } : img
-        )
+        const updatedStrokes = currentPage.strokes.map((s) => {
+          const orig = origStrokes.get(s.id)
+          return orig ? translateStroke(orig, totalDx, totalDy) : s
+        })
+        const updatedBoxes = (currentPage.textBoxes || []).map((b) => {
+          const orig = origBoxes.get(b.id)
+          return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : b
+        })
+        const updatedImages = (currentPage.images || []).map((img) => {
+          const orig = origImages.get(img.id)
+          return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : img
+        })
+
         const updatedPages = [...doc.pages]
         updatedPages[currentPageIndex] = {
           ...currentPage,
@@ -733,7 +806,7 @@ export default function NotebookBoard({
           textBoxes: updatedBoxes,
           images: updatedImages,
         }
-        commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+        setDoc((prev) => ({ ...prev, pages: updatedPages }))
         return
       }
 
@@ -802,18 +875,16 @@ export default function NotebookBoard({
           const detected = detectGeometricShape(currentStrokeRef.current.points)
           if (detected) {
             isShapeLockedRef.current = true
-            const first = currentStrokeRef.current.points[0]
-            const last = currentStrokeRef.current.points[currentStrokeRef.current.points.length - 1]
             const morphed: InkStroke = {
               ...currentStrokeRef.current,
               tool: "shape",
               shapeType: detected,
               fill: shapeFill ? currentStrokeRef.current.color + "33" : undefined,
-              points: [first, last],
+              points: currentStrokeRef.current.points,
             }
             setCurrentStroke(morphed)
           }
-        }, 380)
+        }, 420)
       }
     }
   }
@@ -823,7 +894,7 @@ export default function NotebookBoard({
     isDrawingRef.current = false
     if (shapeHoldTimerRef.current) clearTimeout(shapeHoldTimerRef.current)
 
-    // Laser deactivation
+    // Laser deactivation (keep trail for progressive decay!)
     if (activeTool === "laser") {
       setLaserState((prev) => ({ ...prev, active: false, current: null }))
       return
@@ -864,7 +935,10 @@ export default function NotebookBoard({
     if (activeTool === "lasso") {
       if (isDraggingSelection) {
         setIsDraggingSelection(false)
-        dragStartPointRef.current = null
+        if (initialSelectionSnapshotRef.current) {
+          commitDoc(doc)
+          initialSelectionSnapshotRef.current = null
+        }
         return
       }
 
@@ -905,11 +979,25 @@ export default function NotebookBoard({
 
     // Inking stroke completion
     if (currentStroke && currentStroke.points.length > 0) {
+      let finalStroke = currentStroke
+      // Auto-Shape on release if auto-shape is active or dedicated shape tool
+      if ((activeTool === "shape" || autoShapeDetection) && !finalStroke.shapeType && finalStroke.points.length > 8) {
+        const detected = detectGeometricShape(finalStroke.points)
+        if (detected) {
+          finalStroke = {
+            ...finalStroke,
+            tool: "shape",
+            shapeType: detected,
+            fill: shapeFill ? finalStroke.color + "33" : undefined,
+          }
+        }
+      }
+
       pushHistory()
       const updatedPages = [...doc.pages]
       updatedPages[currentPageIndex] = {
         ...currentPage,
-        strokes: [...currentPage.strokes, currentStroke],
+        strokes: [...currentPage.strokes, finalStroke],
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setCurrentStroke(null)
@@ -1800,27 +1888,76 @@ export default function NotebookBoard({
             <Compass className="w-4 h-4" />
           </button>
 
-          {/* Laser Pointer */}
-          <button
-            onClick={() => {
-              if (activeTool === "laser") {
-                setActiveTool(previousTool)
-                setLaserState((prev) => ({ ...prev, active: false }))
-              } else {
-                setPreviousTool(activeTool)
-                setActiveTool("laser")
-                setLaserState((prev) => ({ ...prev, active: true }))
-              }
-            }}
-            className={`p-1.5 rounded-lg transition-colors ${
-              activeTool === "laser"
-                ? "bg-rose-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Laser Pointer (Live Presentations)"
-          >
-            <Radio className="w-4 h-4" />
-          </button>
+          {/* Laser Pointer with Mode & Color Popover */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (activeTool === "laser") {
+                  setLaserPopoverOpen(!laserPopoverOpen)
+                } else {
+                  setPreviousTool(activeTool)
+                  setActiveTool("laser")
+                  setLaserState((prev) => ({ ...prev, active: true }))
+                  setLaserPopoverOpen(true)
+                }
+              }}
+              className={`p-1.5 rounded-lg transition-colors ${
+                activeTool === "laser"
+                  ? "bg-rose-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+              }`}
+              title="Laser Pointer (Live Presentations)"
+            >
+              <Radio className="w-4 h-4" />
+            </button>
+            {activeTool === "laser" && laserPopoverOpen && (
+              <div className="absolute top-10 left-0 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-2 z-50 flex flex-col gap-2 w-44 animate-in fade-in select-none">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                  <span>Laser Mode</span>
+                  <button onClick={() => setLaserPopoverOpen(false)} className="text-slate-400 hover:text-slate-600">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    onClick={() => setLaserState((prev) => ({ ...prev, mode: "trail" }))}
+                    className={`px-2 py-1 rounded text-[11px] font-medium ${
+                      laserState.mode === "trail"
+                        ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
+                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    Fading Trail
+                  </button>
+                  <button
+                    onClick={() => setLaserState((prev) => ({ ...prev, mode: "dot", trail: [] }))}
+                    className={`px-2 py-1 rounded text-[11px] font-medium ${
+                      laserState.mode === "dot"
+                        ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
+                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    Laser Dot
+                  </button>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-700">
+                  <span className="text-[10px] text-slate-500 font-medium">Color</span>
+                  <div className="flex items-center gap-1.5">
+                    {["#ef4444", "#10b981", "#06b6d4", "#ec4899"].map((col) => (
+                      <button
+                        key={col}
+                        onClick={() => setLaserState((prev) => ({ ...prev, color: col }))}
+                        className={`w-4 h-4 rounded-full border ${
+                          (laserState.color || "#ef4444") === col ? "ring-2 ring-rose-400 scale-110" : ""
+                        }`}
+                        style={{ backgroundColor: col }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Zoom Window (Handwriting Magnifier) */}
           <button
@@ -2206,6 +2343,18 @@ export default function NotebookBoard({
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
+                  <button
+                    onClick={() => {
+                      setSelectedStrokeIds(new Set())
+                      setSelectedBoxIds(new Set())
+                      setSelectedImageIds(new Set())
+                      initialSelectionSnapshotRef.current = null
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-full"
+                    title="Clear Selection"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
 
@@ -2402,20 +2551,69 @@ export default function NotebookBoard({
                 />
               )}
 
-              {/* Selected Group Bounding Box Indicator */}
+              {/* Selected Group Bounding Box Indicator with Corner Resize Handles */}
               {computedSelectionBounds &&
                 (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) && (
-                  <rect
-                    x={computedSelectionBounds.minX - 6}
-                    y={computedSelectionBounds.minY - 6}
-                    width={computedSelectionBounds.maxX - computedSelectionBounds.minX + 12}
-                    height={computedSelectionBounds.maxY - computedSelectionBounds.minY + 12}
-                    fill="none"
-                    stroke="#3b82f6"
-                    strokeWidth={1.5}
-                    strokeDasharray="3,3"
-                    className="animate-pulse pointer-events-none"
-                  />
+                  <g className="lasso-selection-box">
+                    <rect
+                      x={computedSelectionBounds.minX - 6}
+                      y={computedSelectionBounds.minY - 6}
+                      width={computedSelectionBounds.maxX - computedSelectionBounds.minX + 12}
+                      height={computedSelectionBounds.maxY - computedSelectionBounds.minY + 12}
+                      fill="rgba(59, 130, 246, 0.05)"
+                      stroke="#3b82f6"
+                      strokeWidth={1.5}
+                      strokeDasharray="4,4"
+                      className="cursor-move"
+                    />
+                    {/* Bottom-right Corner Scale Handle */}
+                    <circle
+                      cx={computedSelectionBounds.maxX + 6}
+                      cy={computedSelectionBounds.maxY + 6}
+                      r={7}
+                      fill="#3b82f6"
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                      className="cursor-nwse-resize"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        try {
+                          e.currentTarget.setPointerCapture(e.pointerId)
+                        } catch {}
+                        const startX = e.clientX
+                        const startY = e.clientY
+                        const origW = computedSelectionBounds.maxX - computedSelectionBounds.minX
+                        const origH = computedSelectionBounds.maxY - computedSelectionBounds.minY
+                        const origin = { x: computedSelectionBounds.minX, y: computedSelectionBounds.minY }
+                        const strokeSnapshot = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+
+                        const onMove = (moveEv: PointerEvent) => {
+                          const dw = (moveEv.clientX - startX) / zoomLevel
+                          const dh = (moveEv.clientY - startY) / zoomLevel
+                          const sx = Math.max(0.2, (origW + dw) / Math.max(10, origW))
+                          const sy = Math.max(0.2, (origH + dh) / Math.max(10, origH))
+                          const updatedStrokes = currentPage.strokes.map((s) => {
+                            if (selectedStrokeIds.has(s.id)) {
+                              const orig = strokeSnapshot.find((x) => x.id === s.id)
+                              return orig ? scaleStroke(orig, sx, sy, origin) : s
+                            }
+                            return s
+                          })
+                          const updatedPages = [...doc.pages]
+                          updatedPages[currentPageIndex] = { ...currentPage, strokes: updatedStrokes }
+                          setDoc((prev) => ({ ...prev, pages: updatedPages }))
+                        }
+                        const onUp = () => {
+                          window.removeEventListener("pointermove", onMove)
+                          window.removeEventListener("pointerup", onUp)
+                          pushHistory()
+                          commitDoc(doc)
+                        }
+                        window.addEventListener("pointermove", onMove)
+                        window.addEventListener("pointerup", onUp)
+                      }}
+                    />
+                  </g>
                 )}
 
               {/* Eraser radius visual indicator cursor */}
@@ -2423,7 +2621,7 @@ export default function NotebookBoard({
                 <circle
                   cx={canvasPointerPos.x}
                   cy={canvasPointerPos.y}
-                  r={eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24}
+                  r={eraserMode === "precision" ? 8 : eraserMode === "standard" ? 18 : 28}
                   fill="rgba(244, 63, 94, 0.15)"
                   stroke="#f43f5e"
                   strokeWidth={1.5}
@@ -2432,36 +2630,65 @@ export default function NotebookBoard({
                 />
               )}
 
-              {/* Zoom Window Target Magnification Indicator Box */}
+              {/* Zoom Window Target Magnification Indicator Box (Draggable) */}
               {zoomWindowState.active && (
-                <g className="zoom-target-indicator pointer-events-none">
+                <g
+                  className="zoom-target-indicator cursor-move"
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                    } catch {}
+                    const startClientX = e.clientX
+                    const startClientY = e.clientY
+                    const startTargetX = zoomWindowState.targetX
+                    const startTargetY = zoomWindowState.targetY
+
+                    const onMove = (moveEv: PointerEvent) => {
+                      const dx = (moveEv.clientX - startClientX) / zoomLevel
+                      const dy = (moveEv.clientY - startClientY) / zoomLevel
+                      setZoomWindowState((prev) => ({
+                        ...prev,
+                        targetX: Math.max(0, Math.min(currentPage.width - 100, startTargetX + dx)),
+                        targetY: Math.max(0, Math.min(currentPage.height - 100, startTargetY + dy)),
+                      }))
+                    }
+                    const onUp = () => {
+                      window.removeEventListener("pointermove", onMove)
+                      window.removeEventListener("pointerup", onUp)
+                    }
+                    window.addEventListener("pointermove", onMove)
+                    window.addEventListener("pointerup", onUp)
+                  }}
+                >
                   <rect
                     x={zoomWindowState.targetX}
                     y={zoomWindowState.targetY}
                     width={zoomWindowState.width / zoomWindowState.scale}
                     height={zoomWindowState.height / zoomWindowState.scale}
-                    fill="rgba(59, 130, 246, 0.08)"
+                    fill="rgba(59, 130, 246, 0.12)"
                     stroke="#3b82f6"
-                    strokeWidth={1.5}
+                    strokeWidth={2}
                     strokeDasharray="4,4"
                   />
                   <rect
                     x={zoomWindowState.targetX}
-                    y={zoomWindowState.targetY - 18}
-                    width={90}
-                    height={18}
-                    rx={3}
+                    y={zoomWindowState.targetY - 20}
+                    width={100}
+                    height={20}
+                    rx={4}
                     fill="#3b82f6"
                   />
                   <text
-                    x={zoomWindowState.targetX + 45}
-                    y={zoomWindowState.targetY - 5}
+                    x={zoomWindowState.targetX + 50}
+                    y={zoomWindowState.targetY - 6}
                     textAnchor="middle"
                     fontSize={10}
                     fill="#ffffff"
                     fontWeight="bold"
+                    className="select-none pointer-events-none"
                   >
-                    Magnifier View
+                    Magnifier ⠿ Drag
                   </text>
                 </g>
               )}
@@ -2471,6 +2698,7 @@ export default function NotebookBoard({
                 ruler={rulerState}
                 onChangeRuler={setRulerState}
                 laser={laserState}
+                onChangeLaser={setLaserState}
                 zoomLevel={zoomLevel}
               />
             </svg>
@@ -2570,8 +2798,12 @@ export default function NotebookBoard({
 
                   {isEditing ? (
                     <div className="w-full h-[calc(100%-28px)] flex flex-col">
-                      <div className="flex items-center gap-1 mb-1 p-1 bg-white/90 dark:bg-slate-800/90 rounded shadow-sm text-xs flex-wrap">
+                      <div
+                        className="flex items-center gap-1 mb-1 p-1 bg-white/95 dark:bg-slate-800/95 rounded shadow-sm text-xs flex-wrap"
+                        onPointerDown={(e) => e.preventDefault()}
+                      >
                         <button
+                          onPointerDown={(e) => e.preventDefault()}
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
                               b.id === box.id ? { ...b, bold: !b.bold } : b
@@ -2585,6 +2817,7 @@ export default function NotebookBoard({
                           B
                         </button>
                         <button
+                          onPointerDown={(e) => e.preventDefault()}
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
                               b.id === box.id ? { ...b, italic: !b.italic } : b
@@ -2598,6 +2831,7 @@ export default function NotebookBoard({
                           I
                         </button>
                         <button
+                          onPointerDown={(e) => e.preventDefault()}
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
                               b.id === box.id ? { ...b, fontSize: Math.max(10, b.fontSize - 2) } : b
@@ -2611,6 +2845,7 @@ export default function NotebookBoard({
                           A-
                         </button>
                         <button
+                          onPointerDown={(e) => e.preventDefault()}
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
                               b.id === box.id ? { ...b, fontSize: Math.min(48, b.fontSize + 2) } : b
@@ -2625,6 +2860,7 @@ export default function NotebookBoard({
                         </button>
                         <select
                           value={box.fontFamily || "sans"}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             const updated = currentPage.textBoxes.map((b) =>
                               b.id === box.id ? { ...b, fontFamily: e.target.value as any } : b
@@ -2691,6 +2927,44 @@ export default function NotebookBoard({
                       {box.collapsed ? (box.text.split("\n")[0] || "Note...") : box.text}
                     </div>
                   )}
+
+                  {/* Corner Resize Handle */}
+                  {!readOnly && !box.collapsed && (
+                    <div
+                      className="absolute bottom-1 right-1 w-3.5 h-3.5 cursor-nwse-resize opacity-40 hover:opacity-100 flex items-center justify-center select-none"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        const startX = e.clientX
+                        const startY = e.clientY
+                        const origW = box.width
+                        const origH = box.height
+                        const onMove = (moveEv: PointerEvent) => {
+                          const dw = (moveEv.clientX - startX) / zoomLevel
+                          const dh = (moveEv.clientY - startY) / zoomLevel
+                          const updatedBoxes = currentPage.textBoxes.map((b) =>
+                            b.id === box.id
+                              ? { ...b, width: Math.max(100, origW + dw), height: Math.max(40, origH + dh) }
+                              : b
+                          )
+                          const updatedPages = [...doc.pages]
+                          updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
+                          setDoc((prev) => ({ ...prev, pages: updatedPages }))
+                        }
+                        const onUp = () => {
+                          window.removeEventListener("pointermove", onMove)
+                          window.removeEventListener("pointerup", onUp)
+                          pushHistory()
+                          commitDoc(doc)
+                        }
+                        window.addEventListener("pointermove", onMove)
+                        window.addEventListener("pointerup", onUp)
+                      }}
+                    >
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                        <path d="M7 1L1 7M7 4L4 7M7 7L7 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -2703,6 +2977,7 @@ export default function NotebookBoard({
             onChangeTarget={(tx, ty) =>
               setZoomWindowState((prev) => ({ ...prev, targetX: tx, targetY: ty }))
             }
+            onChangeScale={(s) => setZoomWindowState((prev) => ({ ...prev, scale: s }))}
             strokes={currentPage.strokes}
             activeColor={activeColor}
             activeSize={activeSize}

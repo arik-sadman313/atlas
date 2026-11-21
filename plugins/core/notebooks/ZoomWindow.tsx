@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react"
-import { X, ZoomIn, ArrowRight, CornerDownLeft } from "lucide-react"
+import { X, ZoomIn, ArrowRight, CornerDownLeft, GripHorizontal } from "lucide-react"
 import type { ZoomWindowState, InkStroke } from "./types"
 import { renderStrokeToPath } from "./stroke"
 
@@ -7,6 +7,7 @@ interface ZoomWindowProps {
   state: ZoomWindowState
   onClose: () => void
   onChangeTarget: (targetX: number, targetY: number) => void
+  onChangeScale?: (scale: number) => void
   strokes: InkStroke[]
   activeColor: string
   activeSize: number
@@ -18,6 +19,7 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
   state,
   onClose,
   onChangeTarget,
+  onChangeScale,
   strokes,
   activeColor,
   activeSize,
@@ -27,29 +29,46 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
   const [currentStroke, setCurrentStroke] = useState<InkStroke | null>(null)
   const isDrawingRef = useRef(false)
   const windowRef = useRef<HTMLDivElement>(null)
+  const hasAdvancedForCurrentStrokeRef = useRef(false)
+
+  // Zoom window window position offset (draggable by header)
+  const [windowOffset, setWindowOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const isDraggingHeaderRef = useRef(false)
+  const headerDragStartRef = useRef<{ clientX: number; clientY: number; startX: number; startY: number }>({
+    clientX: 0,
+    clientY: 0,
+    startX: 0,
+    startY: 0,
+  })
 
   if (!state.active) return null
 
   const scale = state.scale || 2.5
-  const boxWidth = 560
-  const boxHeight = 220
-  const returnZoneWidth = 80 // Shaded auto-advance return zone
+  const boxWidth = 580
+  const boxHeight = 230
+  const returnZoneWidth = 90 // Shaded auto-advance return zone
 
   // Canvas bounds shown inside the zoom box
   const targetViewW = boxWidth / scale
   const targetViewH = boxHeight / scale
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    e.stopPropagation()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {}
+
     const rect = e.currentTarget.getBoundingClientRect()
     const clickX = e.clientX - rect.left
     const clickY = e.clientY - rect.top
 
     // Check if clicked in auto-advance return zone
     if (clickX > boxWidth - returnZoneWidth) {
-      // Auto-advance target smoothly to the right!
-      onChangeTarget(state.targetX + targetViewW * 0.7, state.targetY)
+      onChangeTarget(state.targetX + targetViewW * 0.65, state.targetY)
       return
     }
+
+    hasAdvancedForCurrentStrokeRef.current = false
 
     // Map screen click inside zoom window to notebook canvas coordinates
     const pageX = state.targetX + clickX / scale
@@ -88,13 +107,17 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
       points: updatedPoints,
     })
 
-    // If writing enters the auto-advance return zone, trigger auto-shift!
-    if (clickX > boxWidth - returnZoneWidth * 0.5) {
-      onChangeTarget(state.targetX + targetViewW * 0.6, state.targetY)
+    // If writing enters the auto-advance return zone, trigger auto-shift ONCE per stroke
+    if (clickX > boxWidth - returnZoneWidth * 0.7 && !hasAdvancedForCurrentStrokeRef.current) {
+      hasAdvancedForCurrentStrokeRef.current = true
+      onChangeTarget(state.targetX + targetViewW * 0.65, state.targetY)
     }
   }
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {}
     if (!isDrawingRef.current || !currentStroke) return
     isDrawingRef.current = false
     if (currentStroke.points.length > 1) {
@@ -103,21 +126,81 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
     setCurrentStroke(null)
   }
 
+  // Handle Dragging Zoom Window Position
+  const handleHeaderPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {}
+    isDraggingHeaderRef.current = true
+    headerDragStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      startX: windowOffset.x,
+      startY: windowOffset.y,
+    }
+  }
+
+  const handleHeaderPointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingHeaderRef.current) return
+    const dx = e.clientX - headerDragStartRef.current.clientX
+    const dy = e.clientY - headerDragStartRef.current.clientY
+    setWindowOffset({
+      x: headerDragStartRef.current.startX + dx,
+      y: headerDragStartRef.current.startY + dy,
+    })
+  }
+
+  const handleHeaderPointerUp = (e: React.PointerEvent) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {}
+    isDraggingHeaderRef.current = false
+  }
+
   return (
     <div
       ref={windowRef}
-      className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white dark:bg-[#1a1d24] rounded-2xl shadow-2xl border-2 border-blue-500/80 z-40 overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-4"
-      style={{ width: `${boxWidth}px`, height: `${boxHeight}px` }}
+      className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white dark:bg-[#1a1d24] rounded-2xl shadow-2xl border-2 border-blue-500/80 z-40 overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-4 select-none"
+      style={{
+        width: `${boxWidth}px`,
+        height: `${boxHeight}px`,
+        transform: `translate(calc(-50% + ${windowOffset.x}px), ${windowOffset.y}px)`,
+      }}
     >
-      {/* Zoom Window Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs select-none">
+      {/* Zoom Window Header (Draggable) */}
+      <div
+        className="flex items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs cursor-move select-none"
+        onPointerDown={handleHeaderPointerDown}
+        onPointerMove={handleHeaderPointerMove}
+        onPointerUp={handleHeaderPointerUp}
+        onPointerCancel={handleHeaderPointerUp}
+      >
         <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
+          <GripHorizontal className="w-3.5 h-3.5 text-slate-400" />
           <ZoomIn className="w-4 h-4 text-blue-500" />
-          <span>Zoom Window ({scale}x)</span>
+          <span>Zoom Window</span>
+          {/* Zoom scale selector */}
+          <div
+            className="flex items-center gap-0.5 ml-2 bg-slate-200 dark:bg-slate-700 rounded p-0.5"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {[1.5, 2.0, 2.5, 3.0].map((s) => (
+              <button
+                key={s}
+                onClick={() => onChangeScale?.(s)}
+                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                  scale === s ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-300 hover:bg-slate-300"
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
           {/* Next line return */}
           <button
             onClick={() => onChangeTarget(100, state.targetY + 45)}
@@ -130,7 +213,7 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
 
           {/* Pan forward */}
           <button
-            onClick={() => onChangeTarget(state.targetX + targetViewW * 0.7, state.targetY)}
+            onClick={() => onChangeTarget(state.targetX + targetViewW * 0.65, state.targetY)}
             className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded text-[11px] font-medium hover:bg-blue-200"
             title="Advance right"
           >
@@ -155,6 +238,7 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
           {/* Transform group representing scaled region */}
           <g transform={`scale(${scale}) translate(${-state.targetX}, ${-state.targetY})`}>

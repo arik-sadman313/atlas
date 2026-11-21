@@ -239,6 +239,7 @@ export interface LaserState {
   mode: "dot" | "trail"
   current: InkPoint | null
   trail: Array<{ x: number; y: number; time: number }>
+  color?: string
 }
 
 export interface ZoomWindowState {

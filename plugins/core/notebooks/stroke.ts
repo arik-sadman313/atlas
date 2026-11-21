@@ -297,6 +297,29 @@ function renderShapePrimitive(stroke: InkStroke): string {
   const first = pts[0]
   const last = pts[pts.length - 1]
 
+  // Calculate full bounding box across ALL stroke points
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+
+  // Fallback for 2-point shapes
+  if (!isFinite(minX) || maxX <= minX) {
+    minX = Math.min(first.x, last.x)
+    maxX = Math.max(first.x, last.x)
+  }
+  if (!isFinite(minY) || maxY <= minY) {
+    minY = Math.min(first.y, last.y)
+    maxY = Math.max(first.y, last.y)
+  }
+  const width = Math.max(2, maxX - minX)
+  const height = Math.max(2, maxY - minY)
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+
   switch (stroke.shapeType) {
     case "line": {
       return `M${first.x.toFixed(2)},${first.y.toFixed(2)} L${last.x.toFixed(2)},${last.y.toFixed(2)}`
@@ -305,7 +328,7 @@ function renderShapePrimitive(stroke: InkStroke): string {
       const dx = last.x - first.x
       const dy = last.y - first.y
       const angle = Math.atan2(dy, dx)
-      const headLen = Math.max(16, stroke.size * 3)
+      const headLen = Math.max(14, stroke.size * 2.5)
       const a1 = angle - Math.PI / 6
       const a2 = angle + Math.PI / 6
       const x1 = last.x - headLen * Math.cos(a1)
@@ -315,25 +338,22 @@ function renderShapePrimitive(stroke: InkStroke): string {
       return `M${first.x.toFixed(2)},${first.y.toFixed(2)} L${last.x.toFixed(2)},${last.y.toFixed(2)} M${x1.toFixed(2)},${y1.toFixed(2)} L${last.x.toFixed(2)},${last.y.toFixed(2)} L${x2.toFixed(2)},${y2.toFixed(2)}`
     }
     case "rect": {
-      const minX = Math.min(first.x, last.x)
-      const minY = Math.min(first.y, last.y)
-      const width = Math.abs(last.x - first.x)
-      const height = Math.abs(last.y - first.y)
-      return `M${minX},${minY} H${minX + width} V${minY + height} H${minX} Z`
+      return `M${minX},${minY} H${maxX} V${maxY} H${minX} Z`
     }
     case "ellipse": {
-      const cx = (first.x + last.x) / 2
-      const cy = (first.y + last.y) / 2
-      const rx = Math.abs(last.x - first.x) / 2
-      const ry = Math.abs(last.y - first.y) / 2
-      return `M${cx - rx},${cy} a${rx},${ry} 0 1,0 ${rx * 2},0 a${rx},${ry} 0 1,0 -${rx * 2},0`
+      const rx = width / 2
+      const ry = height / 2
+      const isCircle = Math.abs(rx - ry) < Math.max(10, Math.min(rx, ry) * 0.25)
+      const finalRx = isCircle ? (rx + ry) / 2 : rx
+      const finalRy = isCircle ? (rx + ry) / 2 : ry
+      return `M${cx - finalRx},${cy} a${finalRx},${finalRy} 0 1,0 ${finalRx * 2},0 a${finalRx},${finalRy} 0 1,0 -${finalRx * 2},0`
     }
     case "triangle": {
-      const topX = (first.x + last.x) / 2
-      const topY = Math.min(first.y, last.y)
-      const bottomY = Math.max(first.y, last.y)
-      const leftX = Math.min(first.x, last.x)
-      const rightX = Math.max(first.x, last.x)
+      const topX = cx
+      const topY = minY
+      const bottomY = maxY
+      const leftX = minX
+      const rightX = maxX
       return `M${topX},${topY} L${rightX},${bottomY} L${leftX},${bottomY} Z`
     }
     case "arc": {
@@ -343,17 +363,12 @@ function renderShapePrimitive(stroke: InkStroke): string {
       return `M${first.x},${first.y} A${r},${r} 0 0,1 ${last.x},${last.y}`
     }
     case "polygon": {
-      // Hexagonal polygon bounding box
-      const minX = Math.min(first.x, last.x)
-      const minY = Math.min(first.y, last.y)
-      const w = Math.abs(last.x - first.x)
-      const h = Math.abs(last.y - first.y)
-      const p1 = `${minX + w * 0.25},${minY}`
-      const p2 = `${minX + w * 0.75},${minY}`
-      const p3 = `${minX + w},${minY + h * 0.5}`
-      const p4 = `${minX + w * 0.75},${minY + h}`
-      const p5 = `${minX + w * 0.25},${minY + h}`
-      const p6 = `${minX},${minY + h * 0.5}`
+      const p1 = `${minX + width * 0.25},${minY}`
+      const p2 = `${minX + width * 0.75},${minY}`
+      const p3 = `${maxX},${minY + height * 0.5}`
+      const p4 = `${minX + width * 0.75},${maxY}`
+      const p5 = `${minX + width * 0.25},${maxY}`
+      const p6 = `${minX},${minY + height * 0.5}`
       return `M${p1} L${p2} L${p3} L${p4} L${p5} L${p6} Z`
     }
     default:
@@ -377,13 +392,13 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
   }
 
   // 1. Straight Line Check: path length close to direct Euclidean distance
-  if (pathLen > 40 && totalDist / pathLen > 0.94) {
+  if (pathLen > 30 && totalDist / pathLen > 0.88) {
     return "line"
   }
 
   // 2. Closed Shape Check: start and end are close
-  const isClosed = totalDist < Math.max(35, pathLen * 0.15)
-  if (isClosed && points.length > 15) {
+  const isClosed = totalDist < Math.max(45, pathLen * 0.25)
+  if (isClosed && points.length > 12) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     for (const p of points) {
       if (p.x < minX) minX = p.x
@@ -393,7 +408,7 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
     }
     const w = maxX - minX
     const h = maxY - minY
-    if (w > 30 && h > 30) {
+    if (w > 20 && h > 20) {
       const cx = (minX + maxX) / 2
       const cy = (minY + maxY) / 2
       const avgR = (w + h) / 4
@@ -406,7 +421,7 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
       }
       radiusVariance /= points.length
 
-      if (radiusVariance / avgR < 0.22) {
+      if (radiusVariance / avgR < 0.28) {
         return "ellipse"
       }
 
@@ -439,6 +454,56 @@ export function isPointNearStroke(point: { x: number; y: number }, stroke: InkSt
     }
   }
   return false
+}
+
+/**
+ * Checks whether a line segment between previous and current pointer hits a stroke.
+ * Prevents missing strokes when dragging eraser rapidly.
+ */
+export function isSegmentNearStroke(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  stroke: InkStroke,
+  threshold = 16
+): boolean {
+  const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+  const steps = Math.max(1, Math.ceil(dist / 8))
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const testPt = {
+      x: p1.x + t * (p2.x - p1.x),
+      y: p1.y + t * (p2.y - p1.y),
+    }
+    if (isPointNearStroke(testPt, stroke, threshold)) return true
+  }
+  return false
+}
+
+/**
+ * Precision trimming or stroke deletion.
+ */
+export function eraseStrokeAtPoint(
+  stroke: InkStroke,
+  point: { x: number; y: number },
+  threshold: number,
+  mode: "precision" | "standard" | "stroke"
+): InkStroke[] {
+  if (mode === "stroke" || mode === "standard" || stroke.shapeType) {
+    return isPointNearStroke(point, stroke, threshold) ? [] : [stroke]
+  }
+
+  // Precision Mode: remove points directly inside the eraser radius
+  const r2 = threshold * threshold
+  const remainingPoints = stroke.points.filter((p) => {
+    const dx = p.x - point.x
+    const dy = p.y - point.y
+    return dx * dx + dy * dy > r2
+  })
+
+  if (remainingPoints.length < 2) return []
+  if (remainingPoints.length === stroke.points.length) return [stroke]
+
+  return [{ ...stroke, points: remainingPoints }]
 }
 
 /**
