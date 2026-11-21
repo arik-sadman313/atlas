@@ -29,7 +29,7 @@ public class AtlasPencilKitPlugin: NSObject, FlutterPlugin, UIPencilInteractionD
 
     public func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
         channel?.invokeMethod("onApplePencilDoubleTap", arguments: [
-            "preferredAction": UIPencilInteraction.preferredAction.rawValue
+            "preferredTapAction": UIPencilInteraction.preferredTapAction.rawValue
         ])
     }
 
