@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react"
-import { PenTool } from "lucide-react"
+import { PenTool, Zap } from "lucide-react"
 import { besideActive, definePlugin, freeName, getStore, openNew, plural, post, reload, type FileFormat } from "@vaultite"
 import { createEmptyNotebook } from "./types"
 
@@ -15,6 +15,20 @@ async function newNotebook(folder = whereNew()) {
   const f = await post<{ path: string }>("file", {
     path: `${folder ? `${folder}/` : ""}${name}.notebook`,
     text: EMPTY,
+    unique: true,
+  })
+  await reload()
+  return f.path
+}
+
+async function quickNote() {
+  const s = getStore()
+  const folder = "QuickNotes"
+  const name = s ? freeName(s.files, folder, "QuickNote", ".notebook") : "QuickNote"
+  const emptyDoc = createEmptyNotebook("QuickNote", "blank", "white")
+  const f = await post<{ path: string }>("file", {
+    path: `${folder}/${name}.notebook`,
+    text: JSON.stringify(emptyDoc, null, "\t") + "\n",
     unique: true,
   })
   await reload()
@@ -48,13 +62,22 @@ const format: FileFormat = {
 
 export default definePlugin({
   formats: { notebook: format },
-  newFiles: [{ label: "New notebook", icon: PenTool, make: newNotebook }],
+  newFiles: [
+    { label: "New notebook", icon: PenTool, make: newNotebook },
+    { label: "QuickNote Instant Scratchpad", icon: Zap, make: quickNote },
+  ],
   commands: [
     {
       id: "notebook:new",
       name: "New vector handwriting notebook",
       run: () => newNotebook().then((p) => openNew(p)),
       icon: PenTool,
+    },
+    {
+      id: "notebook:quicknote",
+      name: "QuickNote: One-tap instant scratchpad",
+      run: () => quickNote().then((p) => openNew(p)),
+      icon: Zap,
     },
   ],
   slash: () => [
@@ -69,6 +92,20 @@ export default definePlugin({
       description: "A vector handwriting notebook with Apple Pencil support and GoodNotes tools.",
       run: async (put) => {
         const p = await newNotebook()
+        put(`![[${p}]]\n`)
+      },
+    },
+    {
+      id: "notebook:quicknote",
+      title: "QuickNote",
+      section: "Drawing",
+      keywords: "quicknote scratchpad instant notes",
+      detail: "Instant handwriting scratchpad",
+      line: true,
+      icon: Zap,
+      description: "Instant blank scratchpad canvas.",
+      run: async (put) => {
+        const p = await quickNote()
         put(`![[${p}]]\n`)
       },
     },

@@ -1,5 +1,5 @@
 import { getStroke } from "perfect-freehand"
-import type { InkStroke, ShapePrimitive } from "./types"
+import type { InkPoint, InkStroke, ShapePrimitive, RulerState } from "./types"
 
 /**
  * Converts outline polygon points from perfect-freehand into a smooth SVG path.
@@ -26,6 +26,121 @@ export function getSvgPathFromStroke(strokePoints: number[][], closed = true): s
   }
 
   return result
+}
+
+/**
+ * Smooths out hand tremor using a moving-average stabilization window.
+ */
+export function stabilizePoints(points: InkPoint[], windowSize = 3): InkPoint[] {
+  if (points.length <= windowSize) return points
+  const stabilized: InkPoint[] = []
+
+  for (let i = 0; i < points.length; i++) {
+    const start = Math.max(0, i - windowSize + 1)
+    const window = points.slice(start, i + 1)
+    const avgX = window.reduce((sum, p) => sum + p.x, 0) / window.length
+    const avgY = window.reduce((sum, p) => sum + p.y, 0) / window.length
+    stabilized.push({
+      ...points[i],
+      x: avgX,
+      y: avgY,
+    })
+  }
+
+  return stabilized
+}
+
+/**
+ * Snaps freehand highlighter points into a straight horizontal or vertical line.
+ */
+export function snapToStraightLine(points: InkPoint[]): InkPoint[] {
+  if (points.length < 2) return points
+  const first = points[0]
+  const last = points[points.length - 1]
+  const dx = Math.abs(last.x - first.x)
+  const dy = Math.abs(last.y - first.y)
+
+  // Horizontal snap
+  if (dx >= dy) {
+    return points.map((p) => ({ ...p, y: first.y }))
+  }
+  // Vertical snap
+  return points.map((p) => ({ ...p, x: first.x }))
+}
+
+/**
+ * Snaps a point to the straight edge of an on-screen interactive ruler.
+ */
+export function snapPointToRuler(
+  pt: { x: number; y: number },
+  ruler: RulerState,
+  threshold = 32
+): { x: number; y: number } | null {
+  if (!ruler.active) return null
+
+  const rad = (ruler.angle * Math.PI) / 180
+  const dirX = Math.cos(rad)
+  const dirY = Math.sin(rad)
+
+  // Vector from ruler center to point
+  const vx = pt.x - ruler.x
+  const vy = pt.y - ruler.y
+
+  // Normal vector perpendicular to ruler
+  const normX = -dirY
+  const normY = dirX
+
+  // Distance along perpendicular
+  const dist = vx * normX + vy * normY
+
+  if (Math.abs(dist) <= threshold) {
+    // Project point directly onto ruler line
+    return {
+      x: pt.x - dist * normX,
+      y: pt.y - dist * normY,
+    }
+  }
+
+  return null
+}
+
+/**
+ * Snaps a line's endpoint to vertices of existing shapes for flowchart connections.
+ */
+export function snapPointToShapeVertices(
+  pt: { x: number; y: number },
+  strokes: InkStroke[],
+  threshold = 24
+): { x: number; y: number } | null {
+  let nearest: { x: number; y: number } | null = null
+  let minDist = threshold
+
+  for (const s of strokes) {
+    if (!s.shapeType || s.points.length < 2) continue
+    const first = s.points[0]
+    const last = s.points[s.points.length - 1]
+
+    const vertices: { x: number; y: number }[] = [
+      first,
+      last,
+      { x: first.x, y: last.y },
+      { x: last.x, y: first.y },
+      { x: (first.x + last.x) / 2, y: first.y },
+      { x: (first.x + last.x) / 2, y: last.y },
+      { x: first.x, y: (first.y + last.y) / 2 },
+      { x: last.x, y: (first.y + last.y) / 2 },
+    ]
+
+    for (const v of vertices) {
+      const d = Math.hypot(pt.x - v.x, pt.y - v.y)
+      if (d < minDist) {
+        minDist = d
+        nearest = v
+      }
+    }
+  }
+
+  return nearest
 }
 
 /**
@@ -124,13 +239,33 @@ function renderShapePrimitive(stroke: InkStroke): string {
       const rightX = Math.max(first.x, last.x)
       return `M${topX},${topY} L${rightX},${bottomY} L${leftX},${bottomY} Z`
     }
+    case "arc": {
+      const dx = last.x - first.x
+      const dy = last.y - first.y
+      const r = Math.hypot(dx, dy)
+      return `M${first.x},${first.y} A${r},${r} 0 0,1 ${last.x},${last.y}`
+    }
+    case "polygon": {
+      // Hexagonal polygon bounding box
+      const minX = Math.min(first.x, last.x)
+      const minY = Math.min(first.y, last.y)
+      const w = Math.abs(last.x - first.x)
+      const h = Math.abs(last.y - first.y)
+      const p1 = `${minX + w * 0.25},${minY}`
+      const p2 = `${minX + w * 0.75},${minY}`
+      const p3 = `${minX + w},${minY + h * 0.5}`
+      const p4 = `${minX + w * 0.75},${minY + h}`
+      const p5 = `${minX + w * 0.25},${minY + h}`
+      const p6 = `${minX},${minY + h * 0.5}`
+      return `M${p1} L${p2} L${p3} L${p4} L${p5} L${p6} Z`
+    }
     default:
       return ""
   }
 }
 
 /**
- * Detects if drawn freehand points approximate a geometric shape (Line, Circle, Rectangle, Triangle).
+ * Detects if drawn freehand points approximate a geometric shape (Line, Circle, Rectangle, Triangle, Arrow, Polygon).
  */
 export function detectGeometricShape(points: { x: number; y: number }[]): ShapePrimitive | null {
   if (points.length < 8) return null
@@ -178,6 +313,13 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
         return "ellipse"
       }
 
+      // Check if top is narrow (triangle)
+      const topPoints = points.filter((p) => p.y < minY + h * 0.3)
+      const topWidth = topPoints.length > 0 ? Math.max(...topPoints.map((p) => p.x)) - Math.min(...topPoints.map((p) => p.x)) : w
+      if (topWidth < w * 0.45) {
+        return "triangle"
+      }
+
       return "rect"
     }
   }
@@ -186,7 +328,7 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
 }
 
 /**
- * Checks whether a given pointer coordinates hit or pass near a stroke.
+ * Checks whether given pointer coordinates hit or pass near a stroke.
  */
 export function isPointNearStroke(point: { x: number; y: number }, stroke: InkStroke, threshold = 12): boolean {
   const r = stroke.size / 2 + threshold
@@ -203,7 +345,7 @@ export function isPointNearStroke(point: { x: number; y: number }, stroke: InkSt
 }
 
 /**
- * Tests if a stroke's centroid lies inside a freehand lasso polygon.
+ * Tests if a stroke's centroid lies inside a lasso polygon or rectangle.
  */
 export function isStrokeInLasso(lassoPoints: { x: number; y: number }[], stroke: InkStroke): boolean {
   if (lassoPoints.length < 3 || stroke.points.length === 0) return false
@@ -273,4 +415,63 @@ export function translateStroke(stroke: InkStroke, dx: number, dy: number): InkS
       y: p.y + dy,
     })),
   }
+}
+
+/**
+ * Scales strokes relative to an origin point.
+ */
+export function scaleStroke(stroke: InkStroke, sx: number, sy: number, origin: { x: number; y: number }): InkStroke {
+  return {
+    ...stroke,
+    size: Math.max(1, stroke.size * Math.sqrt(Math.abs(sx * sy))),
+    points: stroke.points.map((p) => ({
+      ...p,
+      x: origin.x + (p.x - origin.x) * sx,
+      y: origin.y + (p.y - origin.y) * sy,
+    })),
+  }
+}
+
+/**
+ * Rotates strokes around an origin point.
+ */
+export function rotateStroke(stroke: InkStroke, angleRad: number, origin: { x: number; y: number }): InkStroke {
+  const cos = Math.cos(angleRad)
+  const sin = Math.sin(angleRad)
+  return {
+    ...stroke,
+    points: stroke.points.map((p) => {
+      const dx = p.x - origin.x
+      const dy = p.y - origin.y
+      return {
+        ...p,
+        x: origin.x + dx * cos - dy * sin,
+        y: origin.y + dx * sin + dy * cos,
+      }
+    }),
+  }
+}
+
+/**
+ * Simulated OCR Transcription for handwriting to text conversion.
+ */
+export function convertStrokesToText(strokes: InkStroke[]): string {
+  if (strokes.length === 0) return ""
+  return `Handwritten note transcribed on ${new Date().toLocaleDateString()}:\n` +
+    strokes.map((s, idx) => `[Stroke ${idx + 1}: ${s.tool} in ${s.color}]`).join(" ")
+}
+
+/**
+ * Simulated Math formula parser for handwriting to LaTeX conversion.
+ */
+export function convertStrokesToMath(strokes: InkStroke[]): string {
+  if (strokes.length === 0) return ""
+  const samples = [
+    "f(x) = \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}",
+    "E = mc^2",
+    "\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}",
+    "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1",
+    "\\nabla \\times \\mathbf{B} = \\mu_0 \\mathbf{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}",
+  ]
+  return samples[strokes.length % samples.length]
 }

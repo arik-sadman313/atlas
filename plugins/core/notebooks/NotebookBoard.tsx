@@ -23,10 +23,14 @@ import {
   ZoomOut,
   Star,
   Layers,
-  X,
   Maximize2,
   Minimize2,
   Download,
+  Eye,
+  Edit3,
+  Sparkles,
+  Compass,
+  Radio,
 } from "lucide-react"
 import {
   type NotebookDocument,
@@ -34,10 +38,17 @@ import {
   type InkStroke,
   type InkTextBox,
   type NotebookImage,
-  type PageTemplate,
-  type PaperColor,
+  type TapeStrip,
   type ShapePrimitive,
   type InkToolType,
+  type EraserMode,
+  type LassoFilter,
+  type RulerState,
+  type LaserState,
+  type ZoomWindowState,
+  type NotebookElement,
+  type AudioRecording,
+  type AudioEvent,
   createEmptyNotebook,
   createEmptyPage,
 } from "./types"
@@ -49,7 +60,18 @@ import {
   getStrokesBounds,
   translateStroke,
   detectGeometricShape,
+  snapToStraightLine,
+  snapPointToRuler,
+  snapPointToShapeVertices,
+  convertStrokesToText,
+  convertStrokesToMath,
 } from "./stroke"
+import { TapeLayer } from "./TapeLayer"
+import { AudioSyncEngine } from "./AudioSyncEngine"
+import { RulerOverlay } from "./RulerAndLaser"
+import { ZoomWindow } from "./ZoomWindow"
+import { ElementsDrawer } from "./ElementsDrawer"
+import { DocumentNavigationDrawer } from "./DocumentNavigationDrawer"
 
 interface NotebookBoardProps {
   text: string
@@ -60,23 +82,24 @@ interface NotebookBoardProps {
 }
 
 const PRESET_COLORS = [
-  "#1e293b", // Slate Black
-  "#2563eb", // Royal Blue
-  "#059669", // Emerald Green
-  "#dc2626", // Crimson Red
-  "#7c3aed", // Royal Purple
-  "#d97706", // Amber
-  "#0891b2", // Teal
-  "#db2777", // Rose Pink
-  "#f8fafc", // White (for dark paper)
+  "#1e293b",
+  "#2563eb",
+  "#059669",
+  "#dc2626",
+  "#7c3aed",
+  "#ea580c",
+  "#0891b2",
+  "#d97706",
+  "#475569",
+  "#000000",
 ]
 
 const STICKY_COLORS = [
-  { bg: "#fef3c7", text: "#78350f", border: "#fde68a" }, // Amber/Yellow
-  { bg: "#e0f2fe", text: "#0369a1", border: "#bae6fd" }, // Sky Blue
-  { bg: "#dcfce7", text: "#15803d", border: "#bbf7d0" }, // Mint Green
-  { bg: "#fce7f3", text: "#be185d", border: "#fbcfe8" }, // Rose Pink
-  { bg: "#f3e8ff", text: "#6b21a8", border: "#e9d5ff" }, // Purple
+  { bg: "#fef08a", border: "#facc15", text: "#713f12" }, // yellow
+  { bg: "#fed7aa", border: "#fb923c", text: "#7c2d12" }, // orange
+  { bg: "#bbf7d0", border: "#4ade80", text: "#14532d" }, // green
+  { bg: "#bfdbfe", border: "#60a5fa", text: "#1e3a8a" }, // blue
+  { bg: "#fbcfe8", border: "#f472b6", text: "#831843" }, // pink
 ]
 
 export default function NotebookBoard({
@@ -96,50 +119,110 @@ export default function NotebookBoard({
         }
       }
     } catch {
-      // Fallback to fresh notebook
+      // Fallback
     }
     return createEmptyNotebook(path ? path.split("/").pop()?.replace(".notebook", "") : "Untitled Notebook")
   })
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0)
 
-  // GoodNotes Tool Modes
+  // Read-Only View Lock (disables editing inputs, allows hyperlinking & study tape peeling)
+  const [readOnly, setReadOnly] = useState(!editable)
+
+  // Primary Tool Modes
   const [activeTool, setActiveTool] = useState<InkToolType>("fountain")
-  const [eraserMode, setEraserMode] = useState<"stroke" | "highlighterOnly">("stroke")
+  const [previousTool, setPreviousTool] = useState<InkToolType>("fountain")
+
+  // Eraser Settings
+  const [eraserMode, setEraserMode] = useState<EraserMode>("standard")
+  const [eraseHighlighterOnly, setEraseHighlighterOnly] = useState(false)
+  const [autoDeselectEraser, setAutoDeselectEraser] = useState(false)
+
+  // Shape Settings
   const [shapeToolPrimitive, setShapeToolPrimitive] = useState<ShapePrimitive>("rect")
   const [autoShapeDetection, setAutoShapeDetection] = useState(true)
+  const [shapeFill, setShapeFill] = useState(false)
+  const [snapToOtherShapes, setSnapToOtherShapes] = useState(true)
 
-  // Quick Colors & Sizes
+  // Highlighter Settings
+  const [straightLineHighlighter, setStraightLineHighlighter] = useState(false)
+
+  // Tape Settings
+  const [tapePattern, setTapePattern] = useState<"solid" | "stripes" | "dots">("stripes")
+  const [tapeColor, setTapeColor] = useState("#f59e0b")
+
+  // Colors & Tip Sizes
   const [quickColors, setQuickColors] = useState(["#1e293b", "#2563eb", "#dc2626"])
   const [activeColor, setActiveColor] = useState("#1e293b")
   const [showColorPicker, setShowColorPicker] = useState(false)
-
   const quickSizes = [2, 5, 10]
   const [activeSize, setActiveSize] = useState(4)
 
-  // Hardware Apple Pencil palm rejection toggle
+  // Stylus Palm Rejection Mode
   const [drawWithFinger, setDrawWithFinger] = useState(false)
 
-  // Zoom & Pan
+  // Viewport & Chrome
   const [zoomLevel, setZoomLevel] = useState(1.0)
-
-  // Side Drawer for Page Thumbnails & Bookmarks filter
-  const [showThumbnails, setShowThumbnails] = useState(false)
-  const [thumbnailTab, setThumbnailTab] = useState<"all" | "bookmarks">("all")
-
-  // Zen Fullscreen Mode (collapses all sidebars & chrome for maximized writing space)
   const [zenMode, setZenMode] = useState(false)
+  const [isNavDrawerOpen, setIsNavDrawerOpen] = useState(false)
+  const [isElementsDrawerOpen, setIsElementsDrawerOpen] = useState(false)
 
-  // In-progress stroke
+  // Ruler & Laser Pointer States
+  const [rulerState, setRulerState] = useState<RulerState>({
+    active: false,
+    x: 400,
+    y: 550,
+    angle: 0,
+    length: 500,
+  })
+  const [laserState, setLaserState] = useState<LaserState>({
+    active: false,
+    mode: "trail",
+    current: null,
+    trail: [],
+  })
+
+  // Zoom Window State
+  const [zoomWindowState, setZoomWindowState] = useState<ZoomWindowState>({
+    active: false,
+    scale: 2.5,
+    x: 0,
+    y: 0,
+    width: 560,
+    height: 220,
+    targetX: 100,
+    targetY: 200,
+  })
+
+  // Reusable Elements (Custom Saved Stickers)
+  const [customElements, setCustomElements] = useState<NotebookElement[]>([])
+
+  // Audio Sync State
+  const [audioEvents, setAudioEvents] = useState<AudioEvent[]>([])
+  const [activeRecording, setActiveRecording] = useState<AudioRecording | null>(
+    doc.audioRecordings?.[0] || null
+  )
+  const [playbackTimeMs, setPlaybackTimeMs] = useState(0)
+  const [isPlaybackActive, setIsPlaybackActive] = useState(false)
+  const recordingStartTimeRef = useRef(0)
+  const playbackTimerRef = useRef<number | null>(null)
+
+  // Stroke in-progress
   const [currentStroke, setCurrentStroke] = useState<InkStroke | null>(null)
   const strokeStartTimeRef = useRef(0)
 
-  // Lasso Selection & Transformation
+  // Lasso Selection & Granular Filters
   const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([])
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(new Set())
   const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
   const [isDraggingSelection, setIsDraggingSelection] = useState(false)
   const dragStartPointRef = useRef<{ x: number; y: number } | null>(null)
+  const [lassoFilter, setLassoFilter] = useState<LassoFilter>({
+    handwriting: true,
+    images: true,
+    textBoxes: true,
+    stickyNotes: true,
+  })
 
   // Undo / Redo history stacks
   const [history, setHistory] = useState<NotebookPage[]>([])
@@ -194,21 +277,18 @@ export default function NotebookBoard({
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
   }, [currentPage, currentPageIndex, doc, redoStack, commitDoc])
 
-  // Keyboard Shortcuts (Undo/Redo and Tool Switching)
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        if (e.shiftKey) redo()
+        else undo()
         e.preventDefault()
-        if (e.shiftKey) {
-          redo()
-        } else {
-          undo()
-        }
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault()
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
         redo()
+        e.preventDefault()
       } else if (e.key === "p" || e.key === "P") {
         setActiveTool("fountain")
       } else if (e.key === "h" || e.key === "H") {
@@ -223,7 +303,8 @@ export default function NotebookBoard({
         setActiveTool("stickynote")
       } else if (e.key === "Escape") {
         setZenMode(false)
-        setShowThumbnails(false)
+        setIsNavDrawerOpen(false)
+        setIsElementsDrawerOpen(false)
         setSelectedStrokeIds(new Set())
         setSelectedBoxIds(new Set())
       }
@@ -239,19 +320,28 @@ export default function NotebookBoard({
     const scaleX = currentPage.width / rect.width
     const scaleY = currentPage.height / rect.height
 
-    const x = (e.clientX - rect.left) * scaleX
-    const y = (e.clientY - rect.top) * scaleY
+    let x = (e.clientX - rect.left) * scaleX
+    let y = (e.clientY - rect.top) * scaleY
 
-    // Apple Pencil real hardware pressure telemetry
+    // Ruler edge snapping
+    if (rulerState.active) {
+      const snapped = snapPointToRuler({ x, y }, rulerState)
+      if (snapped) {
+        x = snapped.x
+        y = snapped.y
+      }
+    }
+
+    // Hardware Apple Pencil pressure
     const pressure = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5
     return { x, y, pressure }
   }
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!editable) return
+    if (readOnly) return
 
-    // 100% Hardware Palm Rejection: If Apple Pencil mode is active, reject touch drawing
+    // Palm Rejection: reject finger touch drawing when Apple Pencil mode is active
     if (e.pointerType === "touch" && !drawWithFinger) {
       return
     }
@@ -263,12 +353,24 @@ export default function NotebookBoard({
     isDrawingRef.current = true
     strokeStartTimeRef.current = Date.now()
 
-    // 1. Eraser Tool
+    // 1. Laser Pointer Mode
+    if (activeTool === "laser") {
+      setLaserState((prev) => ({
+        ...prev,
+        active: true,
+        current: pt,
+        trail: [{ x: pt.x, y: pt.y, time: Date.now() }],
+      }))
+      return
+    }
+
+    // 2. Eraser Tool
     if (activeTool === "eraser") {
       pushHistory()
+      const threshold = eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24
       const filtered = currentPage.strokes.filter((s) => {
-        if (eraserMode === "highlighterOnly" && s.tool !== "highlighter") return true
-        return !isPointNearStroke(pt, s, 16)
+        if (eraseHighlighterOnly && s.tool !== "highlighter") return true
+        return !isPointNearStroke(pt, s, threshold)
       })
       if (filtered.length !== currentPage.strokes.length) {
         const updatedPages = [...doc.pages]
@@ -278,18 +380,17 @@ export default function NotebookBoard({
       return
     }
 
-    // 2. Lasso Tool
+    // 3. Lasso Tool
     if (activeTool === "lasso") {
-      // Check if clicking inside active selection to begin drag
       if (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0) {
         const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
         const bounds = getStrokesBounds(selectedStrokes)
         if (
           bounds &&
-          pt.x >= bounds.minX - 10 &&
-          pt.x <= bounds.maxX + 10 &&
-          pt.y >= bounds.minY - 10 &&
-          pt.y <= bounds.maxY + 10
+          pt.x >= bounds.minX - 15 &&
+          pt.x <= bounds.maxX + 15 &&
+          pt.y >= bounds.minY - 15 &&
+          pt.y <= bounds.maxY + 15
         ) {
           setIsDraggingSelection(true)
           dragStartPointRef.current = { x: pt.x, y: pt.y }
@@ -298,14 +399,35 @@ export default function NotebookBoard({
         }
       }
 
-      // Start new lasso loop
       setLassoPoints([{ x: pt.x, y: pt.y }])
       setSelectedStrokeIds(new Set())
       setSelectedBoxIds(new Set())
       return
     }
 
-    // 3. Text Box & Sticky Notes
+    // 4. Study Tape Tool
+    if (activeTool === "tape") {
+      pushHistory()
+      const newTape: TapeStrip = {
+        id: `tape_${Date.now()}`,
+        points: [
+          { x: pt.x, y: pt.y },
+          { x: pt.x + 10, y: pt.y },
+        ],
+        width: activeSize * 4,
+        color: tapeColor,
+        pattern: tapePattern,
+        revealed: false,
+        createdAt: Date.now(),
+      }
+      const updatedTapeStrips = [...(currentPage.tapeStrips || []), newTape]
+      const updatedPages = [...doc.pages]
+      updatedPages[currentPageIndex] = { ...currentPage, tapeStrips: updatedTapeStrips }
+      commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+      return
+    }
+
+    // 5. Text Box & Sticky Notes
     if (activeTool === "textbox" || activeTool === "stickynote") {
       pushHistory()
       const isSticky = activeTool === "stickynote"
@@ -338,7 +460,7 @@ export default function NotebookBoard({
       return
     }
 
-    // 4. Shape Tool
+    // 6. Geometric Shape Tool
     if (activeTool === "shape") {
       const newStroke: InkStroke = {
         id: `shape_${Date.now()}`,
@@ -346,6 +468,7 @@ export default function NotebookBoard({
         shapeType: shapeToolPrimitive,
         color: activeColor,
         size: activeSize,
+        fill: shapeFill ? activeColor + "33" : undefined,
         points: [
           { x: pt.x, y: pt.y, pressure: 0.5, time: Date.now() },
           { x: pt.x, y: pt.y, pressure: 0.5, time: Date.now() },
@@ -356,7 +479,7 @@ export default function NotebookBoard({
       return
     }
 
-    // 5. Standard Drawing (Fountain, Ballpoint, Brush, Highlighter)
+    // 7. Standard Inking (Fountain, Ballpoint, Brush, Highlighter)
     if (
       activeTool !== "fountain" &&
       activeTool !== "ballpoint" &&
@@ -367,11 +490,14 @@ export default function NotebookBoard({
     }
 
     const isHighlighter = activeTool === "highlighter"
+    const audioOffset = recordingStartTimeRef.current > 0 ? Date.now() - recordingStartTimeRef.current : undefined
+
     const newStroke: InkStroke = {
       id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       tool: activeTool,
       color: isHighlighter ? activeColor + "77" : activeColor,
       size: isHighlighter ? Math.max(activeSize * 3, 20) : activeSize,
+      audioTimeOffset: audioOffset,
       points: [
         {
           x: pt.x,
@@ -390,40 +516,28 @@ export default function NotebookBoard({
 
   // Pointer Move
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!isDrawingRef.current) return
-    if (e.pointerType === "touch" && !drawWithFinger) return
-
+    if (readOnly) return
     const pt = getCanvasPoint(e)
     if (!pt) return
 
-    // Dragging Lasso Selection
-    if (isDraggingSelection && dragStartPointRef.current) {
-      const dx = pt.x - dragStartPointRef.current.x
-      const dy = pt.y - dragStartPointRef.current.y
-      dragStartPointRef.current = { x: pt.x, y: pt.y }
-
-      const updatedStrokes = currentPage.strokes.map((s) =>
-        selectedStrokeIds.has(s.id) ? translateStroke(s, dx, dy) : s
-      )
-      const updatedBoxes = currentPage.textBoxes.map((b) =>
-        selectedBoxIds.has(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
-      )
-
-      const updatedPages = [...doc.pages]
-      updatedPages[currentPageIndex] = {
-        ...currentPage,
-        strokes: updatedStrokes,
-        textBoxes: updatedBoxes,
-      }
-      commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+    // Laser pointer movement
+    if (activeTool === "laser" && laserState.active) {
+      setLaserState((prev) => ({
+        ...prev,
+        current: pt,
+        trail: [...prev.trail.slice(-15), { x: pt.x, y: pt.y, time: Date.now() }],
+      }))
       return
     }
 
-    // Eraser Tool Drag
+    if (!isDrawingRef.current) return
+
+    // Eraser dragging
     if (activeTool === "eraser") {
+      const threshold = eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24
       const filtered = currentPage.strokes.filter((s) => {
-        if (eraserMode === "highlighterOnly" && s.tool !== "highlighter") return true
-        return !isPointNearStroke(pt, s, 16)
+        if (eraseHighlighterOnly && s.tool !== "highlighter") return true
+        return !isPointNearStroke(pt, s, threshold)
       })
       if (filtered.length !== currentPage.strokes.length) {
         const updatedPages = [...doc.pages]
@@ -433,73 +547,118 @@ export default function NotebookBoard({
       return
     }
 
-    // Lasso Freehand Loop
+    // Lasso loop dragging
     if (activeTool === "lasso") {
+      if (isDraggingSelection && dragStartPointRef.current) {
+        const dx = pt.x - dragStartPointRef.current.x
+        const dy = pt.y - dragStartPointRef.current.y
+        dragStartPointRef.current = { x: pt.x, y: pt.y }
+
+        const updatedStrokes = currentPage.strokes.map((s) =>
+          selectedStrokeIds.has(s.id) ? translateStroke(s, dx, dy) : s
+        )
+        const updatedBoxes = currentPage.textBoxes.map((b) =>
+          selectedBoxIds.has(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
+        )
+        const updatedPages = [...doc.pages]
+        updatedPages[currentPageIndex] = {
+          ...currentPage,
+          strokes: updatedStrokes,
+          textBoxes: updatedBoxes,
+        }
+        commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+        return
+      }
+
       setLassoPoints((prev) => [...prev, { x: pt.x, y: pt.y }])
       return
     }
 
-    // Shape Tool Drag
+    // Shape drawing preview
     if (activeTool === "shape" && currentStroke) {
-      setCurrentStroke((prev) => {
-        if (!prev) return null
-        return {
-          ...prev,
-          points: [prev.points[0], { x: pt.x, y: pt.y, pressure: 0.5, time: Date.now() }],
+      let targetX = pt.x
+      let targetY = pt.y
+
+      // Snap line endpoint to other shape vertices
+      if (snapToOtherShapes) {
+        const snapped = snapPointToShapeVertices({ x: targetX, y: targetY }, currentPage.strokes)
+        if (snapped) {
+          targetX = snapped.x
+          targetY = snapped.y
         }
+      }
+
+      setCurrentStroke({
+        ...currentStroke,
+        points: [currentStroke.points[0], { x: targetX, y: targetY, pressure: 0.5, time: Date.now() }],
       })
       return
     }
 
-    // Standard Stroke Drawing
+    // Regular inking
     if (currentStroke) {
-      setCurrentStroke((prev) => {
-        if (!prev) return null
-        return {
-          ...prev,
-          points: [
-            ...prev.points,
-            {
-              x: pt.x,
-              y: pt.y,
-              pressure: pt.pressure,
-              tiltX: e.tiltX,
-              tiltY: e.tiltY,
-              time: Date.now(),
-            },
-          ],
-        }
+      let nextPoints = [
+        ...currentStroke.points,
+        {
+          x: pt.x,
+          y: pt.y,
+          pressure: pt.pressure,
+          tiltX: e.tiltX,
+          tiltY: e.tiltY,
+          time: Date.now(),
+        },
+      ]
+
+      // Straight line highlighter snap
+      if (activeTool === "highlighter" && straightLineHighlighter) {
+        nextPoints = snapToStraightLine(nextPoints)
+      }
+
+      setCurrentStroke({
+        ...currentStroke,
+        points: nextPoints,
       })
     }
   }
 
   // Pointer Up
-  const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!isDrawingRef.current) return
+  const handlePointerUp = () => {
     isDrawingRef.current = false
-    svgRef.current?.releasePointerCapture(e.pointerId)
 
-    if (isDraggingSelection) {
-      setIsDraggingSelection(false)
-      dragStartPointRef.current = null
+    // Laser deactivation
+    if (activeTool === "laser") {
+      setLaserState((prev) => ({ ...prev, active: false, current: null }))
       return
     }
 
-    // Finalize Lasso Selection
+    // Auto-deselect eraser
+    if (activeTool === "eraser" && autoDeselectEraser) {
+      setActiveTool(previousTool)
+    }
+
+    // Lasso completion
     if (activeTool === "lasso") {
-      if (lassoPoints.length > 3) {
+      if (isDraggingSelection) {
+        setIsDraggingSelection(false)
+        dragStartPointRef.current = null
+        return
+      }
+
+      if (lassoPoints.length > 2) {
         const selectedStrokes = new Set<string>()
         const selectedBoxes = new Set<string>()
 
-        for (const stroke of currentPage.strokes) {
-          if (isStrokeInLasso(lassoPoints, stroke)) {
-            selectedStrokes.add(stroke.id)
-          }
+        if (lassoFilter.handwriting) {
+          currentPage.strokes.forEach((s) => {
+            if (isStrokeInLasso(lassoPoints, s)) selectedStrokes.add(s.id)
+          })
         }
-        for (const box of currentPage.textBoxes) {
-          if (isBoxInLasso(lassoPoints, box)) {
-            selectedBoxes.add(box.id)
-          }
+        if (lassoFilter.textBoxes || lassoFilter.stickyNotes) {
+          currentPage.textBoxes.forEach((b) => {
+            if (b.isStickyNote && !lassoFilter.stickyNotes) return
+            if (!b.isStickyNote && !lassoFilter.textBoxes) return
+            if (isBoxInLasso(lassoPoints, b)) selectedBoxes.add(b.id)
+          })
         }
 
         setSelectedStrokeIds(selectedStrokes)
@@ -509,18 +668,18 @@ export default function NotebookBoard({
       return
     }
 
-    // Finalize Stroke
+    // Inking stroke completion
     if (currentStroke && currentStroke.points.length > 0) {
       pushHistory()
-      let strokeToCommit = currentStroke
+      let finalStroke = currentStroke
 
-      // Auto-Shape Detection (GoodNotes Draw & Hold)
-      if (autoShapeDetection && activeTool !== "shape" && activeTool !== "highlighter") {
+      // Auto-shape recognition
+      if (activeTool !== "shape" && autoShapeDetection && currentStroke.points.length > 10) {
         const detected = detectGeometricShape(currentStroke.points)
         if (detected) {
           const first = currentStroke.points[0]
           const last = currentStroke.points[currentStroke.points.length - 1]
-          strokeToCommit = {
+          finalStroke = {
             ...currentStroke,
             tool: "shape",
             shapeType: detected,
@@ -532,14 +691,37 @@ export default function NotebookBoard({
       const updatedPages = [...doc.pages]
       updatedPages[currentPageIndex] = {
         ...currentPage,
-        strokes: [...currentPage.strokes, strokeToCommit],
+        strokes: [...currentPage.strokes, finalStroke],
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setCurrentStroke(null)
     }
   }
 
-  // Lasso Actions: Recolor, Duplicate, Delete
+  // Duplicate Lasso Selection
+  const duplicateSelected = () => {
+    pushHistory()
+    const duplicatedStrokes = currentPage.strokes
+      .filter((s) => selectedStrokeIds.has(s.id))
+      .map((s) => translateStroke({ ...s, id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` }, 25, 25))
+
+    const duplicatedBoxes = currentPage.textBoxes
+      .filter((b) => selectedBoxIds.has(b.id))
+      .map((b) => ({ ...b, id: `box_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, x: b.x + 25, y: b.y + 25 }))
+
+    const updatedPages = [...doc.pages]
+    updatedPages[currentPageIndex] = {
+      ...currentPage,
+      strokes: [...currentPage.strokes, ...duplicatedStrokes],
+      textBoxes: [...currentPage.textBoxes, ...duplicatedBoxes],
+    }
+    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+
+    setSelectedStrokeIds(new Set(duplicatedStrokes.map((s) => s.id)))
+    setSelectedBoxIds(new Set(duplicatedBoxes.map((b) => b.id)))
+  }
+
+  // Recolor Lasso Selection
   const recolorSelected = (color: string) => {
     pushHistory()
     const updatedStrokes = currentPage.strokes.map((s) =>
@@ -557,68 +739,68 @@ export default function NotebookBoard({
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
   }
 
-  const duplicateSelected = () => {
-    pushHistory()
-    const newStrokes: InkStroke[] = []
-    for (const s of currentPage.strokes) {
-      if (selectedStrokeIds.has(s.id)) {
-        newStrokes.push(translateStroke({ ...s, id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` }, 25, 25))
-      }
-    }
-    const newBoxes: InkTextBox[] = []
-    for (const b of currentPage.textBoxes) {
-      if (selectedBoxIds.has(b.id)) {
-        newBoxes.push({ ...b, id: `box_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, x: b.x + 25, y: b.y + 25 })
-      }
-    }
-
-    const updatedPages = [...doc.pages]
-    updatedPages[currentPageIndex] = {
-      ...currentPage,
-      strokes: [...currentPage.strokes, ...newStrokes],
-      textBoxes: [...currentPage.textBoxes, ...newBoxes],
-    }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
-    setSelectedStrokeIds(new Set(newStrokes.map((s) => s.id)))
-    setSelectedBoxIds(new Set(newBoxes.map((b) => b.id)))
-  }
-
+  // Delete Lasso Selection
   const deleteSelected = () => {
     pushHistory()
-    const filteredStrokes = currentPage.strokes.filter((s) => !selectedStrokeIds.has(s.id))
-    const filteredBoxes = currentPage.textBoxes.filter((b) => !selectedBoxIds.has(b.id))
-
+    const updatedStrokes = currentPage.strokes.filter((s) => !selectedStrokeIds.has(s.id))
+    const updatedBoxes = currentPage.textBoxes.filter((b) => !selectedBoxIds.has(b.id))
     const updatedPages = [...doc.pages]
     updatedPages[currentPageIndex] = {
       ...currentPage,
-      strokes: filteredStrokes,
-      textBoxes: filteredBoxes,
+      strokes: updatedStrokes,
+      textBoxes: updatedBoxes,
     }
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
     setSelectedStrokeIds(new Set())
     setSelectedBoxIds(new Set())
   }
 
-  // Image Insertion
+  // Convert Selected Handwriting to Text
+  const convertSelectedToText = () => {
+    const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const text = convertStrokesToText(selectedStrokes)
+    navigator.clipboard?.writeText(text)
+    alert(`Converted Text copied to clipboard:\n\n${text}`)
+  }
+
+  // Convert Selected Handwriting to Math
+  const convertSelectedToMath = () => {
+    const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const math = convertStrokesToMath(selectedStrokes)
+    navigator.clipboard?.writeText(math)
+    alert(`LaTeX Math copied to clipboard:\n\n${math}`)
+  }
+
+  // Save Selected Handwriting as Reusable Element
+  const saveSelectedAsElement = () => {
+    const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const newElem: NotebookElement = {
+      id: `elem_${Date.now()}`,
+      name: `Sticker ${customElements.length + 1}`,
+      collectionId: "custom",
+      strokes: selectedStrokes,
+    }
+    setCustomElements((prev) => [...prev, newElem])
+    setIsElementsDrawerOpen(true)
+  }
+
+  // Image Upload
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     const reader = new FileReader()
-    reader.onload = (loadEvt) => {
-      const url = loadEvt.target?.result as string
-      if (!url) return
-
-      pushHistory()
+    reader.onload = () => {
+      const url = reader.result as string
       const newImg: NotebookImage = {
         id: `img_${Date.now()}`,
         url,
-        x: 150,
-        y: 200,
-        width: 350,
-        height: 250,
+        x: 100,
+        y: 100,
+        width: 320,
+        height: 240,
       }
-
+      pushHistory()
       const updatedPages = [...doc.pages]
       updatedPages[currentPageIndex] = {
         ...currentPage,
@@ -627,13 +809,18 @@ export default function NotebookBoard({
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
     }
     reader.readAsDataURL(file)
-    e.target.value = ""
   }
 
   // Page Operations
   const addPage = (afterIndex = currentPageIndex) => {
     pushHistory()
-    const newPage = createEmptyPage(doc.pages.length + 1, currentPage.template, currentPage.paperColor || "white")
+    const newPage = createEmptyPage(
+      doc.pages.length + 1,
+      currentPage.template,
+      currentPage.paperColor || "white",
+      currentPage.pageSize || "Standard",
+      currentPage.orientation || "portrait"
+    )
     const updatedPages = [
       ...doc.pages.slice(0, afterIndex + 1),
       newPage,
@@ -673,6 +860,21 @@ export default function NotebookBoard({
     setCurrentPageIndex(nextIndex)
   }
 
+  const rotatePage = (targetIndex = currentPageIndex) => {
+    pushHistory()
+    const updatedPages = doc.pages.map((p, idx) =>
+      idx === targetIndex ? { ...p, rotation: ((p.rotation || 0) + 90) % 360 } : p
+    )
+    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+  }
+
+  const toggleBookmark = (targetIndex = currentPageIndex) => {
+    const updatedPages = doc.pages.map((p, idx) =>
+      idx === targetIndex ? { ...p, bookmarked: !p.bookmarked } : p
+    )
+    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+  }
+
   const exportPageSvg = () => {
     if (!svgRef.current) return
     const svgClone = svgRef.current.cloneNode(true) as SVGSVGElement
@@ -696,44 +898,43 @@ export default function NotebookBoard({
       strokes: [],
       textBoxes: [],
       images: [],
+      tapeStrips: [],
     }
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
   }
 
-  const toggleBookmark = () => {
-    pushHistory()
+  // Toggle study tape reveal
+  const toggleTapeReveal = (tapeId: string) => {
+    const updatedStrips = (currentPage.tapeStrips || []).map((t) =>
+      t.id === tapeId ? { ...t, revealed: !t.revealed } : t
+    )
     const updatedPages = [...doc.pages]
-    updatedPages[currentPageIndex] = { ...currentPage, bookmarked: !currentPage.bookmarked }
+    updatedPages[currentPageIndex] = { ...currentPage, tapeStrips: updatedStrips }
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
   }
 
-  const setPageTemplate = (template: PageTemplate) => {
-    pushHistory()
-    const updatedPages = [...doc.pages]
-    updatedPages[currentPageIndex] = { ...currentPage, template }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
-  }
-
-  const setPaperColor = (paperColor: PaperColor) => {
-    pushHistory()
-    const updatedPages = [...doc.pages]
-    updatedPages[currentPageIndex] = { ...currentPage, paperColor }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
-  }
-
-  // Background Paper Color
-  const getPaperBgColor = () => {
-    switch (currentPage.paperColor) {
-      case "cream":
-        return "#fefae0"
-      case "dark":
-        return "#1e232a"
-      default:
-        return "#ffffff"
+  // Audio Playback Animation
+  const toggleAudioPlayback = () => {
+    if (isPlaybackActive) {
+      if (playbackTimerRef.current) clearInterval(playbackTimerRef.current)
+      setIsPlaybackActive(false)
+    } else {
+      setIsPlaybackActive(true)
+      const maxDuration = activeRecording?.durationMs || 10000
+      playbackTimerRef.current = window.setInterval(() => {
+        setPlaybackTimeMs((prev) => {
+          if (prev >= maxDuration) {
+            clearInterval(playbackTimerRef.current!)
+            setIsPlaybackActive(false)
+            return 0
+          }
+          return prev + 100
+        })
+      }, 100)
     }
   }
 
-  // Render Background Grid / Ruled / Cornell Patterns
+  // Background Pattern Renderer
   const renderBackgroundPattern = () => {
     const isDark = currentPage.paperColor === "dark"
     const lineColor = isDark ? "#334155" : "#cbd5e1"
@@ -770,6 +971,16 @@ export default function NotebookBoard({
             <line x1="0" y1="31" x2="100" y2="31" stroke={lineColor} strokeWidth="0.8" />
           </pattern>
         )
+      case "music-staff":
+        return (
+          <pattern id="notebook-music" width="100" height="60" patternUnits="userSpaceOnUse">
+            <line x1="0" y1="10" x2="100" y2="10" stroke={lineColor} strokeWidth="0.8" />
+            <line x1="0" y1="18" x2="100" y2="18" stroke={lineColor} strokeWidth="0.8" />
+            <line x1="0" y1="26" x2="100" y2="26" stroke={lineColor} strokeWidth="0.8" />
+            <line x1="0" y1="34" x2="100" y2="34" stroke={lineColor} strokeWidth="0.8" />
+            <line x1="0" y1="42" x2="100" y2="42" stroke={lineColor} strokeWidth="0.8" />
+          </pattern>
+        )
       default:
         return null
     }
@@ -787,12 +998,13 @@ export default function NotebookBoard({
         return "url(#notebook-dotted)"
       case "cornell":
         return "url(#notebook-cornell)"
+      case "music-staff":
+        return "url(#notebook-music)"
       default:
         return "none"
     }
   }
 
-  // Selected Bounding Box for Lasso Drag
   const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
   const selectionBounds = getStrokesBounds(selectedStrokes)
 
@@ -814,191 +1026,267 @@ export default function NotebookBoard({
         onChange={handleImageUpload}
       />
 
-      {/* GoodNotes Professional Top Toolbar */}
-      {editable && (
-        <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm z-30 gap-y-1">
-          {/* Left: Thumbnails, Bookmark, Page Navigation & Undo/Redo */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowThumbnails(!showThumbnails)}
-              className={`p-1.5 rounded-lg transition-colors ${
-                showThumbnails
-                  ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-              }`}
-              title="Page Thumbnails & Grid View"
-            >
-              <Layers className="w-4 h-4" />
-            </button>
+      {/* Primary GoodNotes Top Bar */}
+      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm z-30 gap-y-1">
+        {/* Left: Nav Drawer, Bookmark, Read-Only Toggle & Page Nav */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setIsNavDrawerOpen(!isNavDrawerOpen)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              isNavDrawerOpen
+                ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            }`}
+            title="Thumbnails, Outlines & Bookmarks Drawer"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
 
-            <button
-              onClick={toggleBookmark}
-              className={`p-1.5 rounded-lg transition-colors ${
-                currentPage.bookmarked
-                  ? "text-amber-500 hover:text-amber-600"
-                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              }`}
-              title={currentPage.bookmarked ? "Bookmarked Page" : "Bookmark this Page"}
-            >
-              <Star className={`w-4 h-4 ${currentPage.bookmarked ? "fill-amber-400" : ""}`} />
-            </button>
+          {/* Read-Only Mode Toggle */}
+          <button
+            onClick={() => setReadOnly(!readOnly)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              readOnly
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                : "text-slate-400 hover:text-slate-600"
+            }`}
+            title="Read-Only Mode: Disable drawing to tap hyperlinks and peel tape"
+          >
+            {readOnly ? <Eye className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+          </button>
 
-            {/* Page Navigation */}
-            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300">
-              <button
-                onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
-                disabled={currentPageIndex === 0}
-                className="p-0.5 disabled:opacity-30 hover:text-blue-500"
-                title="Previous Page"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <span className="font-semibold mx-1">
-                {currentPageIndex + 1} / {doc.pages.length}
-              </span>
-              <button
-                onClick={() => setCurrentPageIndex((prev) => Math.min(doc.pages.length - 1, prev + 1))}
-                disabled={currentPageIndex === doc.pages.length - 1}
-                className="p-0.5 disabled:opacity-30 hover:text-blue-500"
-                title="Next Page"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+          <button
+            onClick={() => toggleBookmark(currentPageIndex)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              currentPage.bookmarked
+                ? "text-amber-500 hover:text-amber-600"
+                : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            }`}
+            title={currentPage.bookmarked ? "Bookmarked Page" : "Bookmark this Page"}
+          >
+            <Star className={`w-4 h-4 ${currentPage.bookmarked ? "fill-amber-400" : ""}`} />
+          </button>
 
-            {/* Undo / Redo */}
+          {/* Page Navigation */}
+          <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300">
             <button
-              onClick={undo}
-              disabled={history.length === 0}
-              className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-              title="Undo (Ctrl+Z)"
+              onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
+              disabled={currentPageIndex === 0}
+              className="p-0.5 disabled:opacity-30 hover:text-blue-500"
+              title="Previous Page"
             >
-              <Undo2 className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
+            <span className="font-semibold mx-1">
+              {currentPageIndex + 1} / {doc.pages.length}
+            </span>
             <button
-              onClick={redo}
-              disabled={redoStack.length === 0}
-              className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-              title="Redo (Ctrl+Y)"
+              onClick={() => setCurrentPageIndex((prev) => Math.min(doc.pages.length - 1, prev + 1))}
+              disabled={currentPageIndex === doc.pages.length - 1}
+              className="p-0.5 disabled:opacity-30 hover:text-blue-500"
+              title="Next Page"
             >
-              <Redo2 className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Center: Primary GoodNotes Toolset */}
-          <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
-            {/* Fountain Pen */}
-            <button
-              onClick={() => setActiveTool("fountain")}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "fountain"
-                  ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Fountain Pen (Calligraphic pressure taper)"
-            >
-              <Pen className="w-4 h-4" />
-            </button>
+          {/* Undo / Redo */}
+          <button
+            onClick={undo}
+            disabled={history.length === 0 || readOnly}
+            className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={redo}
+            disabled={redoStack.length === 0 || readOnly}
+            className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+        </div>
 
-            {/* Ballpoint Pen */}
-            <button
-              onClick={() => setActiveTool("ballpoint")}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "ballpoint"
-                  ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Ballpoint Pen (Smooth uniform lines)"
-            >
-              <Minus className="w-4 h-4 stroke-[3]" />
-            </button>
+        {/* Center: Inking Toolset */}
+        <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+          {/* Fountain Pen */}
+          <button
+            onClick={() => {
+              setPreviousTool(activeTool)
+              setActiveTool("fountain")
+            }}
+            className={`p-1.5 rounded-lg transition-all ${
+              activeTool === "fountain"
+                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Fountain Pen (Calligraphic pressure taper)"
+          >
+            <Pen className="w-4 h-4" />
+          </button>
 
-            {/* Brush Pen */}
-            <button
-              onClick={() => setActiveTool("brush")}
-              className={`p-1.5 rounded-lg transition-all text-xs font-bold px-2 py-1 ${
-                activeTool === "brush"
-                  ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-sm scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Brush Pen (Ultra expressive calligraphy)"
-            >
-              Brush
-            </button>
+          {/* Ballpoint Pen */}
+          <button
+            onClick={() => {
+              setPreviousTool(activeTool)
+              setActiveTool("ballpoint")
+            }}
+            className={`p-1.5 rounded-lg transition-all ${
+              activeTool === "ballpoint"
+                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Ballpoint Pen (Uniform line weight)"
+          >
+            <Minus className="w-4 h-4 rotate-45 stroke-[2.5]" />
+          </button>
 
-            {/* Highlighter */}
+          {/* Brush Pen */}
+          <button
+            onClick={() => {
+              setPreviousTool(activeTool)
+              setActiveTool("brush")
+            }}
+            className={`p-1.5 rounded-lg transition-all ${
+              activeTool === "brush"
+                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Brush Pen (High dynamic pressure & tilt)"
+          >
+            <span className="font-serif italic font-bold text-xs px-0.5">B</span>
+          </button>
+
+          {/* Highlighter */}
+          <div className="flex items-center">
             <button
-              onClick={() => setActiveTool("highlighter")}
+              onClick={() => {
+                setPreviousTool(activeTool)
+                setActiveTool("highlighter")
+              }}
               className={`p-1.5 rounded-lg transition-all ${
                 activeTool === "highlighter"
-                  ? "bg-white dark:bg-slate-700 text-amber-500 dark:text-amber-400 shadow-sm font-semibold scale-105"
+                  ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105"
                   : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
               }`}
-              title="Highlighter (Draws behind text)"
+              title="Highlighter (Draws beneath dark text ink)"
             >
               <Highlighter className="w-4 h-4" />
             </button>
-
-            {/* Eraser with mode toggle */}
-            <div className="relative flex items-center">
+            {activeTool === "highlighter" && (
               <button
-                onClick={() => {
-                  if (activeTool === "eraser") {
-                    setEraserMode((prev) => (prev === "stroke" ? "highlighterOnly" : "stroke"))
-                  } else {
-                    setActiveTool("eraser")
-                  }
-                }}
-                className={`p-1.5 rounded-lg transition-all ${
-                  activeTool === "eraser"
-                    ? "bg-white dark:bg-slate-700 text-rose-500 dark:text-rose-400 shadow-sm font-semibold scale-105"
-                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+                onClick={() => setStraightLineHighlighter(!straightLineHighlighter)}
+                className={`text-[10px] px-1 py-0.5 rounded font-bold ml-0.5 transition-colors ${
+                  straightLineHighlighter ? "bg-amber-400 text-slate-900" : "text-slate-400 hover:text-slate-600"
                 }`}
-                title={
-                  activeTool === "eraser"
-                    ? `Eraser Mode: ${eraserMode === "stroke" ? "Entire Stroke (Click to switch to Highlighter Only)" : "Highlighter Only"}`
-                    : "Eraser"
-                }
+                title="Snap highlight to straight horizontal/vertical text lines"
               >
-                <Eraser className="w-4 h-4" />
+                Line
               </button>
-              {activeTool === "eraser" && eraserMode === "highlighterOnly" && (
-                <span className="absolute -top-1 -right-1 px-1 bg-amber-500 text-white text-[9px] font-bold rounded-full">
-                  HL
-                </span>
-              )}
-            </div>
+            )}
+          </div>
 
-            {/* Lasso Tool */}
+          {/* Eraser */}
+          <div className="flex items-center gap-0.5">
             <button
-              onClick={() => setActiveTool("lasso")}
+              onClick={() => {
+                setPreviousTool(activeTool)
+                setActiveTool("eraser")
+              }}
               className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "lasso"
-                  ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm font-semibold scale-105"
+                activeTool === "eraser"
+                  ? "bg-white dark:bg-slate-700 text-rose-500 shadow-sm font-semibold scale-105"
                   : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
               }`}
-              title="Lasso Selection (Move, recolor, duplicate, delete)"
+              title="Eraser"
+            >
+              <Eraser className="w-4 h-4" />
+            </button>
+            {activeTool === "eraser" && (
+              <div className="flex items-center gap-0.5 text-[11px] bg-white dark:bg-slate-700 rounded p-0.5">
+                <select
+                  value={eraserMode}
+                  onChange={(e) => setEraserMode(e.target.value as EraserMode)}
+                  className="bg-transparent border-none text-[10px] font-semibold outline-none text-slate-700 dark:text-slate-200"
+                >
+                  <option value="precision">Precision (Small)</option>
+                  <option value="standard">Standard</option>
+                  <option value="stroke">Entire Stroke</option>
+                </select>
+                <button
+                  onClick={() => setEraseHighlighterOnly(!eraseHighlighterOnly)}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                    eraseHighlighterOnly ? "bg-amber-100 text-amber-800" : "text-slate-400"
+                  }`}
+                  title="Erase Highlighter Only"
+                >
+                  Highlighter Only
+                </button>
+                <button
+                  onClick={() => setAutoDeselectEraser(!autoDeselectEraser)}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                    autoDeselectEraser ? "bg-rose-100 text-rose-800" : "text-slate-400"
+                  }`}
+                  title="Auto-Deselect: Automatically switch back to previous pen tool"
+                >
+                  Auto-Switch
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Lasso Tool */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => {
+                setPreviousTool(activeTool)
+                setActiveTool("lasso")
+              }}
+              className={`p-1.5 rounded-lg transition-all ${
+                activeTool === "lasso"
+                  ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-sm font-semibold scale-105"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+              }`}
+              title="Lasso Selection"
             >
               <Lasso className="w-4 h-4" />
             </button>
-
-            {/* Shape Tool with sub-types */}
-            <div className="flex items-center gap-0.5">
+            {activeTool === "lasso" && (
               <button
-                onClick={() => setActiveTool("shape")}
-                className={`p-1.5 rounded-lg transition-all ${
-                  activeTool === "shape"
-                    ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-semibold scale-105"
-                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+                onClick={() => setLassoFilter((prev) => ({ ...prev, handwriting: !prev.handwriting }))}
+                className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                  lassoFilter.handwriting ? "bg-purple-100 text-purple-700" : "text-slate-400"
                 }`}
-                title="Shape Tool (Geometric Primitives)"
+                title="Toggle Handwriting Selection in Lasso"
               >
-                {shapeToolPrimitive === "rect" && <Square className="w-4 h-4" />}
-                {shapeToolPrimitive === "ellipse" && <Circle className="w-4 h-4" />}
-                {shapeToolPrimitive === "line" && <Minus className="w-4 h-4" />}
-                {shapeToolPrimitive === "arrow" && <ArrowUpRight className="w-4 h-4" />}
+                Ink
               </button>
-              {activeTool === "shape" && (
+            )}
+          </div>
+
+          {/* Shape Tool */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => {
+                setPreviousTool(activeTool)
+                setActiveTool("shape")
+              }}
+              className={`p-1.5 rounded-lg transition-all ${
+                activeTool === "shape"
+                  ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-semibold scale-105"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+              }`}
+              title="Shape Tool (Geometric Primitives)"
+            >
+              {shapeToolPrimitive === "rect" && <Square className="w-4 h-4" />}
+              {shapeToolPrimitive === "ellipse" && <Circle className="w-4 h-4" />}
+              {shapeToolPrimitive === "line" && <Minus className="w-4 h-4" />}
+              {shapeToolPrimitive === "arrow" && <ArrowUpRight className="w-4 h-4" />}
+            </button>
+            {activeTool === "shape" && (
+              <div className="flex items-center gap-0.5">
                 <select
                   value={shapeToolPrimitive}
                   onChange={(e) => setShapeToolPrimitive(e.target.value as ShapePrimitive)}
@@ -1010,345 +1298,395 @@ export default function NotebookBoard({
                   <option value="arrow">Arrow</option>
                   <option value="triangle">Triangle</option>
                 </select>
-              )}
-            </div>
-
-            {/* Text Box */}
-            <button
-              onClick={() => setActiveTool("textbox")}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "textbox"
-                  ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Text Box (Click anywhere to type)"
-            >
-              <Type className="w-4 h-4" />
-            </button>
-
-            {/* Sticky Notes */}
-            <button
-              onClick={() => setActiveTool("stickynote")}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "stickynote"
-                  ? "bg-white dark:bg-slate-700 text-amber-500 dark:text-amber-400 shadow-sm scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Sticky Note"
-            >
-              <StickyNote className="w-4 h-4" />
-            </button>
-
-            {/* Insert Image */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors"
-              title="Insert Image / Diagram"
-            >
-              <ImageIcon className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Right: GoodNotes Quick-Colors, Quick-Sizes, Palm Rejection & Templates */}
-          <div className="flex items-center gap-2">
-            {/* 3 Quick Color Slots */}
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
-              {quickColors.map((c, i) => (
                 <button
-                  key={i}
-                  onClick={() => {
-                    setActiveColor(c)
-                    if (activeColor === c) {
-                      setShowColorPicker(!showColorPicker)
-                    }
-                  }}
-                  className={`w-5 h-5 rounded-full border-2 transition-transform ${
-                    activeColor === c ? "scale-125 border-blue-500 shadow-md ring-2 ring-blue-300/50" : "border-white dark:border-slate-700"
+                  onClick={() => setShapeFill(!shapeFill)}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                    shapeFill ? "bg-emerald-200 text-emerald-900" : "text-slate-400"
                   }`}
-                  style={{ backgroundColor: c }}
-                  title={`Quick Color ${i + 1} (Tap again to customize)`}
-                />
-              ))}
-            </div>
-
-            {/* Color Palette Popover */}
-            {showColorPicker && (
-              <div className="absolute top-12 right-64 bg-white dark:bg-[#1a1d24] p-2.5 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2 z-50">
-                <div className="text-[11px] font-semibold text-slate-500">Pick Active Color</div>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {PRESET_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => {
-                        setActiveColor(c)
-                        const updated = [...quickColors]
-                        const idx = updated.indexOf(activeColor)
-                        if (idx >= 0) updated[idx] = c
-                        else updated[0] = c
-                        setQuickColors(updated)
-                        setShowColorPicker(false)
-                      }}
-                      className="w-6 h-6 rounded-full border border-slate-300 hover:scale-110 transition-transform"
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
+                  title="Shape Interior Fill"
+                >
+                  Fill
+                </button>
+                <button
+                  onClick={() => setSnapToOtherShapes(!snapToOtherShapes)}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                    snapToOtherShapes ? "bg-emerald-200 text-emerald-900" : "text-slate-400"
+                  }`}
+                  title="Snap Endpoints to Other Shape Vertices"
+                >
+                  Snap
+                </button>
               </div>
             )}
+          </div>
 
-            {/* 3 Quick Sizes */}
-            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
-              {quickSizes.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveSize(s)}
-                  className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
-                    activeSize === s ? "bg-white dark:bg-slate-700 shadow-sm" : "hover:bg-slate-200 dark:hover:bg-slate-700/50"
-                  }`}
-                  title={`Size preset: ${s}px`}
+          {/* Study Tape Tool */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => {
+                setPreviousTool(activeTool)
+                setActiveTool("tape")
+              }}
+              className={`p-1.5 rounded-lg transition-all ${
+                activeTool === "tape"
+                  ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm scale-105"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+              }`}
+              title="Study Tape Tool: Paint opaque strips over answers, tap in study mode to reveal"
+            >
+              <Minus className="w-4 h-4 stroke-[4]" />
+            </button>
+            {activeTool === "tape" && (
+              <div className="flex items-center gap-1 text-[10px] bg-white dark:bg-slate-700 rounded p-0.5">
+                <select
+                  value={tapePattern}
+                  onChange={(e) => setTapePattern(e.target.value as any)}
+                  className="bg-transparent border-none text-[10px] font-semibold outline-none"
                 >
-                  <div
-                    className="rounded-full bg-slate-800 dark:bg-slate-200"
-                    style={{ width: Math.min(s + 2, 14), height: Math.min(s + 2, 14) }}
+                  <option value="stripes">Stripes</option>
+                  <option value="dots">Dots</option>
+                  <option value="solid">Solid</option>
+                </select>
+                {["#f59e0b", "#3b82f6", "#ec4899", "#10b981"].map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setTapeColor(c)}
+                    className={`w-3.5 h-3.5 rounded-full border ${tapeColor === c ? "ring-1 ring-blue-500 scale-110" : ""}`}
+                    style={{ backgroundColor: c }}
                   />
-                </button>
-              ))}
-            </div>
-
-            {/* Hardware Palm Rejection Toggle */}
-            <button
-              onClick={() => setDrawWithFinger(!drawWithFinger)}
-              className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full font-medium transition-all ${
-                drawWithFinger
-                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300"
-                  : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-              }`}
-              title={
-                drawWithFinger
-                  ? "Draw with Finger enabled"
-                  : "Apple Pencil Only (Touches scroll/pan, 100% palm rejection)"
-              }
-            >
-              <Hand className="w-3.5 h-3.5" />
-              <span>{drawWithFinger ? "Draw with Finger" : "Pencil Only"}</span>
-            </button>
-
-            {/* Auto-Shape Toggle */}
-            <button
-              onClick={() => setAutoShapeDetection(!autoShapeDetection)}
-              className={`px-2 py-1 text-[11px] rounded-md font-semibold transition-colors ${
-                autoShapeDetection
-                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                  : "text-slate-400 hover:text-slate-600"
-              }`}
-              title="Auto-Shape Recognition: Draw a line/circle/box and hold to snap"
-            >
-              Auto-Shape
-            </button>
-
-            {/* Zoom Controls */}
-            <div className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300">
-              <button
-                onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.15))}
-                className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-                title="Zoom Out"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setZoomLevel(1.0)}
-                className="text-[11px] font-semibold px-1 py-0.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-                title="Reset Zoom to 100%"
-              >
-                {Math.round(zoomLevel * 100)}%
-              </button>
-              <button
-                onClick={() => setZoomLevel((z) => Math.min(2.0, z + 0.15))}
-                className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-                title="Zoom In"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Page Template & Paper Color */}
-            <select
-              value={currentPage.template}
-              onChange={(e) => setPageTemplate(e.target.value as PageTemplate)}
-              className="text-xs bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-300 outline-none"
-              title="Page Template"
-            >
-              <option value="ruled">Ruled (Standard)</option>
-              <option value="ruled-wide">Ruled (Wide)</option>
-              <option value="grid">Grid (Math)</option>
-              <option value="dotted">Dotted (Journal)</option>
-              <option value="cornell">Cornell Notes</option>
-              <option value="blank">Blank Paper</option>
-            </select>
-
-            <select
-              value={currentPage.paperColor || "white"}
-              onChange={(e) => setPaperColor(e.target.value as PaperColor)}
-              className="text-xs bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-300 outline-none"
-              title="Paper Tone"
-            >
-              <option value="white">White</option>
-              <option value="cream">Cream</option>
-              <option value="dark">Dark Slate</option>
-            </select>
-
-            {/* Add Page Button */}
-            <button
-              onClick={() => addPage(currentPageIndex)}
-              className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm"
-              title="Add Page After"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Page</span>
-            </button>
-
-            {/* Export SVG */}
-            <button
-              onClick={exportPageSvg}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-              title="Export Page as Vector SVG"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-
-            {/* Clear Page */}
-            <button
-              onClick={clearCurrentPage}
-              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
-              title="Clear Current Page"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-
-            {/* Zen Fullscreen Mode Toggle */}
-            <button
-              onClick={() => setZenMode(!zenMode)}
-              className={`p-1.5 rounded-lg transition-colors ${
-                zenMode
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800"
-              }`}
-              title={zenMode ? "Exit Fullscreen (Esc)" : "Zen Fullscreen Mode (Hide Sidebars)"}
-            >
-              {zenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Workspace Area with Optional Side Thumbnails Drawer */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* GoodNotes Page Thumbnails Drawer */}
-        {showThumbnails && (
-          <div className="w-64 bg-white dark:bg-[#181b22] border-r border-slate-200 dark:border-slate-800 flex flex-col z-20 shadow-lg">
-            <div className="flex items-center justify-between p-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setThumbnailTab("all")}
-                  className={`text-xs font-bold pb-0.5 border-b-2 transition-colors ${
-                    thumbnailTab === "all"
-                      ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                      : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  Pages ({doc.pages.length})
-                </button>
-                <button
-                  onClick={() => setThumbnailTab("bookmarks")}
-                  className={`text-xs font-bold pb-0.5 border-b-2 transition-colors ${
-                    thumbnailTab === "bookmarks"
-                      ? "border-amber-500 text-amber-600 dark:text-amber-400"
-                      : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  Favorites ({doc.pages.filter((p) => p.bookmarked).length})
-                </button>
+                ))}
               </div>
-              <button
-                onClick={() => setShowThumbnails(false)}
-                className="p-1 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-              {doc.pages
-                .map((p, idx) => ({ page: p, idx }))
-                .filter(({ page }) => (thumbnailTab === "bookmarks" ? page.bookmarked : true))
-                .map(({ page: p, idx }) => (
-                <div
-                  key={p.id}
-                  onClick={() => setCurrentPageIndex(idx)}
-                  className={`group relative flex flex-col items-center p-2 rounded-lg cursor-pointer border transition-all ${
-                    idx === currentPageIndex
-                      ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 shadow-md ring-2 ring-blue-400/30"
-                      : "border-slate-200 dark:border-slate-700 hover:border-slate-300 bg-slate-50 dark:bg-slate-800/40"
-                  }`}
-                >
-                  <div
-                    className="w-full h-32 bg-white rounded shadow-sm border border-slate-200 overflow-hidden relative flex items-center justify-center"
-                    style={{ backgroundColor: p.paperColor === "dark" ? "#1e232a" : p.paperColor === "cream" ? "#fefae0" : "#ffffff" }}
-                  >
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {p.strokes.length} strokes • {p.template}
-                    </span>
-                    {p.bookmarked && (
-                      <Star className="absolute top-1 right-1 w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between w-full mt-1.5 px-1 text-xs text-slate-600 dark:text-slate-400">
-                    <span className="font-semibold">Page {idx + 1}</span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          duplicatePage(idx)
-                        }}
-                        className="p-0.5 hover:text-blue-500"
-                        title="Duplicate Page"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          addPage(idx)
-                        }}
-                        className="p-0.5 hover:text-blue-500"
-                        title="Add Page After"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          deletePage(idx)
-                        }}
-                        disabled={doc.pages.length <= 1}
-                        className="p-0.5 hover:text-rose-500 disabled:opacity-20"
-                        title="Delete Page"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {thumbnailTab === "bookmarks" && doc.pages.filter((p) => p.bookmarked).length === 0 && (
-                <div className="text-center text-xs text-slate-400 py-12 flex flex-col items-center gap-2 px-4">
-                  <Star className="w-6 h-6 text-slate-300 stroke-[1.5]" />
-                  <span>No favorites yet. Tap the star in the toolbar to bookmark pages.</span>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        )}
+
+          {/* Text Box */}
+          <button
+            onClick={() => setActiveTool("textbox")}
+            className={`p-1.5 rounded-lg transition-all ${
+              activeTool === "textbox"
+                ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm scale-105"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Text Box"
+          >
+            <Type className="w-4 h-4" />
+          </button>
+
+          {/* Sticky Note */}
+          <button
+            onClick={() => setActiveTool("stickynote")}
+            className={`p-1.5 rounded-lg transition-all ${
+              activeTool === "stickynote"
+                ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm scale-105"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Sticky Note"
+          >
+            <StickyNote className="w-4 h-4" />
+          </button>
+
+          {/* Insert Image */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors"
+            title="Insert Image / Diagram"
+          >
+            <ImageIcon className="w-4 h-4" />
+          </button>
+
+          {/* Elements / Stickers Drawer */}
+          <button
+            onClick={() => setIsElementsDrawerOpen(!isElementsDrawerOpen)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              isElementsDrawerOpen
+                ? "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400 shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Elements & Reusable Stickers"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
+
+          {/* Interactive Straightedge Ruler */}
+          <button
+            onClick={() => setRulerState((prev) => ({ ...prev, active: !prev.active }))}
+            className={`p-1.5 rounded-lg transition-colors ${
+              rulerState.active
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Toggle Straightedge Ruler with Live Degree Readout"
+          >
+            <Compass className="w-4 h-4" />
+          </button>
+
+          {/* Laser Pointer */}
+          <button
+            onClick={() => {
+              if (activeTool === "laser") {
+                setActiveTool(previousTool)
+                setLaserState((prev) => ({ ...prev, active: false }))
+              } else {
+                setPreviousTool(activeTool)
+                setActiveTool("laser")
+                setLaserState((prev) => ({ ...prev, active: true }))
+              }
+            }}
+            className={`p-1.5 rounded-lg transition-colors ${
+              activeTool === "laser"
+                ? "bg-rose-600 text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Laser Pointer (Live Presentations)"
+          >
+            <Radio className="w-4 h-4" />
+          </button>
+
+          {/* Zoom Window (Handwriting Magnifier) */}
+          <button
+            onClick={() => setZoomWindowState((prev) => ({ ...prev, active: !prev.active }))}
+            className={`p-1.5 rounded-lg transition-colors ${
+              zoomWindowState.active
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+            }`}
+            title="Handwriting Magnifier Zoom Window with Auto-Advance"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Right: Quick Colors, Sizes, Palm Rejection, Audio & Export */}
+        <div className="flex items-center gap-2">
+          {/* Audio Sync Engine Recording & Playback */}
+          <AudioSyncEngine
+            onRecordingStart={() => {
+              recordingStartTimeRef.current = Date.now()
+              setAudioEvents([])
+            }}
+            onRecordingStop={(recording) => {
+              recordingStartTimeRef.current = 0
+              setActiveRecording(recording)
+              const updatedDoc = {
+                ...doc,
+                audioRecordings: [...(doc.audioRecordings || []), recording],
+              }
+              commitDoc(updatedDoc)
+            }}
+            currentEvents={audioEvents}
+            activeRecording={activeRecording}
+            playbackTimeMs={playbackTimeMs}
+            isPlaybackActive={isPlaybackActive}
+            onSeekPlayback={(timeMs) => setPlaybackTimeMs(timeMs)}
+            onTogglePlayback={toggleAudioPlayback}
+          />
+
+          {/* 3 Quick Color Slots */}
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+            {quickColors.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  setActiveColor(c)
+                  if (activeColor === c) {
+                    setShowColorPicker(!showColorPicker)
+                  }
+                }}
+                className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                  activeColor === c
+                    ? "scale-125 border-blue-500 shadow-md ring-2 ring-blue-300/50"
+                    : "border-white dark:border-slate-700"
+                }`}
+                style={{ backgroundColor: c }}
+                title={`Quick Color ${i + 1}`}
+              />
+            ))}
+          </div>
+
+          {/* Color Palette Popover */}
+          {showColorPicker && (
+            <div className="absolute top-12 right-64 bg-white dark:bg-[#1a1d24] p-2.5 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2 z-50">
+              <div className="text-[11px] font-semibold text-slate-500">Pick Color Preset</div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setActiveColor(c)
+                      const updated = [...quickColors]
+                      const idx = updated.indexOf(activeColor)
+                      if (idx >= 0) updated[idx] = c
+                      else updated[0] = c
+                      setQuickColors(updated)
+                      setShowColorPicker(false)
+                    }}
+                    className="w-6 h-6 rounded-full border border-slate-300 hover:scale-110 transition-transform"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 3 Quick Sizes */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+            {quickSizes.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveSize(s)}
+                className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
+                  activeSize === s ? "bg-white dark:bg-slate-700 shadow-sm" : "hover:bg-slate-200"
+                }`}
+                title={`Size: ${s}px`}
+              >
+                <div
+                  className="rounded-full bg-slate-800 dark:bg-slate-200"
+                  style={{ width: Math.min(s + 2, 14), height: Math.min(s + 2, 14) }}
+                />
+              </button>
+            ))}
+          </div>
+
+          {/* Hardware Palm Rejection Toggle */}
+          <button
+            onClick={() => setDrawWithFinger(!drawWithFinger)}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full font-medium transition-all ${
+              drawWithFinger
+                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300"
+                : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+            }`}
+            title={drawWithFinger ? "Draw with Finger enabled" : "Apple Pencil Only (100% Palm Rejection)"}
+          >
+            <Hand className="w-3.5 h-3.5" />
+            <span>{drawWithFinger ? "Finger Draw" : "Pencil Only"}</span>
+          </button>
+
+          {/* Auto-Shape Toggle */}
+          <button
+            onClick={() => setAutoShapeDetection(!autoShapeDetection)}
+            className={`px-2 py-1 text-[11px] rounded-md font-semibold transition-colors ${
+              autoShapeDetection
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : "text-slate-400 hover:text-slate-600"
+            }`}
+            title="Auto-Shape Recognition: Draw and hold to snap"
+          >
+            Auto-Shape
+          </button>
+
+          {/* Zoom Controls */}
+          <div className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300">
+            <button
+              onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.15))}
+              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setZoomLevel(1.0)}
+              className="text-[11px] font-semibold px-1 py-0.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
+              title="Reset Zoom"
+            >
+              {Math.round(zoomLevel * 100)}%
+            </button>
+            <button
+              onClick={() => setZoomLevel((z) => Math.min(2.0, z + 0.15))}
+              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
+              title="Zoom In"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Add Page Button */}
+          <button
+            onClick={() => addPage(currentPageIndex)}
+            className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm"
+            title="Add Page After"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Page</span>
+          </button>
+
+          {/* Export SVG */}
+          <button
+            onClick={exportPageSvg}
+            className="p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            title="Export Page as Vector SVG"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
+          {/* Clear Page */}
+          <button
+            onClick={clearCurrentPage}
+            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+            title="Clear Current Page"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+
+          {/* Zen Fullscreen Mode Toggle */}
+          <button
+            onClick={() => setZenMode(!zenMode)}
+            className={`p-1.5 rounded-lg transition-colors ${
+              zenMode
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800"
+            }`}
+            title={zenMode ? "Exit Fullscreen (Esc)" : "Zen Fullscreen Mode (Hide Sidebars)"}
+          >
+            {zenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Workspace Area with Drawers */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Document Navigation Drawer (Thumbnails, Outlines, Bookmarks) */}
+        <DocumentNavigationDrawer
+          isOpen={isNavDrawerOpen}
+          onClose={() => setIsNavDrawerOpen(false)}
+          pages={doc.pages}
+          currentPageIndex={currentPageIndex}
+          onSelectPage={(idx) => setCurrentPageIndex(idx)}
+          onAddPage={addPage}
+          onDuplicatePage={duplicatePage}
+          onDeletePage={deletePage}
+          onRotatePage={rotatePage}
+          onToggleBookmark={toggleBookmark}
+          outlines={doc.outlines}
+          readOnly={readOnly}
+          onToggleReadOnly={() => setReadOnly(!readOnly)}
+        />
+
+        {/* Elements / Stickers Drawer */}
+        <ElementsDrawer
+          isOpen={isElementsDrawerOpen}
+          onClose={() => setIsElementsDrawerOpen(false)}
+          customElements={customElements}
+          onInsertElement={(element) => {
+            const translatedStrokes = element.strokes.map((s) =>
+              translateStroke(
+                { ...s, id: `elem_stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` },
+                150,
+                150
+              )
+            )
+            pushHistory()
+            const updatedPages = [...doc.pages]
+            updatedPages[currentPageIndex] = {
+              ...currentPage,
+              strokes: [...currentPage.strokes, ...translatedStrokes],
+            }
+            commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+            setIsElementsDrawerOpen(false)
+          }}
+          onDeleteCustomElement={(id) => {
+            setCustomElements((prev) => prev.filter((el) => el.id !== id))
+          }}
+        />
 
         {/* Scrollable Canvas Viewport */}
         <div className="flex-1 overflow-auto flex items-center justify-center p-8 touch-pan-x touch-pan-y relative">
@@ -1372,6 +1710,28 @@ export default function NotebookBoard({
                 <Copy className="w-3.5 h-3.5" />
                 <span>Duplicate</span>
               </button>
+              <button
+                onClick={convertSelectedToText}
+                className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
+                title="Transcribe handwriting to text"
+              >
+                To Text
+              </button>
+              <button
+                onClick={convertSelectedToMath}
+                className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
+                title="Convert handwriting to LaTeX math formula"
+              >
+                To Math
+              </button>
+              <button
+                onClick={saveSelectedAsElement}
+                className="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
+                title="Save as Reusable Element / Sticker"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Save Element</span>
+              </button>
               <div className="flex items-center gap-1">
                 {["#1e293b", "#2563eb", "#059669", "#dc2626", "#7c3aed"].map((c) => (
                   <button
@@ -1384,38 +1744,35 @@ export default function NotebookBoard({
               </div>
               <button
                 onClick={deleteSelected}
-                className="p-1 text-rose-600 dark:text-rose-400 hover:bg-rose-50 rounded"
+                className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-full"
                 title="Delete Selection"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
-              <button
-                onClick={() => {
-                  setSelectedStrokeIds(new Set())
-                  setSelectedBoxIds(new Set())
-                }}
-                className="p-1 text-slate-400 hover:text-slate-600"
-                title="Deselect"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
             </div>
           )}
 
-          {/* Scaled Notebook Page Container */}
+          {/* Scaled Notebook Page Canvas */}
           <div
-            className="relative shadow-2xl rounded-sm transition-transform duration-75 border border-slate-200 dark:border-slate-700"
+            className="relative shadow-2xl transition-transform origin-top-left"
             style={{
-              width: currentPage.width * zoomLevel,
-              height: currentPage.height * zoomLevel,
-              backgroundColor: getPaperBgColor(),
+              width: `${currentPage.width * zoomLevel}px`,
+              height: `${currentPage.height * zoomLevel}px`,
+              transform: `rotate(${currentPage.rotation || 0}deg)`,
             }}
           >
-            {/* SVG Vector Drawing Layer */}
             <svg
               ref={svgRef}
               viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}
-              className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
+              className="w-full h-full touch-none select-none overflow-visible rounded-sm"
+              style={{
+                backgroundColor:
+                  currentPage.paperColor === "dark"
+                    ? "#1a1e24"
+                    : currentPage.paperColor === "cream"
+                    ? "#fefae0"
+                    : "#ffffff",
+              }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -1423,27 +1780,16 @@ export default function NotebookBoard({
             >
               <defs>{renderBackgroundPattern()}</defs>
 
-              {/* Page Background Pattern */}
+              {/* Page Background Template */}
               <rect
+                x="0"
+                y="0"
                 width={currentPage.width}
                 height={currentPage.height}
                 fill={getBackgroundFill()}
-                className="pointer-events-none"
               />
 
-              {/* Cornell Notes Structural Layout Lines */}
-              {currentPage.template === "cornell" && (
-                <g stroke="#94a3b8" strokeWidth="1.5" className="pointer-events-none">
-                  {/* Top Cue/Header divider */}
-                  <line x1="0" y1="120" x2={currentPage.width} y2="120" />
-                  {/* Left Cue Column divider */}
-                  <line x1="220" y1="120" x2="220" y2={currentPage.height - 180} />
-                  {/* Bottom Summary block divider */}
-                  <line x1="0" y1={currentPage.height - 180} x2={currentPage.width} y2={currentPage.height - 180} />
-                </g>
-              )}
-
-              {/* LAYER 1: Inserted Images */}
+              {/* Layer 1: Placed Images */}
               {currentPage.images?.map((img) => (
                 <image
                   key={img.id}
@@ -1452,119 +1798,121 @@ export default function NotebookBoard({
                   y={img.y}
                   width={img.width}
                   height={img.height}
-                  preserveAspectRatio="xMidYMid meet"
-                  className="pointer-events-none"
+                  className="pointer-events-none select-none"
                 />
               ))}
 
-              {/* LAYER 2: Highlighters (Rendered under pen strokes with multiply blend) */}
-              {highlighterStrokes.map((stroke) => {
-                const isSelected = selectedStrokeIds.has(stroke.id)
-                const pathD = renderStrokeToPath(stroke)
-                return (
+              {/* Layer 2: Highlighters (Layered underneath handwriting) */}
+              <g className="highlighter-layer" style={{ mixBlendMode: "multiply" }}>
+                {highlighterStrokes.map((s) => (
                   <path
-                    key={stroke.id}
-                    d={pathD}
-                    fill={stroke.color}
-                    className="mix-blend-multiply"
-                    style={{
-                      filter: isSelected ? "drop-shadow(0 0 6px #3b82f6)" : undefined,
-                    }}
+                    key={s.id}
+                    d={renderStrokeToPath(s)}
+                    fill={s.color}
+                    stroke={s.color}
+                    className="transition-opacity"
                   />
-                )
-              })}
+                ))}
+              </g>
 
-              {/* LAYER 3: Dark Ink Pen Strokes (Fountain, Ballpoint, Brush, Shapes) */}
-              {penStrokes.map((stroke) => {
-                const isSelected = selectedStrokeIds.has(stroke.id)
-                const pathD = renderStrokeToPath(stroke)
-                const isShape = stroke.tool === "shape"
+              {/* Layer 3: Dark Handwriting Pens & Shapes */}
+              <g className="pen-strokes-layer">
+                {penStrokes.map((s) => {
+                  const isDimmed = isPlaybackActive && s.audioTimeOffset && s.audioTimeOffset > playbackTimeMs
+                  return (
+                    <path
+                      key={s.id}
+                      d={renderStrokeToPath(s)}
+                      fill={s.fill || s.color}
+                      stroke={s.color}
+                      strokeWidth={s.shapeType ? s.size : 0}
+                      opacity={isDimmed ? 0.2 : 1}
+                      className="cursor-pointer transition-opacity duration-150"
+                      onClick={() => {
+                        if (s.audioTimeOffset !== undefined) {
+                          setPlaybackTimeMs(s.audioTimeOffset)
+                        }
+                      }}
+                    />
+                  )
+                })}
+              </g>
 
-                return (
-                  <path
-                    key={stroke.id}
-                    d={pathD}
-                    fill={isShape ? stroke.fill || "none" : stroke.color}
-                    stroke={isShape ? stroke.color : undefined}
-                    strokeWidth={isShape ? stroke.size : undefined}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      filter: isSelected ? "drop-shadow(0 0 6px #3b82f6)" : undefined,
-                    }}
-                  />
-                )
-              })}
+              {/* Layer 4: Interactive Study Tape Strips */}
+              <TapeLayer
+                tapeStrips={currentPage.tapeStrips || []}
+                isStudyMode={readOnly}
+                onToggleReveal={toggleTapeReveal}
+              />
 
-              {/* Active In-Progress Stroke */}
+              {/* In-progress Live Stroke */}
               {currentStroke && (
                 <path
                   d={renderStrokeToPath(currentStroke)}
-                  fill={currentStroke.tool === "shape" ? "none" : currentStroke.color}
-                  stroke={currentStroke.tool === "shape" ? currentStroke.color : undefined}
-                  strokeWidth={currentStroke.tool === "shape" ? currentStroke.size : undefined}
-                  className={currentStroke.tool === "highlighter" ? "mix-blend-multiply" : ""}
+                  fill={currentStroke.fill || currentStroke.color}
+                  stroke={currentStroke.color}
+                  strokeWidth={currentStroke.shapeType ? currentStroke.size : 0}
+                  opacity={activeTool === "highlighter" ? 0.65 : 1}
                 />
               )}
 
-              {/* Lasso Selection Loop */}
-              {lassoPoints.length > 1 && (
-                <polyline
-                  points={lassoPoints.map((p) => `${p.x},${p.y}`).join(" ")}
-                  fill="none"
+              {/* Lasso Selection Loop Path */}
+              {activeTool === "lasso" && lassoPoints.length > 1 && (
+                <path
+                  d={`M${lassoPoints.map((p) => `${p.x},${p.y}`).join(" L")}`}
+                  fill="rgba(59, 130, 246, 0.1)"
                   stroke="#3b82f6"
-                  strokeWidth="2"
-                  strokeDasharray="5 5"
+                  strokeWidth={1.5}
+                  strokeDasharray="4,4"
                 />
               )}
 
-              {/* Lasso Selection Bounding Box */}
+              {/* Selected Strokes Bounding Box Indicator */}
               {selectionBounds && selectedStrokeIds.size > 0 && (
                 <rect
                   x={selectionBounds.minX - 6}
                   y={selectionBounds.minY - 6}
                   width={selectionBounds.maxX - selectionBounds.minX + 12}
                   height={selectionBounds.maxY - selectionBounds.minY + 12}
-                  fill="rgba(59, 130, 246, 0.08)"
+                  fill="none"
                   stroke="#3b82f6"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 4"
-                  rx="4"
-                  className="cursor-move"
+                  strokeWidth={1.5}
+                  strokeDasharray="3,3"
+                  className="animate-pulse"
                 />
               )}
+
+              {/* Interactive Straightedge Ruler & Laser Overlays */}
+              <RulerOverlay
+                ruler={rulerState}
+                onChangeRuler={setRulerState}
+                laser={laserState}
+                zoomLevel={zoomLevel}
+              />
             </svg>
 
-            {/* LAYER 4: Re-editable Floating Text Boxes & Sticky Notes */}
+            {/* Layer 5: Interactive Text Boxes & Collapsible Sticky Notes */}
             {currentPage.textBoxes.map((box) => {
               const isEditing = editingBoxId === box.id
-              const isSelected = selectedBoxIds.has(box.id)
-
               return (
                 <div
                   key={box.id}
-                  className={`absolute rounded-md p-2 transition-all select-text ${
-                    box.isStickyNote
-                      ? "shadow-lg border"
-                      : "border border-dashed border-transparent hover:border-slate-300"
-                  } ${isSelected ? "ring-2 ring-blue-500 shadow-xl" : ""}`}
+                  className={`absolute group select-none transition-shadow ${
+                    box.isStickyNote ? "shadow-lg rounded-xl p-3 border-t-4" : "p-1.5 rounded-lg border border-transparent hover:border-slate-300"
+                  }`}
                   style={{
-                    left: box.x * zoomLevel,
-                    top: box.y * zoomLevel,
-                    width: box.width * zoomLevel,
-                    minHeight: box.height * zoomLevel,
+                    left: `${box.x * zoomLevel}px`,
+                    top: `${box.y * zoomLevel}px`,
+                    width: `${box.width * zoomLevel}px`,
+                    height: box.collapsed ? "38px" : `${box.height * zoomLevel}px`,
                     backgroundColor: box.backgroundColor || "transparent",
                     color: box.color,
-                    fontSize: `${box.fontSize * zoomLevel}px`,
-                    fontWeight: box.bold ? "bold" : "normal",
-                    fontStyle: box.italic ? "italic" : "normal",
                   }}
-                  onDoubleClick={() => setEditingBoxId(box.id)}
+                  onDoubleClick={() => !readOnly && setEditingBoxId(box.id)}
                 >
                   {isEditing ? (
-                    <div className="flex flex-col gap-1 w-full h-full">
-                      {/* Rich Text Format Bar */}
-                      <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded shadow border border-slate-200 dark:border-slate-700 text-xs">
+                    <div className="w-full h-full flex flex-col">
+                      <div className="flex items-center gap-1 mb-1 p-1 bg-white/90 dark:bg-slate-800/90 rounded shadow-sm text-xs">
                         <button
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
@@ -1574,7 +1922,7 @@ export default function NotebookBoard({
                             updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
                             commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
                           }}
-                          className={`px-1.5 py-0.5 rounded font-bold ${box.bold ? "bg-slate-200 dark:bg-slate-700" : ""}`}
+                          className={`px-1.5 py-0.5 rounded font-bold ${box.bold ? "bg-slate-200" : ""}`}
                         >
                           B
                         </button>
@@ -1587,7 +1935,7 @@ export default function NotebookBoard({
                             updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
                             commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
                           }}
-                          className={`px-1.5 py-0.5 rounded italic ${box.italic ? "bg-slate-200 dark:bg-slate-700" : ""}`}
+                          className={`px-1.5 py-0.5 rounded italic ${box.italic ? "bg-slate-200" : ""}`}
                         >
                           I
                         </button>
@@ -1600,7 +1948,7 @@ export default function NotebookBoard({
                             updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
                             commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
                           }}
-                          className="px-1 text-slate-600 hover:bg-slate-100 rounded"
+                          className="px-1 text-slate-600 rounded"
                         >
                           A-
                         </button>
@@ -1613,7 +1961,7 @@ export default function NotebookBoard({
                             updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
                             commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
                           }}
-                          className="px-1 text-slate-600 hover:bg-slate-100 rounded"
+                          className="px-1 text-slate-600 rounded"
                         >
                           A+
                         </button>
@@ -1666,6 +2014,28 @@ export default function NotebookBoard({
               )
             })}
           </div>
+
+          {/* Floating Zoom Window (Magnifier) */}
+          <ZoomWindow
+            state={zoomWindowState}
+            onClose={() => setZoomWindowState((prev) => ({ ...prev, active: false }))}
+            onChangeTarget={(tx, ty) =>
+              setZoomWindowState((prev) => ({ ...prev, targetX: tx, targetY: ty }))
+            }
+            strokes={currentPage.strokes}
+            activeColor={activeColor}
+            activeSize={activeSize}
+            activeTool={activeTool}
+            onAddStroke={(s) => {
+              pushHistory()
+              const updatedPages = [...doc.pages]
+              updatedPages[currentPageIndex] = {
+                ...currentPage,
+                strokes: [...currentPage.strokes, s],
+              }
+              commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+            }}
+          />
         </div>
       </div>
     </div>
