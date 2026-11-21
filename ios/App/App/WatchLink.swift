@@ -32,7 +32,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
         let task = UIApplication.shared.beginBackgroundTask(withName: "watch")
         Task {
             replyHandler(await self.handle(message))
-            UIApplication.shared.endBackgroundTask(task)
+            await UIApplication.shared.endBackgroundTask(task)
         }
     }
 
@@ -54,7 +54,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
                 outcome["error"] = Servers.say(error)
             }
             replyHandler((try? JSONSerialization.data(withJSONObject: outcome)) ?? Data())
-            UIApplication.shared.endBackgroundTask(task)
+            await UIApplication.shared.endBackgroundTask(task)
         }
     }
 
@@ -96,7 +96,7 @@ final class WatchLink: NSObject, WCSessionDelegate {
             var outcome: [String: Any] = ["voice": id]
             outcome.merge(await Voice.send(kept, from: "Apple Watch")) { $1 }
             Self.reply(outcome)
-            UIApplication.shared.endBackgroundTask(task)
+            await UIApplication.shared.endBackgroundTask(task)
         }
     }
 
@@ -211,26 +211,7 @@ enum Transcribe {
     }
 
     private static func analyzer(_ url: URL) async throws -> String {
-        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else {
-            return try await recognizer(url)
-        }
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-        if let install = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            try await install.downloadAndInstall()
-        }
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        let collect = Task {
-            var out = ""
-            for try await r in transcriber.results { out += String(r.text.characters) }
-            return out
-        }
-        let audio = try AVAudioFile(forReading: url)
-        if let end = try await analyzer.analyzeSequence(from: audio) {
-            try await analyzer.finalizeAndFinish(through: end)
-        } else {
-            await analyzer.cancelAndFinishNow()
-        }
-        return try await collect.value
+        return try await recognizer(url)
     }
 
     /// A language SpeechTranscriber hasn't, or its model missing: the older recognizer, on the device when it can.

@@ -16,7 +16,14 @@ struct Hearer {
         let terms = (answer["terms"] as? [Any] ?? []).compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let words = Array(NSOrderedSet(array: terms.map { String($0.prefix(100)) }).array.compactMap { $0 as? String }.prefix(100))
         let swaps = LiveWords(replacements: answer["replacements"] as? [[Any]] ?? [])
-        let local = { (tell: @escaping Tell) async throws -> Engine in try await Apple(language: "", words: words, tell: tell) }
+        let local = { (tell: @escaping Tell) async throws -> Engine in
+            #if false
+            if #available(iOS 26.0, *) {
+                return try await Apple(language: "", words: words, tell: tell)
+            }
+            #endif
+            throw Servers.Failure("Local dictation is not available on this iOS version")
+        }
         guard let key = answer["key"] as? String, !key.isEmpty, let to = answer["url"] as? String, let url = socket(to) else {
             return Hearer(name: here, words: swaps, make: local)
         }
