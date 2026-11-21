@@ -2,7 +2,7 @@
 	"version": 1,
 	"title": "Vector Drawing",
 	"createdAt": 1732200000000,
-	"updatedAt": 1795274618453,
+	"updatedAt": 1795274841086,
 	"pages": [
 		{
 			"id": "page_1",
@@ -4042,6 +4042,15 @@
 					"isStickyNote": false
 				}
 			],
+			"width": 800,
+			"height": 1100
+		},
+		{
+			"id": "page_1795274841086_yhhjh",
+			"pageNumber": 2,
+			"template": "ruled",
+			"strokes": [],
+			"textBoxes": [],
 			"width": 800,
 			"height": 1100
 		}
