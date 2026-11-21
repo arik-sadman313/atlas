@@ -1,9 +1,9 @@
 {
   "appId": "app.vaultite.ios",
-  "appName": "Vaultite",
+  "appName": "Atlas",
   "webDir": "web/dist",
   "server": {
-    "appStartPath": "phone.html"
+    "appStartPath": "offline.html"
   },
   "ios": {
     "path": "ios",

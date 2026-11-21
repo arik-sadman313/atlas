@@ -93,11 +93,11 @@ public class ShellPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Back to the first screen, which this time doesn't open the last server by itself.
+    /// Reload the local offline vault
     @objc func launcher(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            guard let bridge = self.bridge,
-                  let url = URL(string: bridge.config.localURL.absoluteString + "/phone.html?pick") else { return call.reject("no first screen") }
+            let vault = LocalStore.offlineVault ?? "Atlas"
+            guard let url = LocalStore.offlineURL(vault) else { return call.reject("no local vault") }
             _ = self.webView?.load(URLRequest(url: url))
             call.resolve()
         }

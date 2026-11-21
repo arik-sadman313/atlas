@@ -28,6 +28,7 @@ jobs:
       - name: Build Web Application
         run: |
           npm run build
+          npm run build:offline
 
       - name: Sync Capacitor iOS Project
         run: |

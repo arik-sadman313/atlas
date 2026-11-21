@@ -22,21 +22,23 @@ class AppViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(shell)
         KeyboardBar.hide()
         _ = LocalStore.shared // (its network monitor knows the path by the time a page asks)
-        // A server's page that doesn't load (unreachable, or reloaded after iOS ended the page in the background) opens
-        // the offline app on its vault's copy, else goes back to the first screen, saying why, instead of a blank screen.
-        if let webView, let local = bridge?.config.localURL {
-            let fallback = LoadFallback(inner: webView.navigationDelegate) { [weak webView] failed, why in
-                if let vault = LocalStore.vault(for: failed), LocalStore.hasCopy(vault), let url = LocalStore.offlineURL(vault) {
-                    LocalStore.offlineVault = vault
+
+        let vault = LocalStore.offlineVault ?? "Atlas"
+        LocalStore.offlineVault = vault
+
+        // Standalone Native iPad mode: always boot the local offline vault
+        if let webView, let offlineURL = LocalStore.offlineURL(vault) {
+            let fallback = LoadFallback(inner: webView.navigationDelegate) { [weak webView] _, _ in
+                if let url = LocalStore.offlineURL(LocalStore.offlineVault ?? "Atlas") {
                     _ = webView?.load(URLRequest(url: url))
-                    return
                 }
-                var to = URLComponents(url: local.appendingPathComponent("phone.html"), resolvingAgainstBaseURL: false)
-                to?.queryItems = [URLQueryItem(name: "failed", value: failed), URLQueryItem(name: "why", value: why)]
-                if let url = to?.url { _ = webView?.load(URLRequest(url: url)) }
             }
             webView.navigationDelegate = fallback
             self.fallback = fallback
+
+            DispatchQueue.main.async { [weak webView] in
+                _ = webView?.load(URLRequest(url: offlineURL))
+            }
         }
         // What the audio playing here does, told to the page (plugins/core/player/native.ts), whichever page it is now.
         Audio.shared.tell = { [weak self] state in
@@ -63,6 +65,10 @@ class AppViewController: CAPBridgeViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        let vault = LocalStore.offlineVault ?? "Atlas"
+        if let webView, webView.url == nil || webView.url?.scheme != LocalScheme.scheme, let offlineURL = LocalStore.offlineURL(vault) {
+            _ = webView.load(URLRequest(url: offlineURL))
+        }
         #if DEBUG
         // (a file played in as the microphone: the simulator's test opens its voice note once, as the app starts)
         if VoiceRecorder.played != nil, !Self.playedIn { Self.playedIn = true; Links.pending = Links.record }
@@ -125,9 +131,6 @@ final class LoadFallback: NSObject, WKNavigationDelegate {
         // (-999: another load took over; WebKit's 102: a download or a link handed to another app)
         if e.domain == NSURLErrorDomain && e.code == NSURLErrorCancelled { return }
         if e.domain == "WebKitErrorDomain" && e.code == 102 { return }
-        guard let url = e.userInfo[NSURLErrorFailingURLErrorKey] as? URL, url.scheme == "http" || url.scheme == "https",
-              let host = url.host else { return }
-        let origin = "\(url.scheme!)://\(host)\(url.port.map { ":\($0)" } ?? "")"
-        failed(origin, e.localizedDescription)
+        failed("offline", e.localizedDescription)
     }
 }

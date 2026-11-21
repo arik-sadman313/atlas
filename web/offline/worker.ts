@@ -20,13 +20,13 @@ const standIns = new Set<string>()
 let keep = false
 const dirty = new Set<string>()
 let flushing: ReturnType<typeof setTimeout> | null = null
-/** What changed, to the page, which writes it into the container (only outside .vaultite/: the app's own state stays here). */
+/** What changed, to the page, which writes it into the container. */
 function flush() {
   flushing = null
   const out: { path: string; data: Uint8Array | null }[] = []
   for (const abs of dirty) {
     const rel = abs.slice(VAULT.length + 1)
-    if (rel.startsWith(".vaultite/") || standIns.has(rel)) continue
+    if (standIns.has(rel) || rel.endsWith(".sync-part")) continue
     const st = fs.statSync(abs, { throwIfNoEntry: false })
     if (st?.isDirectory()) continue
     out.push({ path: rel, data: st ? fs.readFileSync(abs) as Uint8Array : null })

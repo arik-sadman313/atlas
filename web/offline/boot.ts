@@ -3,8 +3,9 @@
 import { phoneLocal } from "@/core/phoneapp"
 import { previewPath } from "@/core/phonesync"
 import { kindOf } from "../../core/syncengine.ts"
+import { getStarterFiles } from "./starter.ts"
 
-const vault = new URLSearchParams(location.search).get("vault") ?? ""
+const vault = new URLSearchParams(location.search).get("vault") || "Atlas"
 /** A copy synced from shadow mode: kept for testing only, so nothing typed here is kept (it would never reach the vault). */
 const testing = vault.endsWith("-shadow")
 function opened() {
@@ -43,6 +44,14 @@ for (let i = 0; i < want.length;) {
   for (const p of part) out.push({ path: p, data: got[p] != null ? unb64(got[p]!) : new Uint8Array(), mtime: stat.get(p)!.mtime })
 }
 for (const f of files) if (!inMemory(f.path, f.size)) out.push({ path: f.path, data: null, mtime: f.mtime })
+if (files.length === 0) {
+  const starter = getStarterFiles()
+  for (const [p, content] of Object.entries(starter)) {
+    const bytes = new TextEncoder().encode(content)
+    out.push({ path: p, data: bytes, mtime: Date.now() })
+    void local.write({ area: "vault", vault, path: p, data: b64(bytes) }).catch(() => {})
+  }
+}
 // (media only on the hub: there by name, so notes link to it; its preview answers for it)
 const index = await local.read({ area: "sync", vault, paths: ["previews/index.json"] }).then((r) => JSON.parse(atob(r.files["previews/index.json"] ?? "") || "{}") as Record<string, string>, () => ({}))
 for (const p of Object.keys(index)) if (!stat.has(p)) out.push({ path: p, data: null, mtime: 0 })
@@ -106,19 +115,4 @@ class LocalSocket extends EventTarget {
 }
 globalThis.WebSocket = LocalSocket as unknown as typeof WebSocket
 
-/** Says it's the phone's copy, and goes back to the servers once the hub answers again. */
-function badge() {
-  const bar = document.createElement("div")
-  bar.style.cssText = "position:fixed;z-index:40;left:50%;transform:translateX(-50%);bottom:calc(max(env(safe-area-inset-bottom),0.25rem) + 58px);display:flex;gap:10px;align-items:center;padding:4px 6px 4px 12px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--muted-foreground);font:12px/1.5 var(--font-sans,system-ui);white-space:nowrap"
-  const say = document.createElement("span")
-  say.textContent = testing ? "Offline: a copy for testing, changes aren't kept" : "Offline: this phone's copy"
-  const back = document.createElement("button")
-  back.type = "button"
-  back.textContent = "Servers"
-  back.style.cssText = "font:inherit;color:var(--foreground);padding:2px 10px;border-radius:999px;background:var(--muted)"
-  back.onclick = () => { void writing.then(() => (globalThis as { Capacitor?: { nativePromise: (p: string, m: string, o: object) => Promise<unknown> } }).Capacitor?.nativePromise("Shell", "launcher", {})) }
-  bar.append(say, back)
-  document.body.append(bar)
-}
-if (document.readyState === "loading") addEventListener("DOMContentLoaded", badge); else badge()
 await ready
