@@ -1,0 +1,54 @@
+name: Build iOS & iPadOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-ipa:
+    name: Build iPadOS / iOS IPA Package
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Verify Flutter & Xcode Environment
+        run: |
+          flutter doctor -v
+          xcodebuild -version
+
+      - name: Install Dependencies
+        run: |
+          flutter pub get
+          cd ios
+          pod install --repo-update
+          cd ..
+
+      - name: Build Flutter iOS Release (Unsigned)
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          mkdir -p dist
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r -9 dist/Atlas-iPad-Unsigned.ipa Payload
+          echo "IPA Package generated at dist/Atlas-iPad-Unsigned.ipa"
+          ls -lh dist/Atlas-iPad-Unsigned.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Atlas-iPad-Unsigned.ipa
+          path: dist/Atlas-iPad-Unsigned.ipa
+          retention-days: 14
