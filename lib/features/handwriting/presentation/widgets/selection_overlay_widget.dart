@@ -2,7 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
+import 'ink_element_edit_dialog.dart';
 
 /// Full-featured Excalidraw transform overlay featuring:
 /// - 8 Bounding transform handles (4 corners + 4 edge midpoints)
@@ -353,6 +355,20 @@ class _SelectionOverlayWidgetState extends State<SelectionOverlayWidget> {
   }
 
   Widget _buildFloatingActionBar(BuildContext context, bool isDark) {
+    final selectedStrokes = widget.controller.selectedStrokes;
+    final single = selectedStrokes.length == 1 ? selectedStrokes.first : null;
+    final hasTextOrNote =
+        single != null &&
+        (single.shapeType == 'text' ||
+            single.tool == InkToolType.text ||
+            single.shapeType == 'stickyNote' ||
+            single.tool == InkToolType.stickyNote ||
+            single.text != null);
+    final isSticky =
+        single != null &&
+        (single.shapeType == 'stickyNote' ||
+            single.tool == InkToolType.stickyNote);
+
     return Material(
       color: Colors.transparent,
       elevation: 8,
@@ -380,6 +396,64 @@ class _SelectionOverlayWidgetState extends State<SelectionOverlayWidget> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Re-Edit Text / Note Action
+              if (hasTextOrNote) ...[
+                IconButton(
+                  icon: const Icon(Icons.edit_note_rounded, size: 20),
+                  color: const Color(0xFF6366F1),
+                  tooltip: isSticky ? 'Edit Sticky Note' : 'Edit Text',
+                  splashRadius: 14,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  onPressed: () {
+                    showInkElementEditModal(
+                      context: context,
+                      controller: widget.controller,
+                      existingStroke: single,
+                    );
+                  },
+                ),
+                if (isSticky)
+                  ...[
+                    0xFFFFF9B1, // Yellow
+                    0xFFE0F2FE, // Sky Blue
+                    0xFFDCFCE7, // Mint
+                    0xFFFCE7F3, // Pink
+                    0xFFEDE9FE, // Lavender
+                    0xFFFFEDD5, // Peach
+                  ].map((col) {
+                    final isSel = single.fillColor == col;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                      child: InkWell(
+                        onTap: () => widget.controller.updateStickyNote(
+                          single.id,
+                          single.text ?? '',
+                          bgColor: col,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: Color(col),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSel
+                                  ? const Color(0xFF6366F1)
+                                  : Colors.black26,
+                              width: isSel ? 2.5 : 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                _buildDivider(isDark),
+              ],
               // Stroke Color Swatches
               ..._paletteColors.map((colorVal) {
                 return Padding(

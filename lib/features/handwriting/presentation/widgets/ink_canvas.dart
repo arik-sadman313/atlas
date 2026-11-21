@@ -7,6 +7,7 @@ import '../../domain/math/smart_shape_detector.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
 import 'ink_document_painter.dart';
+import 'ink_element_edit_dialog.dart';
 import 'selection_overlay_widget.dart';
 
 class InkCanvas extends StatefulWidget {
@@ -38,6 +39,8 @@ class _InkCanvasState extends State<InkCanvas> {
   int? _activeStylusPointer;
   int? _activeFingerPanPointer;
   Offset? _lastFingerPanPos;
+  int _lastTapTime = 0;
+  Offset? _lastTapPos;
 
   @override
   void initState() {
@@ -117,13 +120,75 @@ class _InkCanvasState extends State<InkCanvas> {
       }
     }
 
+    // Double-tap detection for re-editing text elements & sticky notes
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final isDoubleTap =
+        (now - _lastTapTime < 350) &&
+        (_lastTapPos != null &&
+            (event.localPosition - _lastTapPos!).distance < 28.0);
+    _lastTapTime = now;
+    _lastTapPos = event.localPosition;
+
+    if (isDoubleTap) {
+      final hitStroke = widget.controller.findStrokeAt(event.localPosition);
+      if (hitStroke != null &&
+          (hitStroke.shapeType == 'text' ||
+              hitStroke.tool == InkToolType.text ||
+              hitStroke.shapeType == 'stickyNote' ||
+              hitStroke.tool == InkToolType.stickyNote ||
+              hitStroke.text != null)) {
+        widget.controller.selectStroke(hitStroke.id);
+        showInkElementEditModal(
+          context: context,
+          controller: widget.controller,
+          existingStroke: hitStroke,
+        );
+        return;
+      }
+    }
+
     if (widget.controller.activeTool.type == InkToolType.text) {
-      _showTextInputDialog(event.localPosition);
+      final hitStroke = widget.controller.findStrokeAt(event.localPosition);
+      if (hitStroke != null &&
+          (hitStroke.shapeType == 'text' ||
+              hitStroke.tool == InkToolType.text)) {
+        widget.controller.selectStroke(hitStroke.id);
+        showInkElementEditModal(
+          context: context,
+          controller: widget.controller,
+          existingStroke: hitStroke,
+        );
+        return;
+      }
+      showInkElementEditModal(
+        context: context,
+        controller: widget.controller,
+        createPosition: event.localPosition,
+        isStickyNote: false,
+      );
       return;
     }
 
     if (widget.controller.activeTool.type == InkToolType.stickyNote) {
-      _showStickyNoteDialog(event.localPosition);
+      final hitStroke = widget.controller.findStrokeAt(event.localPosition);
+      if (hitStroke != null &&
+          (hitStroke.shapeType == 'stickyNote' ||
+              hitStroke.tool == InkToolType.stickyNote)) {
+        widget.controller.selectStroke(hitStroke.id);
+        showInkElementEditModal(
+          context: context,
+          controller: widget.controller,
+          existingStroke: hitStroke,
+          isStickyNote: true,
+        );
+        return;
+      }
+      showInkElementEditModal(
+        context: context,
+        controller: widget.controller,
+        createPosition: event.localPosition,
+        isStickyNote: true,
+      );
       return;
     }
 
@@ -144,100 +209,6 @@ class _InkCanvasState extends State<InkCanvas> {
       pressure: pressure,
       tiltAzimuth: tiltAzimuth,
       tiltAltitude: tiltAltitude,
-    );
-  }
-
-  void _showStickyNoteDialog(Offset position) {
-    final textCtrl = TextEditingController();
-    int selectedColor = 0xFFFFF9B1; // Classic canary yellow
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDlgState) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(
-                Icons.sticky_note_2_rounded,
-                size: 20,
-                color: Color(0xFFF59E0B),
-              ),
-              SizedBox(width: 8),
-              Text('New Sticky Note'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: textCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Type note thoughts...',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 4,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Note Color',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children:
-                    [
-                      0xFFFFF9B1, // Canary Yellow
-                      0xFFE0F2FE, // Sky Blue
-                      0xFFDCFCE7, // Mint Green
-                      0xFFFCE7F3, // Soft Pink
-                      0xFFEDE9FE, // Lavender
-                    ].map((color) {
-                      final isSelected = selectedColor == color;
-                      return GestureDetector(
-                        onTap: () => setDlgState(() => selectedColor = color),
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: Color(color),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isSelected
-                                  ? const Color(0xFF2563EB)
-                                  : Colors.black26,
-                              width: isSelected ? 2.5 : 1.0,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (textCtrl.text.trim().isNotEmpty) {
-                  widget.controller.addStickyNote(
-                    position,
-                    textCtrl.text.trim(),
-                    bgColor: selectedColor,
-                  );
-                }
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('Create Note'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -377,55 +348,6 @@ class _InkCanvasState extends State<InkCanvas> {
     }
 
     widget.controller.endStroke();
-  }
-
-  void _showTextInputDialog(Offset position) {
-    final textCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.text_fields_rounded, size: 20),
-            SizedBox(width: 8),
-            Text('Add Note Text'),
-          ],
-        ),
-        content: TextField(
-          controller: textCtrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Type handwritten label or note...',
-            border: OutlineInputBorder(),
-          ),
-          maxLines: 3,
-          onSubmitted: (val) {
-            if (val.trim().isNotEmpty) {
-              widget.controller.addTextElement(position, val.trim());
-            }
-            Navigator.of(ctx).pop();
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (textCtrl.text.trim().isNotEmpty) {
-                widget.controller.addTextElement(
-                  position,
-                  textCtrl.text.trim(),
-                );
-              }
-              Navigator.of(ctx).pop();
-            },
-            child: const Text('Add Text'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override

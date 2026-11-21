@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:perfect_freehand/perfect_freehand.dart';
@@ -155,13 +156,37 @@ class StrokeTessellator {
     final avgScale = ((scaleX.abs() + scaleY.abs()) / 2.0);
     final newBaseWidth = (stroke.baseWidth * (avgScale == 0 ? 1.0 : avgScale))
         .clamp(0.2, 50.0);
-    final newBounds = computeBoundsFromPoints(newPoints, newBaseWidth);
+
+    Rect newBounds;
+    if (stroke.bounds != null && stroke.points.length <= 2) {
+      final b = stroke.bounds!;
+      final newLeft = ox + (b.left - ox) * scaleX + delta.dx;
+      final newTop = oy + (b.top - oy) * scaleY + delta.dy;
+      final newRight = ox + (b.right - ox) * scaleX + delta.dx;
+      final newBottom = oy + (b.bottom - oy) * scaleY + delta.dy;
+      newBounds = Rect.fromLTRB(
+        math.min(newLeft, newRight),
+        math.min(newTop, newBottom),
+        math.max(newLeft, newRight),
+        math.max(newTop, newBottom),
+      );
+    } else {
+      newBounds = computeBoundsFromPoints(newPoints, newBaseWidth);
+    }
+
+    final newFontSize = stroke.fontSize != null
+        ? (stroke.fontSize! * (avgScale == 0 ? 1.0 : avgScale)).clamp(
+            8.0,
+            120.0,
+          )
+        : null;
 
     return stroke.copyWith(
       points: newPoints,
       baseWidth: newBaseWidth,
       color: newColor ?? stroke.color,
       bounds: newBounds,
+      fontSize: newFontSize,
       angle: stroke.angle + deltaAngle,
     );
   }

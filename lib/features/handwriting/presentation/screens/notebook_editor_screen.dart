@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:drift/drift.dart' as drift;
 import 'package:file_picker/file_picker.dart';
@@ -64,6 +65,7 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
   final TransformationController _transformController =
       TransformationController();
   double _zoomLevel = 1.0;
+  Size _lastViewportSize = Size.zero;
 
   Timer? _autosaveTimer;
   bool _hasUnsavedChanges = false;
@@ -83,18 +85,75 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     }
   }
 
+  void _fitPageToScreen([Size? viewportSize]) {
+    final size = viewportSize ?? _lastViewportSize;
+    final doc = _canvasController?.document;
+    if (doc == null || size.width <= 0 || size.height <= 0) return;
+
+    const hPadding = 48.0;
+    const vPadding = 96.0;
+    final availableW = math.max(100.0, size.width - hPadding);
+    final availableH = math.max(100.0, size.height - vPadding);
+    final scaleX = availableW / doc.width;
+    final scaleY = availableH / doc.height;
+    final scale = math.min(scaleX, scaleY).clamp(0.25, 3.5);
+    final renderedW = doc.width * scale;
+    final renderedH = doc.height * scale;
+    final dx = (size.width - renderedW) / 2.0;
+    final dy = math.max(20.0, (size.height - renderedH) / 2.0);
+
+    _zoomLevel = scale;
+    _transformController.value = Matrix4.identity()
+      ..translateByDouble(dx, dy, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+    if (mounted) setState(() {});
+  }
+
+  void _fitWidthToScreen([Size? viewportSize]) {
+    final size = viewportSize ?? _lastViewportSize;
+    final doc = _canvasController?.document;
+    if (doc == null || size.width <= 0) return;
+
+    final availableW = math.max(100.0, size.width - 32.0);
+    final scale = (availableW / doc.width).clamp(0.25, 3.5);
+    final renderedW = doc.width * scale;
+    final dx = (size.width - renderedW) / 2.0;
+    const dy = 24.0;
+
+    _zoomLevel = scale;
+    _transformController.value = Matrix4.identity()
+      ..translateByDouble(dx, dy, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
+    if (mounted) setState(() {});
+  }
+
   void _zoomIn() {
-    final newScale = (_zoomLevel * 1.25).clamp(0.3, 3.5);
-    _setZoom(newScale);
+    final newScale = (_zoomLevel * 1.25).clamp(0.25, 3.5);
+    _zoomToScale(newScale);
   }
 
   void _zoomOut() {
-    final newScale = (_zoomLevel / 1.25).clamp(0.3, 3.5);
-    _setZoom(newScale);
+    final newScale = (_zoomLevel / 1.25).clamp(0.25, 3.5);
+    _zoomToScale(newScale);
   }
 
-  void _resetZoom() {
-    _setZoom(1.0);
+  void _zoomToScale(double targetScale) {
+    if (_lastViewportSize.width <= 0 || _lastViewportSize.height <= 0) {
+      _setZoom(targetScale);
+      return;
+    }
+    final factor = targetScale / (_zoomLevel == 0 ? 1.0 : _zoomLevel);
+    final center = Offset(
+      _lastViewportSize.width / 2,
+      _lastViewportSize.height / 2,
+    );
+    final matrix = _transformController.value.clone();
+    matrix.translateByDouble(center.dx, center.dy, 0, 1);
+    matrix.scaleByDouble(factor, factor, 1, 1);
+    matrix.translateByDouble(-center.dx, -center.dy, 0, 1);
+    _zoomLevel = targetScale;
+    _transformController.value = matrix;
+    if (mounted) setState(() {});
   }
 
   void _setZoom(double scale) {
@@ -1062,59 +1121,73 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
         currentPage?.pdfSourceHash != null && currentPage?.pdfPageIndex != null;
     final isPan = _canvasController?.activeTool.type == InkToolType.pan;
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: InteractiveViewer(
-            transformationController: _transformController,
-            minScale: 0.3,
-            maxScale: 3.5,
-            panEnabled: isPan,
-            scaleEnabled: true,
-            boundaryMargin: const EdgeInsets.all(400),
-            child: Center(
-              child: Container(
-                width: doc.width,
-                height: doc.height,
-                margin: const EdgeInsets.symmetric(vertical: 40),
-                decoration: BoxDecoration(
-                  color: Color(doc.backgroundColor),
-                  borderRadius: BorderRadius.circular(4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                        alpha: isDark ? 0.5 : 0.15,
-                      ),
-                      blurRadius: 20,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: ClipRect(
-                  child: InkCanvas(
-                    controller: _canvasController!,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _lastViewportSize = constraints.biggest;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                transformationController: _transformController,
+                minScale: 0.25,
+                maxScale: 3.5,
+                panEnabled: isPan,
+                scaleEnabled: true,
+                boundaryMargin: const EdgeInsets.all(500),
+                child: Center(
+                  child: Container(
                     width: doc.width,
                     height: doc.height,
-                    drawBackground: !isPdf,
-                    onCanvasPan: _onCanvasPanFromFinger,
-                    backgroundWidget: isPdf
-                        ? PdfPageBackground(
-                            pdfSourceHash: currentPage!.pdfSourceHash,
-                            pdfPageIndex: currentPage.pdfPageIndex,
-                            width: doc.width,
-                            height: doc.height,
-                          )
-                        : null,
+                    margin: const EdgeInsets.symmetric(vertical: 40),
+                    decoration: BoxDecoration(
+                      color: Color(doc.backgroundColor),
+                      borderRadius: BorderRadius.circular(4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: isDark ? 0.5 : 0.15,
+                          ),
+                          blurRadius: 20,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: ClipRect(
+                      child: InkCanvas(
+                        controller: _canvasController!,
+                        width: doc.width,
+                        height: doc.height,
+                        drawBackground: !isPdf,
+                        onCanvasPan: _onCanvasPanFromFinger,
+                        backgroundWidget: isPdf
+                            ? PdfPageBackground(
+                                pdfSourceHash: currentPage!.pdfSourceHash,
+                                pdfPageIndex: currentPage.pdfPageIndex,
+                                width: doc.width,
+                                height: doc.height,
+                              )
+                            : null,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
 
-        // Zoom Navigation Pill (Bottom-Left)
-        Positioned(left: 16, bottom: 20, child: _buildZoomPill(isDark)),
-      ],
+            // Zoom Navigation Pill (Bottom-Left)
+            Positioned(left: 16, bottom: 20, child: _buildZoomPill(isDark)),
+
+            // Page Navigation Floating Pill (Bottom-Right)
+            if (_pages.isNotEmpty)
+              Positioned(
+                right: 16,
+                bottom: 20,
+                child: _buildPageNavPill(isDark),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -1152,9 +1225,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               onPressed: _zoomOut,
             ),
-            InkWell(
-              onTap: _resetZoom,
-              borderRadius: BorderRadius.circular(8),
+            PopupMenuButton<double>(
+              tooltip: 'Zoom Presets',
+              padding: EdgeInsets.zero,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 child: Text(
@@ -1166,6 +1239,44 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
                   ),
                 ),
               ),
+              onSelected: (val) {
+                if (val == -1.0) {
+                  _fitPageToScreen();
+                } else if (val == -2.0) {
+                  _fitWidthToScreen();
+                } else {
+                  _zoomToScale(val);
+                }
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                  value: -1.0,
+                  child: Row(
+                    children: [
+                      Icon(Icons.fit_screen_rounded, size: 16),
+                      SizedBox(width: 8),
+                      Text('Fit Page to Screen'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: -2.0,
+                  child: Row(
+                    children: [
+                      Icon(Icons.photo_size_select_large_rounded, size: 16),
+                      SizedBox(width: 8),
+                      Text('Fit Page Width'),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(value: 0.5, child: Text('50%')),
+                const PopupMenuItem(value: 0.75, child: Text('75%')),
+                const PopupMenuItem(value: 1.0, child: Text('100% (Actual)')),
+                const PopupMenuItem(value: 1.25, child: Text('125%')),
+                const PopupMenuItem(value: 1.5, child: Text('150%')),
+                const PopupMenuItem(value: 2.0, child: Text('200%')),
+              ],
             ),
             IconButton(
               icon: const Icon(Icons.add, size: 16),
@@ -1174,6 +1285,119 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               onPressed: _zoomIn,
+            ),
+            Container(
+              width: 1,
+              height: 16,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
+            ),
+            IconButton(
+              icon: const Icon(Icons.fit_screen_rounded, size: 16),
+              tooltip: 'Fit Page to Screen',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: () => _fitPageToScreen(),
+            ),
+            IconButton(
+              icon: const Icon(Icons.photo_size_select_large_rounded, size: 16),
+              tooltip: 'Fit Page Width',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: () => _fitWidthToScreen(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPageNavPill(bool isDark) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF14171F) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.chevron_left_rounded, size: 20),
+              tooltip: 'Previous Page',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: _currentPageIndex > 0
+                  ? () => _switchPage(_currentPageIndex - 1)
+                  : null,
+            ),
+            Builder(
+              builder: (ctx) => InkWell(
+                onTap: () => Scaffold.of(ctx).openEndDrawer(),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Page ${_currentPageIndex + 1} of ${_pages.length}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.auto_stories_outlined,
+                        size: 14,
+                        color: isDark ? Colors.white54 : Colors.black54,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.chevron_right_rounded, size: 20),
+              tooltip: 'Next Page',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: _currentPageIndex < _pages.length - 1
+                  ? () => _switchPage(_currentPageIndex + 1)
+                  : null,
+            ),
+            Container(
+              width: 1,
+              height: 16,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              color: isDark ? const Color(0xFF282F3E) : const Color(0xFFE2E8F0),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_rounded, size: 18),
+              tooltip: 'Add Page',
+              splashRadius: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              color: const Color(0xFF6366F1),
+              onPressed: _addNewPage,
             ),
           ],
         ),

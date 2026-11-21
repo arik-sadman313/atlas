@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -72,15 +73,14 @@ class InkCanvasController extends ChangeNotifier {
   InkCanvasController({
     required AtlasInkDocument document,
     InkToolConfig? initialTool,
-    bool drawWithFinger = true,
+    this._drawWithFinger = true,
   }) : _activeTool =
            initialTool ??
            const InkToolConfig(
              type: InkToolType.ballpointPen,
              color: 0xFF18181B,
              baseWidth: 3.0,
-           ),
-       _drawWithFinger = drawWithFinger {
+           ) {
     _document = document;
   }
 
@@ -379,11 +379,22 @@ class InkCanvasController extends ChangeNotifier {
     String text, {
     double fontSize = 18.0,
     int? color,
+    String? fontFamily,
+    String? textAlign,
   }) {
     if (text.trim().isEmpty) return;
     _recordUndoSnapshot();
 
     final strokeId = 'text_${DateTime.now().microsecondsSinceEpoch}';
+    final lines = text.split('\n');
+    final maxLineLen = lines.map((l) => l.length).fold(0, math.max);
+    final estW = math.max(
+      140.0,
+      math.min(650.0, maxLineLen * (fontSize * 0.65) + 32.0),
+    );
+    final estH = math.max(44.0, lines.length * (fontSize * 1.35) + 20.0);
+    final bounds = Rect.fromLTWH(position.dx, position.dy, estW, estH);
+
     final stroke = InkStroke(
       id: strokeId,
       tool: InkToolType.text,
@@ -391,16 +402,114 @@ class InkCanvasController extends ChangeNotifier {
       baseWidth: 1.5,
       opacity: _activeTool.opacity,
       blendMode: 'srcOver',
-      points: [InkPoint(x: position.dx, y: position.dy)],
-      bounds: Rect.fromLTWH(position.dx, position.dy, 240, 40),
+      points: [
+        InkPoint(x: bounds.left, y: bounds.top),
+        InkPoint(x: bounds.right, y: bounds.bottom),
+      ],
+      bounds: bounds,
       shapeType: 'text',
       text: text,
       fontSize: fontSize,
+      fontFamily: fontFamily,
+      textAlign: textAlign ?? 'left',
       roughness: 0.0,
       seed: 123,
     );
 
     _addStrokeToDocument(stroke);
+    _selectedStrokeIds = {strokeId};
+    _recomputeSelectionBounds();
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void updateTextElement(
+    String strokeId,
+    String newText, {
+    double? fontSize,
+    int? color,
+    String? fontFamily,
+    String? textAlign,
+  }) {
+    if (newText.trim().isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (stroke.id == strokeId) {
+          final fs = fontSize ?? stroke.fontSize ?? 18.0;
+          final lines = newText.split('\n');
+          final maxLineLen = lines.map((l) => l.length).fold(0, math.max);
+          final estW = math.max(
+            140.0,
+            math.min(650.0, maxLineLen * (fs * 0.65) + 32.0),
+          );
+          final estH = math.max(44.0, lines.length * (fs * 1.35) + 20.0);
+          final oldBounds = stroke.computedBounds;
+          final newBounds = Rect.fromLTWH(
+            oldBounds.left,
+            oldBounds.top,
+            estW,
+            estH,
+          );
+
+          return stroke.copyWith(
+            text: newText,
+            fontSize: fs,
+            color: color ?? stroke.color,
+            fontFamily: fontFamily ?? stroke.fontFamily,
+            textAlign: textAlign ?? stroke.textAlign,
+            bounds: newBounds,
+            points: [
+              InkPoint(x: newBounds.left, y: newBounds.top),
+              InkPoint(x: newBounds.right, y: newBounds.bottom),
+            ],
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
+    _redoStack.clear();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
+  }
+
+  void updateStickyNote(
+    String strokeId,
+    String newText, {
+    int? bgColor,
+    double? fontSize,
+    int? textColor,
+    String? textAlign,
+  }) {
+    if (newText.trim().isEmpty) return;
+    _recordUndoSnapshot();
+
+    final updatedLayers = _document.layers.map((layer) {
+      final updatedStrokes = layer.strokes.map((stroke) {
+        if (stroke.id == strokeId) {
+          return stroke.copyWith(
+            text: newText,
+            fillColor: bgColor ?? stroke.fillColor,
+            color: textColor ?? stroke.color,
+            fontSize: fontSize ?? stroke.fontSize,
+            textAlign: textAlign ?? stroke.textAlign,
+          );
+        }
+        return stroke;
+      }).toList();
+      return layer.copyWith(strokes: updatedStrokes);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _recomputeSelectionBounds();
     _redoStack.clear();
     _revision++;
     _renderCache.invalidate();
@@ -661,6 +770,35 @@ class InkCanvasController extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  InkStroke? getStrokeById(String strokeId) {
+    for (final layer in _document.layers) {
+      for (final stroke in layer.strokes) {
+        if (stroke.id == strokeId) return stroke;
+      }
+    }
+    return null;
+  }
+
+  InkStroke? findStrokeAt(Offset position) {
+    final id = hitTestStroke(position);
+    return id != null ? getStrokeById(id) : null;
+  }
+
+  void deleteStrokeById(String strokeId) {
+    _recordUndoSnapshot();
+    final updatedLayers = _document.layers.map((layer) {
+      final remaining = layer.strokes.where((s) => s.id != strokeId).toList();
+      return layer.copyWith(strokes: remaining);
+    }).toList();
+
+    _document = _document.copyWith(layers: updatedLayers);
+    _selectedStrokeIds.remove(strokeId);
+    _recomputeSelectionBounds();
+    _revision++;
+    _renderCache.invalidate();
+    notifyListeners();
   }
 
   void selectStroke(String strokeId, {bool multiSelect = false}) {

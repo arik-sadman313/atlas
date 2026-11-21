@@ -75,56 +75,55 @@ void main() {
       },
     );
 
-    testWidgets(
-      'Inverted stylus automatically activates vector eraser',
-      (tester) async {
-        final doc = AtlasInkDocument.empty(
-          documentId: 'doc_inverted_1',
-          width: 800,
-          height: 600,
-        );
-        final controller = InkCanvasController(
-          document: doc,
-          initialTool: const InkToolConfig(
-            type: InkToolType.ballpointPen,
-            color: 0xFF000000,
-            baseWidth: 3.0,
+    testWidgets('Inverted stylus automatically activates vector eraser', (
+      tester,
+    ) async {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_inverted_1',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(
+        document: doc,
+        initialTool: const InkToolConfig(
+          type: InkToolType.ballpointPen,
+          color: 0xFF000000,
+          baseWidth: 3.0,
+        ),
+        drawWithFinger: false,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: InkCanvas(controller: controller, width: 800, height: 600),
           ),
-          drawWithFinger: false,
-        );
+        ),
+      );
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: InkCanvas(controller: controller, width: 800, height: 600),
-            ),
-          ),
-        );
+      expect(controller.activeTool.type, equals(InkToolType.ballpointPen));
 
-        expect(controller.activeTool.type, equals(InkToolType.ballpointPen));
+      await tester.sendEventToBinding(
+        const PointerDownEvent(
+          pointer: 1,
+          position: Offset(150, 150),
+          kind: PointerDeviceKind.invertedStylus,
+        ),
+      );
+      await tester.pump();
 
-        await tester.sendEventToBinding(
-          const PointerDownEvent(
-            pointer: 1,
-            position: Offset(150, 150),
-            kind: PointerDeviceKind.invertedStylus,
-          ),
-        );
-        await tester.pump();
+      // Should switch to vector eraser
+      expect(controller.activeTool.type, equals(InkToolType.vectorEraser));
 
-        // Should switch to vector eraser
-        expect(controller.activeTool.type, equals(InkToolType.vectorEraser));
-
-        await tester.sendEventToBinding(
-          const PointerUpEvent(
-            pointer: 1,
-            position: Offset(150, 150),
-            kind: PointerDeviceKind.invertedStylus,
-          ),
-        );
-        await tester.pump();
-      },
-    );
+      await tester.sendEventToBinding(
+        const PointerUpEvent(
+          pointer: 1,
+          position: Offset(150, 150),
+          kind: PointerDeviceKind.invertedStylus,
+        ),
+      );
+      await tester.pump();
+    });
 
     testWidgets(
       'When drawWithFinger is false: finger touch does NOT draw, triggers onCanvasPan',
@@ -206,7 +205,8 @@ void main() {
         );
         final controller = InkCanvasController(
           document: doc,
-          drawWithFinger: true, // even if finger mode was on, pencil down rejects touches!
+          drawWithFinger:
+              true, // even if finger mode was on, pencil down rejects touches!
         );
 
         await tester.pumpWidget(
@@ -288,65 +288,64 @@ void main() {
       },
     );
 
-    testWidgets(
-      'Large contact patch (radiusMajor > 20) is rejected as palm',
-      (tester) async {
-        final doc = AtlasInkDocument.empty(
-          documentId: 'doc_large_patch',
-          width: 800,
-          height: 600,
-        );
-        final controller = InkCanvasController(
-          document: doc,
-          drawWithFinger: true,
-        );
+    testWidgets('Large contact patch (radiusMajor > 20) is rejected as palm', (
+      tester,
+    ) async {
+      final doc = AtlasInkDocument.empty(
+        documentId: 'doc_large_patch',
+        width: 800,
+        height: 600,
+      );
+      final controller = InkCanvasController(
+        document: doc,
+        drawWithFinger: true,
+      );
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: InkCanvas(controller: controller, width: 800, height: 600),
-            ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: InkCanvas(controller: controller, width: 800, height: 600),
           ),
-        );
+        ),
+      );
 
-        // Contact patch with large radius (e.g. 25.0)
-        await tester.sendEventToBinding(
-          const PointerDownEvent(
-            pointer: 1,
-            position: Offset(200, 200),
-            kind: PointerDeviceKind.touch,
-            radiusMajor: 25.0,
-            radiusMinor: 22.0,
-          ),
-        );
-        await tester.pump();
+      // Contact patch with large radius (e.g. 25.0)
+      await tester.sendEventToBinding(
+        const PointerDownEvent(
+          pointer: 1,
+          position: Offset(200, 200),
+          kind: PointerDeviceKind.touch,
+          radiusMajor: 25.0,
+          radiusMinor: 22.0,
+        ),
+      );
+      await tester.pump();
 
-        expect(controller.isDrawing, isFalse);
-        expect(controller.activePoints, isEmpty);
+      expect(controller.isDrawing, isFalse);
+      expect(controller.activePoints, isEmpty);
 
-        await tester.sendEventToBinding(
-          const PointerMoveEvent(
-            pointer: 1,
-            position: Offset(210, 210),
-            kind: PointerDeviceKind.touch,
-            radiusMajor: 25.0,
-            radiusMinor: 22.0,
-          ),
-        );
-        await tester.pump();
-        expect(controller.isDrawing, isFalse);
+      await tester.sendEventToBinding(
+        const PointerMoveEvent(
+          pointer: 1,
+          position: Offset(210, 210),
+          kind: PointerDeviceKind.touch,
+          radiusMajor: 25.0,
+          radiusMinor: 22.0,
+        ),
+      );
+      await tester.pump();
+      expect(controller.isDrawing, isFalse);
 
-        await tester.sendEventToBinding(
-          const PointerUpEvent(
-            pointer: 1,
-            position: Offset(210, 210),
-            kind: PointerDeviceKind.touch,
-          ),
-        );
-        await tester.pump();
-        expect(controller.document.totalStrokeCount, equals(0));
-      },
-    );
+      await tester.sendEventToBinding(
+        const PointerUpEvent(
+          pointer: 1,
+          position: Offset(210, 210),
+          kind: PointerDeviceKind.touch,
+        ),
+      );
+      await tester.pump();
+      expect(controller.document.totalStrokeCount, equals(0));
+    });
 
     testWidgets(
       'When drawWithFinger is true: finger touch draws strokes normally',
@@ -494,10 +493,7 @@ void main() {
         // State toggled to true -> Icon changes to touch_app_rounded
         expect(controller.drawWithFinger, isTrue);
         expect(find.byIcon(Icons.touch_app_rounded), findsOneWidget);
-        expect(
-          find.textContaining('Finger Drawing Enabled'),
-          findsOneWidget,
-        );
+        expect(find.textContaining('Finger Drawing Enabled'), findsOneWidget);
       },
     );
   });
