@@ -31,6 +31,9 @@ import {
   Sparkles,
   Compass,
   Radio,
+  Palette,
+  Sliders,
+  Feather,
 } from "lucide-react"
 import {
   type NotebookDocument,
@@ -49,6 +52,8 @@ import {
   type NotebookElement,
   type AudioRecording,
   type AudioEvent,
+  type PenStudioSettings,
+  DEFAULT_PEN_SETTINGS,
   createEmptyNotebook,
   createEmptyPage,
 } from "./types"
@@ -72,6 +77,8 @@ import { RulerOverlay } from "./RulerAndLaser"
 import { ZoomWindow } from "./ZoomWindow"
 import { ElementsDrawer } from "./ElementsDrawer"
 import { DocumentNavigationDrawer } from "./DocumentNavigationDrawer"
+import { PenStudioPopover } from "./PenStudioPopover"
+import { ColorStudioPopover } from "./ColorStudioPopover"
 
 interface NotebookBoardProps {
   text: string
@@ -81,18 +88,23 @@ interface NotebookBoardProps {
   onChange?: (newText: string) => void
 }
 
-const PRESET_COLORS = [
-  "#1e293b",
-  "#2563eb",
-  "#059669",
-  "#dc2626",
-  "#7c3aed",
-  "#ea580c",
-  "#0891b2",
-  "#d97706",
-  "#475569",
-  "#000000",
-]
+// Stroke path cache for 60-120fps fluid iPad rendering without quadratic bezier recalculation
+const strokePathCache = new Map<string, string>()
+
+function getCachedStrokePath(stroke: InkStroke): string {
+  if (!stroke.id) return renderStrokeToPath(stroke)
+  const key = `${stroke.id}_${stroke.points.length}_${stroke.size}_${stroke.color}`
+  let path = strokePathCache.get(key)
+  if (!path) {
+    path = renderStrokeToPath(stroke)
+    strokePathCache.set(key, path)
+    if (strokePathCache.size > 2000) {
+      const firstKey = strokePathCache.keys().next().value
+      if (firstKey) strokePathCache.delete(firstKey)
+    }
+  }
+  return path
+}
 
 const STICKY_COLORS = [
   { bg: "#fef08a", border: "#facc15", text: "#713f12" }, // yellow
@@ -133,6 +145,10 @@ export default function NotebookBoard({
   const [activeTool, setActiveTool] = useState<InkToolType>("fountain")
   const [previousTool, setPreviousTool] = useState<InkToolType>("fountain")
 
+  // Pen Studio & Configurable Physics
+  const [isPenStudioOpen, setIsPenStudioOpen] = useState(false)
+  const [penSettings, setPenSettings] = useState<PenStudioSettings>(DEFAULT_PEN_SETTINGS)
+
   // Eraser Settings
   const [eraserMode, setEraserMode] = useState<EraserMode>("standard")
   const [eraseHighlighterOnly, setEraseHighlighterOnly] = useState(false)
@@ -151,21 +167,32 @@ export default function NotebookBoard({
   const [tapePattern, setTapePattern] = useState<"solid" | "stripes" | "dots">("stripes")
   const [tapeColor, setTapeColor] = useState("#f59e0b")
 
-  // Colors & Tip Sizes
+  // Color Studio & 3 Quick Color Slots
+  const [isColorStudioOpen, setIsColorStudioOpen] = useState(false)
+  const [activeQuickSlot, setActiveQuickSlot] = useState(0)
   const [quickColors, setQuickColors] = useState(["#1e293b", "#2563eb", "#dc2626"])
   const [activeColor, setActiveColor] = useState("#1e293b")
-  const [showColorPicker, setShowColorPicker] = useState(false)
-  const quickSizes = [2, 5, 10]
+  const quickSizes = [2, 4, 8]
   const [activeSize, setActiveSize] = useState(4)
 
-  // Stylus Palm Rejection Mode
-  const [drawWithFinger, setDrawWithFinger] = useState(false)
+  // Stylus Palm Rejection Mode & iPad Auto-detection
+  const [drawWithFinger, setDrawWithFinger] = useState(true)
+  const [stylusDetected, setStylusDetected] = useState(false)
 
   // Viewport & Chrome
   const [zoomLevel, setZoomLevel] = useState(1.0)
   const [zenMode, setZenMode] = useState(false)
   const [isNavDrawerOpen, setIsNavDrawerOpen] = useState(false)
   const [isElementsDrawerOpen, setIsElementsDrawerOpen] = useState(false)
+
+  // Multi-Touch Gesture Reference for iPad Pinch-to-Zoom and Pan
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const touchStateRef = useRef<{
+    initialDist: number
+    initialZoom: number
+    initialCenter: { x: number; y: number }
+    initialScroll: { left: number; top: number }
+  } | null>(null)
 
   // Ruler & Laser Pointer States
   const [rulerState, setRulerState] = useState<RulerState>({
@@ -313,15 +340,84 @@ export default function NotebookBoard({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [undo, redo])
 
-  // Coordinate conversion taking into account SVG viewBox and scaling
+  // Touch gesture arbitration for iPadOS / multi-touch devices (Pinch-to-zoom & two-finger pan)
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0]
+      const t2 = e.touches[1]
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+      const center = {
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2,
+      }
+      touchStateRef.current = {
+        initialDist: dist,
+        initialZoom: zoomLevel,
+        initialCenter: center,
+        initialScroll: {
+          left: containerRef.current?.scrollLeft || 0,
+          top: containerRef.current?.scrollTop || 0,
+        },
+      }
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && touchStateRef.current) {
+      e.preventDefault()
+      const t1 = e.touches[0]
+      const t2 = e.touches[1]
+      const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+      const currentCenter = {
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2,
+      }
+
+      // Smooth Pinch Zoom
+      if (touchStateRef.current.initialDist > 0) {
+        const factor = currentDist / touchStateRef.current.initialDist
+        const newZoom = Math.min(3.0, Math.max(0.5, touchStateRef.current.initialZoom * factor))
+        setZoomLevel(parseFloat(newZoom.toFixed(2)))
+      }
+
+      // Two-Finger Pan Scroll
+      if (containerRef.current) {
+        const dx = currentCenter.x - touchStateRef.current.initialCenter.x
+        const dy = currentCenter.y - touchStateRef.current.initialCenter.y
+        containerRef.current.scrollLeft = touchStateRef.current.initialScroll.left - dx
+        containerRef.current.scrollTop = touchStateRef.current.initialScroll.top - dy
+      }
+    }
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length < 2) {
+      touchStateRef.current = null
+    }
+  }
+
+  // Coordinate conversion taking into account SVG CTM (transforms, zoom, rotation, scroll)
   const getCanvasPoint = (e: React.PointerEvent<SVGSVGElement>): { x: number; y: number; pressure: number } | null => {
     if (!svgRef.current) return null
-    const rect = svgRef.current.getBoundingClientRect()
-    const scaleX = currentPage.width / rect.width
-    const scaleY = currentPage.height / rect.height
+    let x = 0
+    let y = 0
 
-    let x = (e.clientX - rect.left) * scaleX
-    let y = (e.clientY - rect.top) * scaleY
+    const svg = svgRef.current
+    const ctm = svg.getScreenCTM()
+    if (ctm) {
+      const svgPoint = svg.createSVGPoint()
+      svgPoint.x = e.clientX
+      svgPoint.y = e.clientY
+      const matrixPt = svgPoint.matrixTransform(ctm.inverse())
+      x = matrixPt.x
+      y = matrixPt.y
+    } else {
+      const rect = svg.getBoundingClientRect()
+      const scaleX = currentPage.width / rect.width
+      const scaleY = currentPage.height / rect.height
+      x = (e.clientX - rect.left) * scaleX
+      y = (e.clientY - rect.top) * scaleY
+    }
 
     // Ruler edge snapping
     if (rulerState.active) {
@@ -341,8 +437,16 @@ export default function NotebookBoard({
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (readOnly) return
 
+    if (isPenStudioOpen) setIsPenStudioOpen(false)
+    if (isColorStudioOpen) setIsColorStudioOpen(false)
+
+    // Auto-detect Apple Pencil or Active Stylus
+    if (e.pointerType === "pen") {
+      setStylusDetected(true)
+    }
+
     // Palm Rejection: reject finger touch drawing when Apple Pencil mode is active
-    if (e.pointerType === "touch" && !drawWithFinger) {
+    if (e.pointerType === "touch" && !drawWithFinger && stylusDetected) {
       return
     }
 
@@ -492,12 +596,20 @@ export default function NotebookBoard({
     const isHighlighter = activeTool === "highlighter"
     const audioOffset = recordingStartTimeRef.current > 0 ? Date.now() - recordingStartTimeRef.current : undefined
 
+    const currentPenConfig =
+      activeTool === "brush"
+        ? penSettings.brush
+        : activeTool === "ballpoint"
+        ? penSettings.ballpoint
+        : penSettings.fountain
+
     const newStroke: InkStroke = {
       id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       tool: activeTool,
       color: isHighlighter ? activeColor + "77" : activeColor,
       size: isHighlighter ? Math.max(activeSize * 3, 20) : activeSize,
       audioTimeOffset: audioOffset,
+      penSettings: currentPenConfig,
       points: [
         {
           x: pt.x,
@@ -1027,7 +1139,8 @@ export default function NotebookBoard({
       />
 
       {/* Primary GoodNotes Top Bar */}
-      <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm z-30 gap-y-1">
+      <div className="relative z-30 flex-shrink-0">
+        <div className="flex items-center justify-between px-3 py-1.5 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto gap-2 min-h-[46px]">
         {/* Left: Nav Drawer, Bookmark, Read-Only Toggle & Page Nav */}
         <div className="flex items-center gap-1">
           <button
@@ -1110,54 +1223,96 @@ export default function NotebookBoard({
         </div>
 
         {/* Center: Inking Toolset */}
-        <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+        <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60 relative">
           {/* Fountain Pen */}
           <button
             onClick={() => {
-              setPreviousTool(activeTool)
-              setActiveTool("fountain")
+              if (activeTool === "fountain") {
+                setIsColorStudioOpen(false)
+                setIsPenStudioOpen((prev) => !prev)
+              } else {
+                setPreviousTool(activeTool)
+                setActiveTool("fountain")
+              }
             }}
-            className={`p-1.5 rounded-lg transition-all ${
+            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
               activeTool === "fountain"
                 ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
             }`}
-            title="Fountain Pen (Calligraphic pressure taper)"
+            title="Fountain Pen (Calligraphic dynamic taper - Tap again for Pen Studio)"
           >
             <Pen className="w-4 h-4" />
+            {activeTool === "fountain" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            )}
           </button>
 
           {/* Ballpoint Pen */}
           <button
             onClick={() => {
-              setPreviousTool(activeTool)
-              setActiveTool("ballpoint")
+              if (activeTool === "ballpoint") {
+                setIsColorStudioOpen(false)
+                setIsPenStudioOpen((prev) => !prev)
+              } else {
+                setPreviousTool(activeTool)
+                setActiveTool("ballpoint")
+              }
             }}
-            className={`p-1.5 rounded-lg transition-all ${
+            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
               activeTool === "ballpoint"
                 ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
             }`}
-            title="Ballpoint Pen (Uniform line weight)"
+            title="Ballpoint Pen (Uniform line weight - Tap again for Pen Studio)"
           >
             <Minus className="w-4 h-4 rotate-45 stroke-[2.5]" />
+            {activeTool === "ballpoint" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            )}
           </button>
 
           {/* Brush Pen */}
           <button
             onClick={() => {
-              setPreviousTool(activeTool)
-              setActiveTool("brush")
+              if (activeTool === "brush") {
+                setIsColorStudioOpen(false)
+                setIsPenStudioOpen((prev) => !prev)
+              } else {
+                setPreviousTool(activeTool)
+                setActiveTool("brush")
+              }
             }}
-            className={`p-1.5 rounded-lg transition-all ${
+            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
               activeTool === "brush"
                 ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
             }`}
-            title="Brush Pen (High dynamic pressure & tilt)"
+            title="Brush Pen (High dynamic pressure & tilt - Tap again for Pen Studio)"
           >
-            <span className="font-serif italic font-bold text-xs px-0.5">B</span>
+            <Feather className="w-4 h-4" />
+            {activeTool === "brush" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            )}
           </button>
+
+          {/* Pen Studio Fine Tuning Popover Trigger */}
+          {(activeTool === "fountain" || activeTool === "ballpoint" || activeTool === "brush") && (
+            <button
+              onClick={() => {
+                setIsColorStudioOpen(false)
+                setIsPenStudioOpen((prev) => !prev)
+              }}
+              className={`p-1 rounded-md text-xs font-semibold flex items-center gap-0.5 transition-colors ${
+                isPenStudioOpen
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 shadow-sm"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              }`}
+              title="Open Pen Studio & Fine Tuning"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           {/* Highlighter */}
           <div className="flex items-center">
@@ -1481,52 +1636,46 @@ export default function NotebookBoard({
             onTogglePlayback={toggleAudioPlayback}
           />
 
-          {/* 3 Quick Color Slots */}
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+          {/* 3 Quick Color Slots & Comprehensive Color Studio */}
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700 relative">
             {quickColors.map((c, i) => (
               <button
                 key={i}
                 onClick={() => {
-                  setActiveColor(c)
-                  if (activeColor === c) {
-                    setShowColorPicker(!showColorPicker)
+                  if (activeQuickSlot === i) {
+                    setIsPenStudioOpen(false)
+                    setIsColorStudioOpen((prev) => !prev)
+                  } else {
+                    setActiveQuickSlot(i)
+                    setActiveColor(c)
                   }
                 }}
                 className={`w-5 h-5 rounded-full border-2 transition-transform ${
-                  activeColor === c
+                  activeQuickSlot === i
                     ? "scale-125 border-blue-500 shadow-md ring-2 ring-blue-300/50"
-                    : "border-white dark:border-slate-700"
+                    : "border-white dark:border-slate-700 hover:scale-110"
                 }`}
                 style={{ backgroundColor: c }}
-                title={`Quick Color ${i + 1}`}
+                title={`Quick Color Slot ${i + 1} (Tap again to open Color Studio)`}
               />
             ))}
-          </div>
 
-          {/* Color Palette Popover */}
-          {showColorPicker && (
-            <div className="absolute top-12 right-64 bg-white dark:bg-[#1a1d24] p-2.5 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2 z-50">
-              <div className="text-[11px] font-semibold text-slate-500">Pick Color Preset</div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {PRESET_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => {
-                      setActiveColor(c)
-                      const updated = [...quickColors]
-                      const idx = updated.indexOf(activeColor)
-                      if (idx >= 0) updated[idx] = c
-                      else updated[0] = c
-                      setQuickColors(updated)
-                      setShowColorPicker(false)
-                    }}
-                    className="w-6 h-6 rounded-full border border-slate-300 hover:scale-110 transition-transform"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+            {/* Color Studio Palette Trigger Button */}
+            <button
+              onClick={() => {
+                setIsPenStudioOpen(false)
+                setIsColorStudioOpen((prev) => !prev)
+              }}
+              className={`p-1 rounded-full transition-colors ml-0.5 ${
+                isColorStudioOpen
+                  ? "bg-purple-100 text-purple-600 dark:bg-purple-900/60 dark:text-purple-300 shadow-sm"
+                  : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+              }`}
+              title="Open Color Studio (Curated Palettes, Custom Spectrum & Hex)"
+            >
+              <Palette className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {/* 3 Quick Sizes */}
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
@@ -1547,18 +1696,25 @@ export default function NotebookBoard({
             ))}
           </div>
 
-          {/* Hardware Palm Rejection Toggle */}
+          {/* Hardware Stylus & Palm Rejection Mode */}
           <button
             onClick={() => setDrawWithFinger(!drawWithFinger)}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full font-medium transition-all ${
               drawWithFinger
                 ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300"
                 : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
             }`}
-            title={drawWithFinger ? "Draw with Finger enabled" : "Apple Pencil Only (100% Palm Rejection)"}
+            title={
+              drawWithFinger
+                ? "Finger Draw Active (Touch anywhere to draw or write)"
+                : "Apple Pencil Mode (100% Palm Rejection - Only stylus draws)"
+            }
           >
             <Hand className="w-3.5 h-3.5" />
             <span>{drawWithFinger ? "Finger Draw" : "Pencil Only"}</span>
+            {stylusDetected && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Apple Pencil Active" />
+            )}
           </button>
 
           {/* Auto-Shape Toggle */}
@@ -1642,6 +1798,66 @@ export default function NotebookBoard({
         </div>
       </div>
 
+        {/* Backdrop to dismiss popovers when clicking outside */}
+        {(isPenStudioOpen || isColorStudioOpen) && (
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => {
+              setIsPenStudioOpen(false)
+              setIsColorStudioOpen(false)
+            }}
+          />
+        )}
+
+        {/* Floating Pen Studio Popover (Positioned directly below toolbar, free of overflow clipping) */}
+        {isPenStudioOpen && (
+          <div className="absolute top-full left-44 mt-1.5 z-50">
+            <PenStudioPopover
+              activeTool={activeTool}
+              onSelectTool={(tool) => {
+                setActiveTool(tool)
+              }}
+              penSettings={penSettings}
+              onChangePenSettings={(tool, cfg) => {
+                setPenSettings((prev) => ({
+                  ...prev,
+                  [tool]: { ...prev[tool], ...cfg },
+                }))
+              }}
+              activeColor={activeColor}
+              activeSize={activeSize}
+              onChangeSize={(size) => setActiveSize(size)}
+              autoShapeDetection={autoShapeDetection}
+              onToggleAutoShape={() => setAutoShapeDetection(!autoShapeDetection)}
+              onClose={() => setIsPenStudioOpen(false)}
+            />
+          </div>
+        )}
+
+        {/* Floating Color Studio Popover (Positioned directly below toolbar, free of overflow clipping) */}
+        {isColorStudioOpen && (
+          <div className="absolute top-full right-44 mt-1.5 z-50">
+            <ColorStudioPopover
+              quickColors={quickColors}
+              activeColorIndex={activeQuickSlot}
+              onSelectQuickSlot={(idx) => {
+                setActiveQuickSlot(idx)
+                setActiveColor(quickColors[idx] || "#1e293b")
+              }}
+              onChangeQuickColor={(idx, newColor) => {
+                const updated = [...quickColors]
+                updated[idx] = newColor
+                setQuickColors(updated)
+                if (activeQuickSlot === idx) {
+                  setActiveColor(newColor)
+                }
+              }}
+              onClose={() => setIsColorStudioOpen(false)}
+            />
+          </div>
+        )}
+      </div>
+
       {/* Main Workspace Area with Drawers */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Document Navigation Drawer (Thumbnails, Outlines, Bookmarks) */}
@@ -1688,8 +1904,14 @@ export default function NotebookBoard({
           }}
         />
 
-        {/* Scrollable Canvas Viewport */}
-        <div className="flex-1 overflow-auto flex items-center justify-center p-8 touch-pan-x touch-pan-y relative">
+        {/* Scrollable Canvas Viewport with Native Multi-Touch Gesture Handling */}
+        <div
+          ref={containerRef}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="flex-1 overflow-auto flex items-center justify-center p-8 relative touch-none"
+        >
           {/* Lasso Floating Action Menu */}
           {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0) && selectionBounds && (
             <div
@@ -1807,7 +2029,7 @@ export default function NotebookBoard({
                 {highlighterStrokes.map((s) => (
                   <path
                     key={s.id}
-                    d={renderStrokeToPath(s)}
+                    d={getCachedStrokePath(s)}
                     fill={s.color}
                     stroke={s.color}
                     className="transition-opacity"
@@ -1822,7 +2044,7 @@ export default function NotebookBoard({
                   return (
                     <path
                       key={s.id}
-                      d={renderStrokeToPath(s)}
+                      d={getCachedStrokePath(s)}
                       fill={s.fill || s.color}
                       stroke={s.color}
                       strokeWidth={s.shapeType ? s.size : 0}

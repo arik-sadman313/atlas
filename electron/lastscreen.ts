@@ -52,7 +52,12 @@ export function showLastScreen(win: AppWindow, vault: string): Promise<boolean> 
     win.contentView.removeChildView(view)
     view.webContents.close()
   }
-  const fade = () => { void view.webContents.insertCSS("html{opacity:0}").catch(() => {}); setTimeout(remove, FADE_MS + 20) }
+  const fade = () => {
+    if (view && !view.webContents?.isDestroyed()) {
+      void view.webContents?.insertCSS("html{opacity:0}").catch(() => {})
+    }
+    setTimeout(remove, FADE_MS + 20)
+  }
   shown.set(win, fade)
   const themed = () => { if (nativeTheme.shouldUseDarkColors !== m.dark) fade() }
   nativeTheme.on("updated", themed)

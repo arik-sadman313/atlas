@@ -161,32 +161,90 @@ export function renderStrokeToPath(stroke: InkStroke): string {
     return `M${(p.x - r).toFixed(2)},${p.y.toFixed(2)} a${r},${r} 0 1,0 ${stroke.size},0 a${r},${r} 0 1,0 -${stroke.size},0`
   }
 
-  const rawPoints = stroke.points.map((p) => [
-    p.x,
-    p.y,
-    p.pressure !== undefined && p.pressure > 0 ? p.pressure : 0.5,
-  ])
-
-  // GoodNotes style pen physics tuning
+  // GoodNotes style pen physics tuning & configuration
   const isFountain = stroke.tool === "fountain"
   const isBrush = stroke.tool === "brush"
   const isHighlighter = stroke.tool === "highlighter"
   const isBallpoint = stroke.tool === "ballpoint" || stroke.tool === "pen"
 
+  const tipSharpness = stroke.penSettings?.tipSharpness ?? (isFountain ? 75 : isBrush ? 85 : 10)
+  const pressureSensitivity = stroke.penSettings?.pressureSensitivity ?? (isFountain ? 60 : isBrush ? 90 : 0)
+  const stabilization = stroke.penSettings?.stabilization ?? (isFountain ? 45 : isBrush ? 35 : 50)
+
+  const rawPoints = stroke.points.map((p) => {
+    let pressure = p.pressure !== undefined && p.pressure > 0 ? p.pressure : 0.5
+    if (isFountain) {
+      const curve = Math.max(0.2, pressureSensitivity / 50)
+      pressure = Math.min(1, Math.max(0.1, Math.pow(pressure, 1 / curve)))
+    } else if (isBrush) {
+      const curve = Math.max(0.2, pressureSensitivity / 50)
+      pressure = Math.min(1, Math.max(0.05, Math.pow(pressure, 1 / curve)))
+    } else if (isBallpoint || isHighlighter) {
+      pressure = 0.5 // Constant pressure for uniform line weight
+    }
+    return [p.x, p.y, pressure]
+  })
+
+  let thinning = 0.35
+  let smoothing = 0.55
+  let streamline = 0.45
+  let taperStart = 0
+  let taperEnd = 0
+  let simulatePressure = false
+  let cap = true
+
+  if (isBallpoint) {
+    // Ballpoint Pen: uniform line weight, perfectly round tip, no pressure thinning
+    thinning = 0
+    smoothing = 0.65
+    streamline = 0.35 + (stabilization / 100) * 0.4
+    taperStart = 0
+    taperEnd = 0
+    simulatePressure = false
+    cap = true
+  } else if (isFountain) {
+    // Fountain Pen: calligraphic pressure taper, sharp ends, responsive dynamic thinning
+    thinning = 0.35 + (tipSharpness / 100) * 0.45
+    smoothing = 0.5
+    streamline = 0.3 + (stabilization / 100) * 0.45
+    taperStart = (tipSharpness / 100) * stroke.size * 0.6
+    taperEnd = (tipSharpness / 100) * stroke.size * 0.9
+    simulatePressure = stroke.points.every((p) => p.pressure === undefined || p.pressure === 0.5)
+    cap = true
+  } else if (isBrush) {
+    // Brush Pen: dynamic pressure sweep, calligraphic thicks and thins
+    thinning = 0.7 + (pressureSensitivity / 100) * 0.25
+    smoothing = 0.6
+    streamline = 0.25 + (stabilization / 100) * 0.45
+    taperStart = stroke.size * 0.8
+    taperEnd = stroke.size * 1.5
+    simulatePressure = true
+    cap = true
+  } else if (isHighlighter) {
+    // Highlighter: uniform broad stroke underneath text
+    thinning = 0
+    smoothing = 0.65
+    streamline = 0.5
+    taperStart = 0
+    taperEnd = 0
+    simulatePressure = false
+    cap = false
+  }
+
   const strokeOptions = {
     size: stroke.size,
-    thinning: isBrush ? 0.85 : isFountain ? 0.6 : isHighlighter ? 0 : isBallpoint ? 0.05 : 0.35,
-    smoothing: 0.55,
-    streamline: 0.45,
-    simulatePressure: stroke.points.every((p) => p.pressure === undefined || p.pressure === 0.5),
+    thinning,
+    smoothing,
+    streamline,
+    simulatePressure,
     easing: (t: number) => t,
     start: {
-      cap: true,
-      taper: isBrush ? stroke.size * 0.8 : isFountain ? stroke.size * 0.4 : 0,
+      cap,
+      taper: taperStart,
     },
     end: {
-      cap: true,
-      taper: isBrush ? stroke.size * 1.2 : isFountain ? stroke.size * 0.6 : 0,
+      cap,
+      taper: taperEnd,
     },
   }
 

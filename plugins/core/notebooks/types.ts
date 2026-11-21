@@ -26,6 +26,36 @@ export type EraserMode = "precision" | "standard" | "stroke"
 
 export type ShapePrimitive = "line" | "arrow" | "rect" | "ellipse" | "triangle" | "polygon" | "arc"
 
+export interface PenToolConfig {
+  tipSharpness: number // 0 to 100%
+  pressureSensitivity: number // 0 to 100%
+  stabilization: number // 0 to 100%
+}
+
+export interface PenStudioSettings {
+  fountain: PenToolConfig
+  ballpoint: PenToolConfig
+  brush: PenToolConfig
+}
+
+export const DEFAULT_PEN_SETTINGS: PenStudioSettings = {
+  fountain: {
+    tipSharpness: 75,
+    pressureSensitivity: 60,
+    stabilization: 45,
+  },
+  ballpoint: {
+    tipSharpness: 10,
+    pressureSensitivity: 0,
+    stabilization: 50,
+  },
+  brush: {
+    tipSharpness: 85,
+    pressureSensitivity: 90,
+    stabilization: 35,
+  },
+}
+
 export interface InkStroke {
   id: string
   tool: "pen" | "fountain" | "ballpoint" | "brush" | "highlighter" | "eraser" | "shape"
@@ -37,6 +67,11 @@ export interface InkStroke {
   shapeType?: ShapePrimitive
   fill?: string
   stabilized?: boolean
+  penSettings?: {
+    tipSharpness?: number
+    pressureSensitivity?: number
+    stabilization?: number
+  }
 }
 
 export interface InkTextBox {
