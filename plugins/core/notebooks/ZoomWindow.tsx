@@ -170,22 +170,36 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
             />
 
             {/* Existing strokes */}
-            {strokes.map((s) => (
-              <path
-                key={s.id}
-                d={renderStrokeToPath(s)}
-                fill={s.fill || s.color}
-                stroke={s.color}
-                strokeWidth={s.shapeType ? s.size : 0}
-              />
-            ))}
+            {strokes.map((s) => {
+              const isLineLike = s.shapeType === "line" || s.shapeType === "arrow" || s.shapeType === "arc"
+              return (
+                <path
+                  key={s.id}
+                  d={renderStrokeToPath(s)}
+                  fill={s.shapeType ? (isLineLike ? "none" : (s.fill || "none")) : s.color}
+                  stroke={s.shapeType ? s.color : "none"}
+                  strokeWidth={s.shapeType ? s.size : 0}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )
+            })}
 
             {/* Current in-progress stroke */}
             {currentStroke && (
               <path
                 d={renderStrokeToPath(currentStroke)}
-                fill={currentStroke.color}
-                stroke={currentStroke.color}
+                fill={
+                  currentStroke.shapeType
+                    ? (currentStroke.shapeType === "line" || currentStroke.shapeType === "arrow" || currentStroke.shapeType === "arc"
+                        ? "none"
+                        : currentStroke.fill || "none")
+                    : currentStroke.color
+                }
+                stroke={currentStroke.shapeType ? currentStroke.color : "none"}
+                strokeWidth={currentStroke.shapeType ? currentStroke.size : 0}
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             )}
           </g>

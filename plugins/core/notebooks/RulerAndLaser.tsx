@@ -77,6 +77,9 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           className="backdrop-blur-md shadow-2xl cursor-grab active:cursor-grabbing"
           onPointerDown={(e) => {
             e.stopPropagation()
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {}
             setIsDraggingRuler(true)
             dragStartRef.current = { x: e.clientX, y: e.clientY }
           }}
@@ -91,7 +94,18 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
               y: ruler.y + dy,
             })
           }}
-          onPointerUp={() => setIsDraggingRuler(false)}
+          onPointerUp={(e) => {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {}
+            setIsDraggingRuler(false)
+          }}
+          onPointerCancel={(e) => {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {}
+            setIsDraggingRuler(false)
+          }}
         />
 
         {/* Center Live Degree Readout Pill */}
@@ -100,6 +114,9 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           className="cursor-pointer"
           onPointerDown={(e) => {
             e.stopPropagation()
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {}
             setIsRotatingRuler(true)
             dragStartRef.current = { x: e.clientX, y: e.clientY }
           }}
@@ -112,7 +129,18 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
               angle: Math.round((ruler.angle + delta) % 360),
             })
           }}
-          onPointerUp={() => setIsRotatingRuler(false)}
+          onPointerUp={(e) => {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {}
+            setIsRotatingRuler(false)
+          }}
+          onPointerCancel={(e) => {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {}
+            setIsRotatingRuler(false)
+          }}
         >
           <rect
             x={-35}

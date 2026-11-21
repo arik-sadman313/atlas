@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import {
   Pen,
   Highlighter,
@@ -13,6 +13,9 @@ import {
   Image as ImageIcon,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  GripHorizontal,
   Plus,
   Copy,
   Trash2,
@@ -60,9 +63,9 @@ import {
 import {
   renderStrokeToPath,
   isPointNearStroke,
+  isPointNearTape,
   isStrokeInLasso,
   isBoxInLasso,
-  getStrokesBounds,
   translateStroke,
   detectGeometricShape,
   snapToStraightLine,
@@ -104,6 +107,26 @@ function getCachedStrokePath(stroke: InkStroke): string {
     }
   }
   return path
+}
+
+function getStrokeStyle(s: InkStroke) {
+  if (s.shapeType) {
+    const isLineLike = s.shapeType === "line" || s.shapeType === "arrow" || s.shapeType === "arc"
+    return {
+      fill: isLineLike ? "none" : (s.fill || "none"),
+      stroke: s.color,
+      strokeWidth: s.size,
+      strokeLinecap: "round" as const,
+      strokeLinejoin: "round" as const,
+    }
+  }
+  return {
+    fill: s.color,
+    stroke: "none",
+    strokeWidth: 0,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  }
 }
 
 const STICKY_COLORS = [
@@ -242,14 +265,30 @@ export default function NotebookBoard({
   const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([])
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(new Set())
   const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set())
+  const [activeImageId, setActiveImageId] = useState<string | null>(null)
   const [isDraggingSelection, setIsDraggingSelection] = useState(false)
   const dragStartPointRef = useRef<{ x: number; y: number } | null>(null)
+  const lassoPointsRef = useRef<{ x: number; y: number }[]>([])
   const [lassoFilter, setLassoFilter] = useState<LassoFilter>({
     handwriting: true,
     images: true,
     textBoxes: true,
     stickyNotes: true,
   })
+
+  // Study Tape Draft (in-progress dragging)
+  const [activeTapeDraft, setActiveTapeDraft] = useState<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
+  const activeTapeDraftRef = useRef<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
+
+  // Canvas pointer position (for Eraser cursor circle indicator)
+  const [canvasPointerPos, setCanvasPointerPos] = useState<{ x: number; y: number } | null>(null)
+
+  // Shape Draw-and-Hold timer & lock ref
+  const shapeHoldTimerRef = useRef<any>(null)
+  const isShapeLockedRef = useRef(false)
+  const currentStrokeRef = useRef<InkStroke | null>(null)
+  currentStrokeRef.current = currentStroke
 
   // Undo / Redo history stacks
   const [history, setHistory] = useState<NotebookPage[]>([])
@@ -453,7 +492,9 @@ export default function NotebookBoard({
     const pt = getCanvasPoint(e)
     if (!pt) return
 
-    svgRef.current?.setPointerCapture(e.pointerId)
+    try {
+      svgRef.current?.setPointerCapture(e.pointerId)
+    } catch {}
     isDrawingRef.current = true
     strokeStartTimeRef.current = Date.now()
 
@@ -476,9 +517,16 @@ export default function NotebookBoard({
         if (eraseHighlighterOnly && s.tool !== "highlighter") return true
         return !isPointNearStroke(pt, s, threshold)
       })
-      if (filtered.length !== currentPage.strokes.length) {
+      let tapeFiltered = currentPage.tapeStrips || []
+      if (!eraseHighlighterOnly && tapeFiltered.length > 0) {
+        tapeFiltered = tapeFiltered.filter((tape) => !isPointNearTape(pt, tape, threshold))
+      }
+      if (
+        filtered.length !== currentPage.strokes.length ||
+        tapeFiltered.length !== (currentPage.tapeStrips || []).length
+      ) {
         const updatedPages = [...doc.pages]
-        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered }
+        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered, tapeStrips: tapeFiltered }
         commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       }
       return
@@ -486,15 +534,15 @@ export default function NotebookBoard({
 
     // 3. Lasso Tool
     if (activeTool === "lasso") {
-      if (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0) {
-        const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
-        const bounds = getStrokesBounds(selectedStrokes)
+      if (
+        (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
+        computedSelectionBounds
+      ) {
         if (
-          bounds &&
-          pt.x >= bounds.minX - 15 &&
-          pt.x <= bounds.maxX + 15 &&
-          pt.y >= bounds.minY - 15 &&
-          pt.y <= bounds.maxY + 15
+          pt.x >= computedSelectionBounds.minX - 15 &&
+          pt.x <= computedSelectionBounds.maxX + 15 &&
+          pt.y >= computedSelectionBounds.minY - 15 &&
+          pt.y <= computedSelectionBounds.maxY + 15
         ) {
           setIsDraggingSelection(true)
           dragStartPointRef.current = { x: pt.x, y: pt.y }
@@ -503,31 +551,18 @@ export default function NotebookBoard({
         }
       }
 
+      lassoPointsRef.current = [{ x: pt.x, y: pt.y }]
       setLassoPoints([{ x: pt.x, y: pt.y }])
       setSelectedStrokeIds(new Set())
       setSelectedBoxIds(new Set())
+      setSelectedImageIds(new Set())
       return
     }
 
-    // 4. Study Tape Tool
+    // 4. Study Tape Tool (Interactive Drag Painting)
     if (activeTool === "tape") {
-      pushHistory()
-      const newTape: TapeStrip = {
-        id: `tape_${Date.now()}`,
-        points: [
-          { x: pt.x, y: pt.y },
-          { x: pt.x + 10, y: pt.y },
-        ],
-        width: activeSize * 4,
-        color: tapeColor,
-        pattern: tapePattern,
-        revealed: false,
-        createdAt: Date.now(),
-      }
-      const updatedTapeStrips = [...(currentPage.tapeStrips || []), newTape]
-      const updatedPages = [...doc.pages]
-      updatedPages[currentPageIndex] = { ...currentPage, tapeStrips: updatedTapeStrips }
-      commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+      activeTapeDraftRef.current = { start: pt, current: pt }
+      setActiveTapeDraft({ start: pt, current: pt })
       return
     }
 
@@ -556,7 +591,7 @@ export default function NotebookBoard({
       const updatedPages = [...doc.pages]
       updatedPages[currentPageIndex] = {
         ...currentPage,
-        textBoxes: [...currentPage.textBoxes, newBox],
+        textBoxes: [...(currentPage.textBoxes || []), newBox],
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setEditingBoxId(newBox.id)
@@ -632,6 +667,8 @@ export default function NotebookBoard({
     const pt = getCanvasPoint(e)
     if (!pt) return
 
+    setCanvasPointerPos(pt)
+
     // Laser pointer movement
     if (activeTool === "laser" && laserState.active) {
       setLaserState((prev) => ({
@@ -644,18 +681,32 @@ export default function NotebookBoard({
 
     if (!isDrawingRef.current) return
 
-    // Eraser dragging
+    // Eraser dragging (Strokes and Study Tape)
     if (activeTool === "eraser") {
       const threshold = eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24
       const filtered = currentPage.strokes.filter((s) => {
         if (eraseHighlighterOnly && s.tool !== "highlighter") return true
         return !isPointNearStroke(pt, s, threshold)
       })
-      if (filtered.length !== currentPage.strokes.length) {
+      let tapeFiltered = currentPage.tapeStrips || []
+      if (!eraseHighlighterOnly && tapeFiltered.length > 0) {
+        tapeFiltered = tapeFiltered.filter((tape) => !isPointNearTape(pt, tape, threshold))
+      }
+      if (
+        filtered.length !== currentPage.strokes.length ||
+        tapeFiltered.length !== (currentPage.tapeStrips || []).length
+      ) {
         const updatedPages = [...doc.pages]
-        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered }
+        updatedPages[currentPageIndex] = { ...currentPage, strokes: filtered, tapeStrips: tapeFiltered }
         commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       }
+      return
+    }
+
+    // Study Tape dragging
+    if (activeTool === "tape" && activeTapeDraftRef.current) {
+      activeTapeDraftRef.current.current = pt
+      setActiveTapeDraft({ ...activeTapeDraftRef.current })
       return
     }
 
@@ -669,19 +720,24 @@ export default function NotebookBoard({
         const updatedStrokes = currentPage.strokes.map((s) =>
           selectedStrokeIds.has(s.id) ? translateStroke(s, dx, dy) : s
         )
-        const updatedBoxes = currentPage.textBoxes.map((b) =>
+        const updatedBoxes = (currentPage.textBoxes || []).map((b) =>
           selectedBoxIds.has(b.id) ? { ...b, x: b.x + dx, y: b.y + dy } : b
+        )
+        const updatedImages = (currentPage.images || []).map((img) =>
+          selectedImageIds.has(img.id) ? { ...img, x: img.x + dx, y: img.y + dy } : img
         )
         const updatedPages = [...doc.pages]
         updatedPages[currentPageIndex] = {
           ...currentPage,
           strokes: updatedStrokes,
           textBoxes: updatedBoxes,
+          images: updatedImages,
         }
         commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
         return
       }
 
+      lassoPointsRef.current.push({ x: pt.x, y: pt.y })
       setLassoPoints((prev) => [...prev, { x: pt.x, y: pt.y }])
       return
     }
@@ -726,16 +782,46 @@ export default function NotebookBoard({
         nextPoints = snapToStraightLine(nextPoints)
       }
 
-      setCurrentStroke({
+      const updated = {
         ...currentStroke,
         points: nextPoints,
-      })
+      }
+      setCurrentStroke(updated)
+
+      // Draw and Hold geometric shape recognition
+      if (
+        activeTool !== "shape" &&
+        activeTool !== "highlighter" &&
+        autoShapeDetection &&
+        !isShapeLockedRef.current &&
+        nextPoints.length > 8
+      ) {
+        if (shapeHoldTimerRef.current) clearTimeout(shapeHoldTimerRef.current)
+        shapeHoldTimerRef.current = setTimeout(() => {
+          if (!isDrawingRef.current || !currentStrokeRef.current) return
+          const detected = detectGeometricShape(currentStrokeRef.current.points)
+          if (detected) {
+            isShapeLockedRef.current = true
+            const first = currentStrokeRef.current.points[0]
+            const last = currentStrokeRef.current.points[currentStrokeRef.current.points.length - 1]
+            const morphed: InkStroke = {
+              ...currentStrokeRef.current,
+              tool: "shape",
+              shapeType: detected,
+              fill: shapeFill ? currentStrokeRef.current.color + "33" : undefined,
+              points: [first, last],
+            }
+            setCurrentStroke(morphed)
+          }
+        }, 380)
+      }
     }
   }
 
   // Pointer Up
   const handlePointerUp = () => {
     isDrawingRef.current = false
+    if (shapeHoldTimerRef.current) clearTimeout(shapeHoldTimerRef.current)
 
     // Laser deactivation
     if (activeTool === "laser") {
@@ -743,9 +829,35 @@ export default function NotebookBoard({
       return
     }
 
+    // Study Tape completion
+    if (activeTool === "tape" && activeTapeDraftRef.current) {
+      const { start, current } = activeTapeDraftRef.current
+      activeTapeDraftRef.current = null
+      setActiveTapeDraft(null)
+
+      const dist = Math.hypot(current.x - start.x, current.y - start.y)
+      const p2 = dist >= 6 ? current : { x: start.x + 80, y: start.y }
+
+      pushHistory()
+      const newTape: TapeStrip = {
+        id: `tape_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        points: [start, p2],
+        width: Math.max(16, activeSize * 4),
+        color: tapeColor,
+        pattern: tapePattern,
+        revealed: false,
+        createdAt: Date.now(),
+      }
+      const updatedTapeStrips = [...(currentPage.tapeStrips || []), newTape]
+      const updatedPages = [...doc.pages]
+      updatedPages[currentPageIndex] = { ...currentPage, tapeStrips: updatedTapeStrips }
+      commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+      return
+    }
+
     // Auto-deselect eraser
     if (activeTool === "eraser" && autoDeselectEraser) {
-      setActiveTool(previousTool)
+      setActiveTool(previousTool !== "eraser" ? previousTool : "fountain")
     }
 
     // Lasso completion
@@ -756,26 +868,37 @@ export default function NotebookBoard({
         return
       }
 
-      if (lassoPoints.length > 2) {
+      const pts = lassoPointsRef.current.length > 2 ? lassoPointsRef.current : lassoPoints
+      if (pts.length > 2) {
         const selectedStrokes = new Set<string>()
         const selectedBoxes = new Set<string>()
+        const selectedImages = new Set<string>()
 
         if (lassoFilter.handwriting) {
           currentPage.strokes.forEach((s) => {
-            if (isStrokeInLasso(lassoPoints, s)) selectedStrokes.add(s.id)
+            if (isStrokeInLasso(pts, s)) selectedStrokes.add(s.id)
           })
         }
         if (lassoFilter.textBoxes || lassoFilter.stickyNotes) {
-          currentPage.textBoxes.forEach((b) => {
+          (currentPage.textBoxes || []).forEach((b) => {
             if (b.isStickyNote && !lassoFilter.stickyNotes) return
             if (!b.isStickyNote && !lassoFilter.textBoxes) return
-            if (isBoxInLasso(lassoPoints, b)) selectedBoxes.add(b.id)
+            if (isBoxInLasso(pts, b)) selectedBoxes.add(b.id)
+          })
+        }
+        if (lassoFilter.images && currentPage.images) {
+          currentPage.images.forEach((img) => {
+            if (isBoxInLasso(pts, { x: img.x, y: img.y, width: img.width, height: img.height })) {
+              selectedImages.add(img.id)
+            }
           })
         }
 
         setSelectedStrokeIds(selectedStrokes)
         setSelectedBoxIds(selectedBoxes)
+        setSelectedImageIds(selectedImages)
       }
+      lassoPointsRef.current = []
       setLassoPoints([])
       return
     }
@@ -783,30 +906,14 @@ export default function NotebookBoard({
     // Inking stroke completion
     if (currentStroke && currentStroke.points.length > 0) {
       pushHistory()
-      let finalStroke = currentStroke
-
-      // Auto-shape recognition
-      if (activeTool !== "shape" && autoShapeDetection && currentStroke.points.length > 10) {
-        const detected = detectGeometricShape(currentStroke.points)
-        if (detected) {
-          const first = currentStroke.points[0]
-          const last = currentStroke.points[currentStroke.points.length - 1]
-          finalStroke = {
-            ...currentStroke,
-            tool: "shape",
-            shapeType: detected,
-            points: [first, last],
-          }
-        }
-      }
-
       const updatedPages = [...doc.pages]
       updatedPages[currentPageIndex] = {
         ...currentPage,
-        strokes: [...currentPage.strokes, finalStroke],
+        strokes: [...currentPage.strokes, currentStroke],
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setCurrentStroke(null)
+      isShapeLockedRef.current = false
     }
   }
 
@@ -817,20 +924,31 @@ export default function NotebookBoard({
       .filter((s) => selectedStrokeIds.has(s.id))
       .map((s) => translateStroke({ ...s, id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` }, 25, 25))
 
-    const duplicatedBoxes = currentPage.textBoxes
+    const duplicatedBoxes = (currentPage.textBoxes || [])
       .filter((b) => selectedBoxIds.has(b.id))
       .map((b) => ({ ...b, id: `box_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, x: b.x + 25, y: b.y + 25 }))
+
+    const duplicatedImages = (currentPage.images || [])
+      .filter((img) => selectedImageIds.has(img.id))
+      .map((img) => ({
+        ...img,
+        id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        x: img.x + 25,
+        y: img.y + 25,
+      }))
 
     const updatedPages = [...doc.pages]
     updatedPages[currentPageIndex] = {
       ...currentPage,
       strokes: [...currentPage.strokes, ...duplicatedStrokes],
-      textBoxes: [...currentPage.textBoxes, ...duplicatedBoxes],
+      textBoxes: [...(currentPage.textBoxes || []), ...duplicatedBoxes],
+      images: [...(currentPage.images || []), ...duplicatedImages],
     }
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
 
     setSelectedStrokeIds(new Set(duplicatedStrokes.map((s) => s.id)))
     setSelectedBoxIds(new Set(duplicatedBoxes.map((b) => b.id)))
+    setSelectedImageIds(new Set(duplicatedImages.map((img) => img.id)))
   }
 
   // Recolor Lasso Selection
@@ -839,7 +957,7 @@ export default function NotebookBoard({
     const updatedStrokes = currentPage.strokes.map((s) =>
       selectedStrokeIds.has(s.id) ? { ...s, color } : s
     )
-    const updatedBoxes = currentPage.textBoxes.map((b) =>
+    const updatedBoxes = (currentPage.textBoxes || []).map((b) =>
       selectedBoxIds.has(b.id) ? { ...b, color } : b
     )
     const updatedPages = [...doc.pages]
@@ -855,16 +973,88 @@ export default function NotebookBoard({
   const deleteSelected = () => {
     pushHistory()
     const updatedStrokes = currentPage.strokes.filter((s) => !selectedStrokeIds.has(s.id))
-    const updatedBoxes = currentPage.textBoxes.filter((b) => !selectedBoxIds.has(b.id))
+    const updatedBoxes = (currentPage.textBoxes || []).filter((b) => !selectedBoxIds.has(b.id))
+    const updatedImages = (currentPage.images || []).filter((img) => !selectedImageIds.has(img.id))
     const updatedPages = [...doc.pages]
     updatedPages[currentPageIndex] = {
       ...currentPage,
       strokes: updatedStrokes,
       textBoxes: updatedBoxes,
+      images: updatedImages,
     }
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
     setSelectedStrokeIds(new Set())
     setSelectedBoxIds(new Set())
+    setSelectedImageIds(new Set())
+  }
+
+  // Delete specific placed image
+  const deleteImage = (imgId: string) => {
+    pushHistory()
+    const updatedImages = (currentPage.images || []).filter((img) => img.id !== imgId)
+    const updatedPages = [...doc.pages]
+    updatedPages[currentPageIndex] = { ...currentPage, images: updatedImages }
+    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+    if (activeImageId === imgId) setActiveImageId(null)
+  }
+
+  // Start corner resizing for placed images
+  const startImageResize = (
+    e: React.PointerEvent,
+    img: NotebookImage,
+    corner: "tl" | "tr" | "bl" | "br"
+  ) => {
+    e.stopPropagation()
+    const startX = e.clientX
+    const startY = e.clientY
+    const origW = img.width
+    const origH = img.height
+    const origX = img.x
+    const origY = img.y
+
+    const onMove = (moveEv: PointerEvent) => {
+      const dx = (moveEv.clientX - startX) / zoomLevel
+      const dy = (moveEv.clientY - startY) / zoomLevel
+      let newW = origW
+      let newH = origH
+      let newX = origX
+      let newY = origY
+
+      if (corner === "br") {
+        newW = Math.max(40, origW + dx)
+        newH = Math.max(40, origH + dy)
+      } else if (corner === "bl") {
+        newW = Math.max(40, origW - dx)
+        newH = Math.max(40, origH + dy)
+        newX = origX + (origW - newW)
+      } else if (corner === "tr") {
+        newW = Math.max(40, origW + dx)
+        newH = Math.max(40, origH - dy)
+        newY = origY + (origH - newH)
+      } else if (corner === "tl") {
+        newW = Math.max(40, origW - dx)
+        newH = Math.max(40, origH - dy)
+        newX = origX + (origW - newW)
+        newY = origY + (origH - newH)
+      }
+
+      const updated = (currentPage.images || []).map((i) =>
+        i.id === img.id ? { ...i, width: newW, height: newH, x: newX, y: newY } : i
+      )
+      const updatedPages = [...doc.pages]
+      updatedPages[currentPageIndex] = { ...currentPage, images: updated }
+      setDoc((prev) => ({ ...prev, pages: updatedPages }))
+    }
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      pushHistory()
+      commitDoc(doc)
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
   }
 
   // Convert Selected Handwriting to Text
@@ -1117,8 +1307,43 @@ export default function NotebookBoard({
     }
   }
 
-  const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
-  const selectionBounds = getStrokesBounds(selectedStrokes)
+  const computedSelectionBounds = useMemo(() => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+    for (const s of currentPage.strokes) {
+      if (selectedStrokeIds.has(s.id)) {
+        for (const p of s.points) {
+          if (p.x < minX) minX = p.x
+          if (p.y < minY) minY = p.y
+          if (p.x > maxX) maxX = p.x
+          if (p.y > maxY) maxY = p.y
+        }
+      }
+    }
+
+    for (const b of (currentPage.textBoxes || [])) {
+      if (selectedBoxIds.has(b.id)) {
+        if (b.x < minX) minX = b.x
+        if (b.y < minY) minY = b.y
+        if (b.x + b.width > maxX) maxX = b.x + b.width
+        if (b.y + b.height > maxY) maxY = b.y + b.height
+      }
+    }
+
+    if (currentPage.images) {
+      for (const img of currentPage.images) {
+        if (selectedImageIds.has(img.id)) {
+          if (img.x < minX) minX = img.x
+          if (img.y < minY) minY = img.y
+          if (img.x + img.width > maxX) maxX = img.x + img.width
+          if (img.y + img.height > maxY) maxY = img.y + img.height
+        }
+      }
+    }
+
+    if (minX === Infinity) return null
+    return { minX, minY, maxX, maxY }
+  }, [currentPage.strokes, currentPage.textBoxes, currentPage.images, selectedStrokeIds, selectedBoxIds, selectedImageIds])
 
   // Separate strokes by layer so highlighters always sit under pens
   const highlighterStrokes = currentPage.strokes.filter((s) => s.tool === "highlighter")
@@ -1912,69 +2137,7 @@ export default function NotebookBoard({
           onTouchEnd={handleTouchEnd}
           className="flex-1 overflow-auto flex items-center justify-center p-8 relative touch-none"
         >
-          {/* Lasso Floating Action Menu */}
-          {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0) && selectionBounds && (
-            <div
-              className="absolute z-40 bg-white dark:bg-[#1a1d24] px-3 py-1.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 transform -translate-y-12 animate-in fade-in"
-              style={{
-                left: `${selectionBounds.minX * zoomLevel + 60}px`,
-                top: `${selectionBounds.minY * zoomLevel + 20}px`,
-              }}
-            >
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                {selectedStrokeIds.size + selectedBoxIds.size} Selected
-              </span>
-              <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
-              <button
-                onClick={duplicateSelected}
-                className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Duplicate</span>
-              </button>
-              <button
-                onClick={convertSelectedToText}
-                className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
-                title="Transcribe handwriting to text"
-              >
-                To Text
-              </button>
-              <button
-                onClick={convertSelectedToMath}
-                className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
-                title="Convert handwriting to LaTeX math formula"
-              >
-                To Math
-              </button>
-              <button
-                onClick={saveSelectedAsElement}
-                className="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
-                title="Save as Reusable Element / Sticker"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>Save Element</span>
-              </button>
-              <div className="flex items-center gap-1">
-                {["#1e293b", "#2563eb", "#059669", "#dc2626", "#7c3aed"].map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => recolorSelected(c)}
-                    className="w-4 h-4 rounded-full border border-slate-300"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <button
-                onClick={deleteSelected}
-                className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-full"
-                title="Delete Selection"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Scaled Notebook Page Canvas */}
+          {/* Scaled Notebook Page Canvas Wrapper */}
           <div
             className="relative shadow-2xl transition-transform origin-top-left"
             style={{
@@ -1983,6 +2146,69 @@ export default function NotebookBoard({
               transform: `rotate(${currentPage.rotation || 0}deg)`,
             }}
           >
+            {/* Lasso Floating Action Menu inside Page coordinate system */}
+            {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
+              computedSelectionBounds && (
+                <div
+                  className="absolute z-40 bg-white dark:bg-[#1a1d24] px-3 py-1.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 animate-in fade-in select-none"
+                  style={{
+                    left: `${Math.max(10, Math.min(currentPage.width * zoomLevel - 420, computedSelectionBounds.minX * zoomLevel))}px`,
+                    top: `${Math.max(10, computedSelectionBounds.minY * zoomLevel - 48)}px`,
+                  }}
+                >
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    {selectedStrokeIds.size + selectedBoxIds.size + selectedImageIds.size} Selected
+                  </span>
+                  <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
+                  <button
+                    onClick={duplicateSelected}
+                    className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Duplicate</span>
+                  </button>
+                  <button
+                    onClick={convertSelectedToText}
+                    className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
+                    title="Transcribe handwriting to text"
+                  >
+                    To Text
+                  </button>
+                  <button
+                    onClick={convertSelectedToMath}
+                    className="text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
+                    title="Convert handwriting to LaTeX math formula"
+                  >
+                    To Math
+                  </button>
+                  <button
+                    onClick={saveSelectedAsElement}
+                    className="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline flex items-center gap-1"
+                    title="Save as Reusable Element / Sticker"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Save Element</span>
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {["#1e293b", "#2563eb", "#059669", "#dc2626", "#7c3aed"].map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => recolorSelected(c)}
+                        className="w-4 h-4 rounded-full border border-slate-300"
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    onClick={deleteSelected}
+                    className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-full"
+                    title="Delete Selection"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
             <svg
               ref={svgRef}
               viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}
@@ -1999,6 +2225,7 @@ export default function NotebookBoard({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
+              onPointerLeave={() => setCanvasPointerPos(null)}
             >
               <defs>{renderBackgroundPattern()}</defs>
 
@@ -2011,33 +2238,107 @@ export default function NotebookBoard({
                 fill={getBackgroundFill()}
               />
 
-              {/* Layer 1: Placed Images */}
-              {currentPage.images?.map((img) => (
-                <image
-                  key={img.id}
-                  href={img.url}
-                  x={img.x}
-                  y={img.y}
-                  width={img.width}
-                  height={img.height}
-                  className="pointer-events-none select-none"
-                />
-              ))}
+              {/* Layer 1: Placed Images with Selection & Resize Handles */}
+              {(currentPage.images || []).map((img) => {
+                const isSelected = activeImageId === img.id || selectedImageIds.has(img.id)
+                return (
+                  <g
+                    key={img.id}
+                    onClick={(e) => {
+                      if (readOnly) return
+                      e.stopPropagation()
+                      setActiveImageId(img.id)
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <image
+                      href={img.url}
+                      x={img.x}
+                      y={img.y}
+                      width={img.width}
+                      height={img.height}
+                      className="select-none"
+                    />
+                    {isSelected && !readOnly && (
+                      <g className="image-selection-overlay">
+                        <rect
+                          x={img.x - 2}
+                          y={img.y - 2}
+                          width={img.width + 4}
+                          height={img.height + 4}
+                          fill="none"
+                          stroke="#3b82f6"
+                          strokeWidth={2}
+                          strokeDasharray="4,4"
+                        />
+                        {/* 4 Corner handles for resizing */}
+                        {([
+                          { cx: img.x, cy: img.y, cursor: "nwse-resize", corner: "tl" },
+                          { cx: img.x + img.width, cy: img.y, cursor: "nesw-resize", corner: "tr" },
+                          { cx: img.x, cy: img.y + img.height, cursor: "nesw-resize", corner: "bl" },
+                          { cx: img.x + img.width, cy: img.y + img.height, cursor: "nwse-resize", corner: "br" },
+                        ] as const).map((h, i) => (
+                          <circle
+                            key={i}
+                            cx={h.cx}
+                            cy={h.cy}
+                            r={6}
+                            fill="#ffffff"
+                            stroke="#3b82f6"
+                            strokeWidth={2}
+                            style={{ cursor: h.cursor }}
+                            onPointerDown={(e) => {
+                              e.stopPropagation()
+                              startImageResize(e, img, h.corner)
+                            }}
+                          />
+                        ))}
+                        {/* Delete button on top right */}
+                        <g
+                          transform={`translate(${img.x + img.width + 12}, ${img.y - 6})`}
+                          className="cursor-pointer hover:scale-110 transition-transform"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteImage(img.id)
+                          }}
+                        >
+                          <circle cx={0} cy={0} r={10} fill="#ef4444" />
+                          <line x1={-4} y1={-4} x2={4} y2={4} stroke="#ffffff" strokeWidth={2} />
+                          <line x1={4} y1={-4} x2={-4} y2={4} stroke="#ffffff" strokeWidth={2} />
+                        </g>
+                      </g>
+                    )}
+                  </g>
+                )
+              })}
 
               {/* Layer 2: Highlighters (Layered underneath handwriting) */}
-              <g className="highlighter-layer" style={{ mixBlendMode: "multiply" }}>
-                {highlighterStrokes.map((s) => (
-                  <path
-                    key={s.id}
-                    d={getCachedStrokePath(s)}
-                    fill={s.color}
-                    stroke={s.color}
-                    className="transition-opacity"
-                  />
-                ))}
+              <g
+                className="highlighter-layer"
+                style={{ mixBlendMode: currentPage.paperColor === "dark" ? "screen" : "multiply" }}
+              >
+                {highlighterStrokes.map((s) => {
+                  const isDimmed = isPlaybackActive && s.audioTimeOffset && s.audioTimeOffset > playbackTimeMs
+                  return (
+                    <path
+                      key={s.id}
+                      d={getCachedStrokePath(s)}
+                      fill={s.color}
+                      stroke="none"
+                      strokeWidth={0}
+                      opacity={isDimmed ? 0.2 : 0.75}
+                      className="transition-opacity cursor-pointer"
+                      onClick={() => {
+                        if (s.audioTimeOffset !== undefined) {
+                          setPlaybackTimeMs(s.audioTimeOffset)
+                        }
+                      }}
+                    />
+                  )
+                })}
               </g>
 
-              {/* Layer 3: Dark Handwriting Pens & Shapes */}
+              {/* Layer 3: Dark Handwriting Pens & Geometric Shapes */}
               <g className="pen-strokes-layer">
                 {penStrokes.map((s) => {
                   const isDimmed = isPlaybackActive && s.audioTimeOffset && s.audioTimeOffset > playbackTimeMs
@@ -2045,9 +2346,7 @@ export default function NotebookBoard({
                     <path
                       key={s.id}
                       d={getCachedStrokePath(s)}
-                      fill={s.fill || s.color}
-                      stroke={s.color}
-                      strokeWidth={s.shapeType ? s.size : 0}
+                      {...getStrokeStyle(s)}
                       opacity={isDimmed ? 0.2 : 1}
                       className="cursor-pointer transition-opacity duration-150"
                       onClick={() => {
@@ -2067,13 +2366,27 @@ export default function NotebookBoard({
                 onToggleReveal={toggleTapeReveal}
               />
 
+              {/* In-progress Active Tape Dragging Draft */}
+              {activeTapeDraft && (
+                <TapeLayer
+                  tapeStrips={[{
+                    id: "tape_draft",
+                    points: [activeTapeDraft.start, activeTapeDraft.current],
+                    width: Math.max(16, activeSize * 4),
+                    color: tapeColor,
+                    pattern: tapePattern,
+                    revealed: false,
+                    createdAt: Date.now(),
+                  }]}
+                  isStudyMode={false}
+                />
+              )}
+
               {/* In-progress Live Stroke */}
               {currentStroke && (
                 <path
                   d={renderStrokeToPath(currentStroke)}
-                  fill={currentStroke.fill || currentStroke.color}
-                  stroke={currentStroke.color}
-                  strokeWidth={currentStroke.shapeType ? currentStroke.size : 0}
+                  {...getStrokeStyle(currentStroke)}
                   opacity={activeTool === "highlighter" ? 0.65 : 1}
                 />
               )}
@@ -2089,19 +2402,68 @@ export default function NotebookBoard({
                 />
               )}
 
-              {/* Selected Strokes Bounding Box Indicator */}
-              {selectionBounds && selectedStrokeIds.size > 0 && (
-                <rect
-                  x={selectionBounds.minX - 6}
-                  y={selectionBounds.minY - 6}
-                  width={selectionBounds.maxX - selectionBounds.minX + 12}
-                  height={selectionBounds.maxY - selectionBounds.minY + 12}
-                  fill="none"
-                  stroke="#3b82f6"
+              {/* Selected Group Bounding Box Indicator */}
+              {computedSelectionBounds &&
+                (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) && (
+                  <rect
+                    x={computedSelectionBounds.minX - 6}
+                    y={computedSelectionBounds.minY - 6}
+                    width={computedSelectionBounds.maxX - computedSelectionBounds.minX + 12}
+                    height={computedSelectionBounds.maxY - computedSelectionBounds.minY + 12}
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth={1.5}
+                    strokeDasharray="3,3"
+                    className="animate-pulse pointer-events-none"
+                  />
+                )}
+
+              {/* Eraser radius visual indicator cursor */}
+              {activeTool === "eraser" && canvasPointerPos && (
+                <circle
+                  cx={canvasPointerPos.x}
+                  cy={canvasPointerPos.y}
+                  r={eraserMode === "precision" ? 6 : eraserMode === "standard" ? 16 : 24}
+                  fill="rgba(244, 63, 94, 0.15)"
+                  stroke="#f43f5e"
                   strokeWidth={1.5}
                   strokeDasharray="3,3"
-                  className="animate-pulse"
+                  className="pointer-events-none"
                 />
+              )}
+
+              {/* Zoom Window Target Magnification Indicator Box */}
+              {zoomWindowState.active && (
+                <g className="zoom-target-indicator pointer-events-none">
+                  <rect
+                    x={zoomWindowState.targetX}
+                    y={zoomWindowState.targetY}
+                    width={zoomWindowState.width / zoomWindowState.scale}
+                    height={zoomWindowState.height / zoomWindowState.scale}
+                    fill="rgba(59, 130, 246, 0.08)"
+                    stroke="#3b82f6"
+                    strokeWidth={1.5}
+                    strokeDasharray="4,4"
+                  />
+                  <rect
+                    x={zoomWindowState.targetX}
+                    y={zoomWindowState.targetY - 18}
+                    width={90}
+                    height={18}
+                    rx={3}
+                    fill="#3b82f6"
+                  />
+                  <text
+                    x={zoomWindowState.targetX + 45}
+                    y={zoomWindowState.targetY - 5}
+                    textAnchor="middle"
+                    fontSize={10}
+                    fill="#ffffff"
+                    fontWeight="bold"
+                  >
+                    Magnifier View
+                  </text>
+                </g>
               )}
 
               {/* Interactive Straightedge Ruler & Laser Overlays */}
@@ -2113,8 +2475,8 @@ export default function NotebookBoard({
               />
             </svg>
 
-            {/* Layer 5: Interactive Text Boxes & Collapsible Sticky Notes */}
-            {currentPage.textBoxes.map((box) => {
+            {/* Layer 5: Interactive Text Boxes & Collapsible Sticky Notes with Drag Handles */}
+            {(currentPage.textBoxes || []).map((box) => {
               const isEditing = editingBoxId === box.id
               return (
                 <div
@@ -2132,9 +2494,83 @@ export default function NotebookBoard({
                   }}
                   onDoubleClick={() => !readOnly && setEditingBoxId(box.id)}
                 >
+                  {/* Top Bar for dragging, collapsing, and actions */}
+                  <div
+                    className="flex items-center justify-between pb-1 mb-1 border-b border-black/10 cursor-move text-xs select-none"
+                    onPointerDown={(e) => {
+                      if (readOnly) return
+                      e.stopPropagation()
+                      const startX = e.clientX
+                      const startY = e.clientY
+                      const origX = box.x
+                      const origY = box.y
+                      const onMove = (moveEv: PointerEvent) => {
+                        const dx = (moveEv.clientX - startX) / zoomLevel
+                        const dy = (moveEv.clientY - startY) / zoomLevel
+                        const updatedBoxes = currentPage.textBoxes.map((b) =>
+                          b.id === box.id ? { ...b, x: origX + dx, y: origY + dy } : b
+                        )
+                        const updatedPages = [...doc.pages]
+                        updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
+                        setDoc((prev) => ({ ...prev, pages: updatedPages }))
+                      }
+                      const onUp = () => {
+                        window.removeEventListener("pointermove", onMove)
+                        window.removeEventListener("pointerup", onUp)
+                        pushHistory()
+                        commitDoc(doc)
+                      }
+                      window.addEventListener("pointermove", onMove)
+                      window.addEventListener("pointerup", onUp)
+                    }}
+                  >
+                    <div className="flex items-center gap-1 font-semibold text-[10px] opacity-75">
+                      <GripHorizontal className="w-3.5 h-3.5" />
+                      <span>{box.isStickyNote ? "Sticky Note" : "Text"}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {box.isStickyNote && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const updated = currentPage.textBoxes.map((b) =>
+                              b.id === box.id ? { ...b, collapsed: !b.collapsed } : b
+                            )
+                            const updatedPages = [...doc.pages]
+                            updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
+                            commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+                          }}
+                          className="p-0.5 hover:bg-black/10 rounded"
+                          title={box.collapsed ? "Expand note" : "Collapse note"}
+                        >
+                          {box.collapsed ? (
+                            <ChevronDown className="w-3 h-3" />
+                          ) : (
+                            <ChevronUp className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          pushHistory()
+                          const updated = currentPage.textBoxes.filter((b) => b.id !== box.id)
+                          const updatedPages = [...doc.pages]
+                          updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
+                          commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+                        }}
+                        className="p-0.5 hover:bg-rose-500/20 text-rose-600 rounded"
+                        title="Delete box"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
                   {isEditing ? (
-                    <div className="w-full h-full flex flex-col">
-                      <div className="flex items-center gap-1 mb-1 p-1 bg-white/90 dark:bg-slate-800/90 rounded shadow-sm text-xs">
+                    <div className="w-full h-[calc(100%-28px)] flex flex-col">
+                      <div className="flex items-center gap-1 mb-1 p-1 bg-white/90 dark:bg-slate-800/90 rounded shadow-sm text-xs flex-wrap">
                         <button
                           onClick={() => {
                             const updated = currentPage.textBoxes.map((b) =>
@@ -2187,23 +2623,35 @@ export default function NotebookBoard({
                         >
                           A+
                         </button>
-                        <button
-                          onClick={() => {
-                            const filtered = currentPage.textBoxes.filter((b) => b.id !== box.id)
+                        <select
+                          value={box.fontFamily || "sans"}
+                          onChange={(e) => {
+                            const updated = currentPage.textBoxes.map((b) =>
+                              b.id === box.id ? { ...b, fontFamily: e.target.value as any } : b
+                            )
                             const updatedPages = [...doc.pages]
-                            updatedPages[currentPageIndex] = { ...currentPage, textBoxes: filtered }
+                            updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updated }
                             commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
                           }}
-                          className="p-1 text-rose-500 hover:bg-rose-50 rounded ml-auto"
+                          className="text-[10px] bg-slate-100 dark:bg-slate-700 rounded px-1 py-0.5 outline-none"
                         >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                          <option value="sans">Sans</option>
+                          <option value="serif">Serif</option>
+                          <option value="mono">Mono</option>
+                          <option value="handwriting">Handwriting</option>
+                        </select>
                       </div>
 
                       <textarea
                         autoFocus
                         defaultValue={box.text}
-                        className="w-full h-full bg-transparent resize-none border-none outline-none font-sans"
+                        className={`w-full h-full bg-transparent resize-none border-none outline-none ${
+                          box.fontFamily === "serif"
+                            ? "font-serif"
+                            : box.fontFamily === "mono"
+                            ? "font-mono"
+                            : "font-sans"
+                        }`}
                         style={{
                           fontSize: `${box.fontSize * zoomLevel}px`,
                           color: box.color,
@@ -2226,10 +2674,21 @@ export default function NotebookBoard({
                     </div>
                   ) : (
                     <div
-                      className="w-full h-full whitespace-pre-wrap cursor-pointer"
+                      className={`w-full h-[calc(100%-28px)] overflow-hidden whitespace-pre-wrap cursor-pointer ${
+                        box.fontFamily === "serif"
+                          ? "font-serif"
+                          : box.fontFamily === "mono"
+                          ? "font-mono"
+                          : "font-sans"
+                      }`}
+                      style={{
+                        fontSize: `${box.fontSize * zoomLevel}px`,
+                        fontWeight: box.bold ? "bold" : "normal",
+                        fontStyle: box.italic ? "italic" : "normal",
+                      }}
                       title="Double-click to edit text"
                     >
-                      {box.text}
+                      {box.collapsed ? (box.text.split("\n")[0] || "Note...") : box.text}
                     </div>
                   )}
                 </div>

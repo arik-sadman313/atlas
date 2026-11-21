@@ -1,5 +1,5 @@
 import { getStroke } from "perfect-freehand"
-import type { InkPoint, InkStroke, ShapePrimitive, RulerState } from "./types"
+import type { InkPoint, InkStroke, ShapePrimitive, RulerState, TapeStrip } from "./types"
 
 /**
  * Converts outline polygon points from perfect-freehand into a smooth SVG path.
@@ -74,7 +74,7 @@ export function snapToStraightLine(points: InkPoint[]): InkPoint[] {
 export function snapPointToRuler(
   pt: { x: number; y: number },
   ruler: RulerState,
-  threshold = 32
+  threshold = 28
 ): { x: number; y: number } | null {
   if (!ruler.active) return null
 
@@ -86,22 +86,61 @@ export function snapPointToRuler(
   const vx = pt.x - ruler.x
   const vy = pt.y - ruler.y
 
+  // Distance along ruler length
+  const rulerHalfWidth = (ruler.length || 500) / 2
+  const along = vx * dirX + vy * dirY
+  if (Math.abs(along) > rulerHalfWidth + 20) return null
+
   // Normal vector perpendicular to ruler
   const normX = -dirY
   const normY = dirX
 
-  // Distance along perpendicular
-  const dist = vx * normX + vy * normY
+  // Distance along perpendicular from centerline
+  const perp = vx * normX + vy * normY
 
-  if (Math.abs(dist) <= threshold) {
-    // Project point directly onto ruler line
+  // Straightedge ruler has thickness 70 (edges at -35 and +35)
+  const halfH = 35
+  const distToTop = Math.abs(perp - (-halfH))
+  const distToBottom = Math.abs(perp - halfH)
+
+  if (distToTop <= threshold) {
+    const diff = perp - (-halfH)
     return {
-      x: pt.x - dist * normX,
-      y: pt.y - dist * normY,
+      x: pt.x - diff * normX,
+      y: pt.y - diff * normY,
+    }
+  }
+
+  if (distToBottom <= threshold) {
+    const diff = perp - halfH
+    return {
+      x: pt.x - diff * normX,
+      y: pt.y - diff * normY,
     }
   }
 
   return null
+}
+
+/**
+ * Tests whether a point is within threshold of a study tape strip.
+ */
+export function isPointNearTape(pt: { x: number; y: number }, tape: TapeStrip, threshold = 16): boolean {
+  if (!tape.points || tape.points.length < 2) return false
+  const p1 = tape.points[0]
+  const p2 = tape.points[tape.points.length - 1]
+
+  const l2 = (p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2
+  if (l2 === 0) {
+    return Math.hypot(pt.x - p1.x, pt.y - p1.y) <= (tape.width / 2 + threshold)
+  }
+
+  let t = ((pt.x - p1.x) * (p2.x - p1.x) + (pt.y - p1.y) * (p2.y - p1.y)) / l2
+  t = Math.max(0, Math.min(1, t))
+  const projX = p1.x + t * (p2.x - p1.x)
+  const projY = p1.y + t * (p2.y - p1.y)
+
+  return Math.hypot(pt.x - projX, pt.y - projY) <= (tape.width / 2 + threshold)
 }
 
 /**
@@ -405,6 +444,20 @@ export function isPointNearStroke(point: { x: number; y: number }, stroke: InkSt
 /**
  * Tests if a stroke's centroid lies inside a lasso polygon or rectangle.
  */
+function isPointInPolygon(pt: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y
+    const xj = polygon[j].x, yj = polygon[j].y
+    const intersect = ((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+/**
+ * Tests if a stroke's centroid or any of its points lies inside a lasso polygon.
+ */
 export function isStrokeInLasso(lassoPoints: { x: number; y: number }[], stroke: InkStroke): boolean {
   if (lassoPoints.length < 3 || stroke.points.length === 0) return false
 
@@ -413,17 +466,14 @@ export function isStrokeInLasso(lassoPoints: { x: number; y: number }[], stroke:
     sumX += p.x
     sumY += p.y
   }
-  const cx = sumX / stroke.points.length
-  const cy = sumY / stroke.points.length
+  const centroid = { x: sumX / stroke.points.length, y: sumY / stroke.points.length }
+  if (isPointInPolygon(centroid, lassoPoints)) return true
 
-  let inside = false
-  for (let i = 0, j = lassoPoints.length - 1; i < lassoPoints.length; j = i++) {
-    const xi = lassoPoints[i].x, yi = lassoPoints[i].y
-    const xj = lassoPoints[j].x, yj = lassoPoints[j].y
-    const intersect = ((yi > cy) !== (yj > cy)) && (cx < ((xj - xi) * (cy - yi)) / (yj - yi) + xi)
-    if (intersect) inside = !inside
+  for (const p of stroke.points) {
+    if (isPointInPolygon(p, lassoPoints)) return true
   }
-  return inside
+
+  return false
 }
 
 export function isBoxInLasso(lassoPoints: { x: number; y: number }[], box: { x: number; y: number; width: number; height: number }): boolean {
@@ -431,14 +481,19 @@ export function isBoxInLasso(lassoPoints: { x: number; y: number }[], box: { x: 
   const cx = box.x + box.width / 2
   const cy = box.y + box.height / 2
 
-  let inside = false
-  for (let i = 0, j = lassoPoints.length - 1; i < lassoPoints.length; j = i++) {
-    const xi = lassoPoints[i].x, yi = lassoPoints[i].y
-    const xj = lassoPoints[j].x, yj = lassoPoints[j].y
-    const intersect = ((yi > cy) !== (yj > cy)) && (cx < ((xj - xi) * (cy - yi)) / (yj - yi) + xi)
-    if (intersect) inside = !inside
+  if (isPointInPolygon({ x: cx, y: cy }, lassoPoints)) return true
+
+  const corners = [
+    { x: box.x, y: box.y },
+    { x: box.x + box.width, y: box.y },
+    { x: box.x + box.width, y: box.y + box.height },
+    { x: box.x, y: box.y + box.height },
+  ]
+  for (const c of corners) {
+    if (isPointInPolygon(c, lassoPoints)) return true
   }
-  return inside
+
+  return false
 }
 
 /**
