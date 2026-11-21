@@ -35,8 +35,8 @@ import {
   Compass,
   Radio,
   Palette,
-  Sliders,
   Feather,
+  Triangle,
   X,
 } from "lucide-react"
 import {
@@ -302,6 +302,7 @@ export default function NotebookBoard({
     startPt: { x: number; y: number }
   } | null>(null)
   const lastEraserPointRef = useRef<{ x: number; y: number } | null>(null)
+  const rulerLockedEdgeRef = useRef<"top" | "bottom" | null>(null)
   const [laserPopoverOpen, setLaserPopoverOpen] = useState(false)
 
   // Undo / Redo history stacks
@@ -472,15 +473,6 @@ export default function NotebookBoard({
       y = (e.clientY - rect.top) * scaleY
     }
 
-    // Ruler edge snapping
-    if (rulerState.active) {
-      const snapped = snapPointToRuler({ x, y }, rulerState)
-      if (snapped) {
-        x = snapped.x
-        y = snapped.y
-      }
-    }
-
     // Hardware Apple Pencil pressure
     const pressure = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5
     return { x, y, pressure }
@@ -505,6 +497,21 @@ export default function NotebookBoard({
 
     const pt = getCanvasPoint(e)
     if (!pt) return
+
+    // Ruler edge lock for inking tools: snap start point and lock edge direction
+    const isInkingTool = ["fountain", "ballpoint", "brush", "highlighter"].includes(activeTool)
+    if (rulerState.active && isInkingTool) {
+      const snapped = snapPointToRuler(pt, rulerState, 45)
+      if (snapped) {
+        pt.x = snapped.x
+        pt.y = snapped.y
+        rulerLockedEdgeRef.current = snapped.edge
+      } else {
+        rulerLockedEdgeRef.current = null
+      }
+    } else {
+      rulerLockedEdgeRef.current = null
+    }
 
     try {
       svgRef.current?.setPointerCapture(e.pointerId)
@@ -838,11 +845,45 @@ export default function NotebookBoard({
 
     // Regular inking
     if (currentStroke) {
+      let inkingX = pt.x
+      let inkingY = pt.y
+
+      // Constrain strictly along ruler edge if drawing against ruler
+      if (rulerState.active) {
+        if (!rulerLockedEdgeRef.current) {
+          const snapCheck = snapPointToRuler(pt, rulerState, 45)
+          if (snapCheck) {
+            rulerLockedEdgeRef.current = snapCheck.edge
+          }
+        }
+
+        if (rulerLockedEdgeRef.current) {
+          const rad = (rulerState.angle * Math.PI) / 180
+          const dirX = Math.cos(rad)
+          const dirY = Math.sin(rad)
+          const normX = -dirY
+          const normY = dirX
+          const edgeY = rulerLockedEdgeRef.current === "top" ? -35 : 35
+          const rulerHalfWidth = (rulerState.length || 500) / 2
+
+          // Vector from ruler center to pointer
+          const vx = pt.x - rulerState.x
+          const vy = pt.y - rulerState.y
+          const along = vx * dirX + vy * dirY
+
+          // Constrain strictly along the ruler edge (with small overhang)
+          const clampedAlong = Math.max(-rulerHalfWidth - 15, Math.min(rulerHalfWidth + 15, along))
+
+          inkingX = rulerState.x + clampedAlong * dirX + edgeY * normX
+          inkingY = rulerState.y + clampedAlong * dirY + edgeY * normY
+        }
+      }
+
       let nextPoints = [
         ...currentStroke.points,
         {
-          x: pt.x,
-          y: pt.y,
+          x: inkingX,
+          y: inkingY,
           pressure: pt.pressure,
           tiltX: e.tiltX,
           tiltY: e.tiltY,
@@ -977,11 +1018,14 @@ export default function NotebookBoard({
       return
     }
 
+    const wasRulerDrawn = Boolean(rulerLockedEdgeRef.current)
+    rulerLockedEdgeRef.current = null
+
     // Inking stroke completion
     if (currentStroke && currentStroke.points.length > 0) {
       let finalStroke = currentStroke
-      // Auto-Shape on release if auto-shape is active or dedicated shape tool
-      if ((activeTool === "shape" || autoShapeDetection) && !finalStroke.shapeType && finalStroke.points.length > 8) {
+      // Auto-Shape on release if auto-shape is active or dedicated shape tool (skip if ruler-drawn)
+      if (!wasRulerDrawn && (activeTool === "shape" || autoShapeDetection) && !finalStroke.shapeType && finalStroke.points.length > 8) {
         const detected = detectGeometricShape(finalStroke.points)
         if (detected) {
           finalStroke = {
@@ -1452,713 +1496,781 @@ export default function NotebookBoard({
       />
 
       {/* Primary GoodNotes Top Bar */}
-      <div className="relative z-30 flex-shrink-0">
-        <div className="flex items-center justify-between px-3 py-1.5 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto gap-2 min-h-[46px]">
-        {/* Left: Nav Drawer, Bookmark, Read-Only Toggle & Page Nav */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setIsNavDrawerOpen(!isNavDrawerOpen)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isNavDrawerOpen
-                ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
-            title="Thumbnails, Outlines & Bookmarks Drawer"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
-
-          {/* Read-Only Mode Toggle */}
-          <button
-            onClick={() => setReadOnly(!readOnly)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              readOnly
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                : "text-slate-400 hover:text-slate-600"
-            }`}
-            title="Read-Only Mode: Disable drawing to tap hyperlinks and peel tape"
-          >
-            {readOnly ? <Eye className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-          </button>
-
-          <button
-            onClick={() => toggleBookmark(currentPageIndex)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              currentPage.bookmarked
-                ? "text-amber-500 hover:text-amber-600"
-                : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-            }`}
-            title={currentPage.bookmarked ? "Bookmarked Page" : "Bookmark this Page"}
-          >
-            <Star className={`w-4 h-4 ${currentPage.bookmarked ? "fill-amber-400" : ""}`} />
-          </button>
-
-          {/* Page Navigation */}
-          <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300">
+      <div className="relative z-30 flex-shrink-0 select-none">
+        <header className="h-12 px-3 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 shadow-sm flex items-center justify-between gap-2 overflow-x-auto">
+          {/* Left: Document Drawer, Bookmark, Read-Only Toggle, Navigation, Undo/Redo */}
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button
-              onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
-              disabled={currentPageIndex === 0}
-              className="p-0.5 disabled:opacity-30 hover:text-blue-500"
-              title="Previous Page"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <span className="font-semibold mx-1">
-              {currentPageIndex + 1} / {doc.pages.length}
-            </span>
-            <button
-              onClick={() => setCurrentPageIndex((prev) => Math.min(doc.pages.length - 1, prev + 1))}
-              disabled={currentPageIndex === doc.pages.length - 1}
-              className="p-0.5 disabled:opacity-30 hover:text-blue-500"
-              title="Next Page"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Undo / Redo */}
-          <button
-            onClick={undo}
-            disabled={history.length === 0 || readOnly}
-            className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={redo}
-            disabled={redoStack.length === 0 || readOnly}
-            className="p-1.5 text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
-            title="Redo (Ctrl+Y)"
-          >
-            <Redo2 className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Center: Inking Toolset */}
-        <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/80 p-0.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60 relative">
-          {/* Fountain Pen */}
-          <button
-            onClick={() => {
-              if (activeTool === "fountain") {
-                setIsColorStudioOpen(false)
-                setIsPenStudioOpen((prev) => !prev)
-              } else {
-                setPreviousTool(activeTool)
-                setActiveTool("fountain")
-              }
-            }}
-            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
-              activeTool === "fountain"
-                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Fountain Pen (Calligraphic dynamic taper - Tap again for Pen Studio)"
-          >
-            <Pen className="w-4 h-4" />
-            {activeTool === "fountain" && (
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            )}
-          </button>
-
-          {/* Ballpoint Pen */}
-          <button
-            onClick={() => {
-              if (activeTool === "ballpoint") {
-                setIsColorStudioOpen(false)
-                setIsPenStudioOpen((prev) => !prev)
-              } else {
-                setPreviousTool(activeTool)
-                setActiveTool("ballpoint")
-              }
-            }}
-            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
-              activeTool === "ballpoint"
-                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Ballpoint Pen (Uniform line weight - Tap again for Pen Studio)"
-          >
-            <Minus className="w-4 h-4 rotate-45 stroke-[2.5]" />
-            {activeTool === "ballpoint" && (
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            )}
-          </button>
-
-          {/* Brush Pen */}
-          <button
-            onClick={() => {
-              if (activeTool === "brush") {
-                setIsColorStudioOpen(false)
-                setIsPenStudioOpen((prev) => !prev)
-              } else {
-                setPreviousTool(activeTool)
-                setActiveTool("brush")
-              }
-            }}
-            className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
-              activeTool === "brush"
-                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Brush Pen (High dynamic pressure & tilt - Tap again for Pen Studio)"
-          >
-            <Feather className="w-4 h-4" />
-            {activeTool === "brush" && (
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            )}
-          </button>
-
-          {/* Pen Studio Fine Tuning Popover Trigger */}
-          {(activeTool === "fountain" || activeTool === "ballpoint" || activeTool === "brush") && (
-            <button
-              onClick={() => {
-                setIsColorStudioOpen(false)
-                setIsPenStudioOpen((prev) => !prev)
-              }}
-              className={`p-1 rounded-md text-xs font-semibold flex items-center gap-0.5 transition-colors ${
-                isPenStudioOpen
-                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 shadow-sm"
-                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              onClick={() => setIsNavDrawerOpen(!isNavDrawerOpen)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                isNavDrawerOpen
+                  ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 font-semibold"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
               }`}
-              title="Open Pen Studio & Fine Tuning"
+              title="Thumbnails, Outlines & Bookmarks Drawer"
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <Layers className="w-4 h-4" />
             </button>
-          )}
 
-          {/* Highlighter */}
-          <div className="flex items-center">
             <button
-              onClick={() => {
-                setPreviousTool(activeTool)
-                setActiveTool("highlighter")
-              }}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "highlighter"
-                  ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
+              onClick={() => setReadOnly(!readOnly)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                readOnly
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 font-bold"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               }`}
-              title="Highlighter (Draws beneath dark text ink)"
+              title="Read-Only Mode: Disable drawing to tap hyperlinks and peel study tape"
             >
-              <Highlighter className="w-4 h-4" />
+              {readOnly ? <Eye className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
             </button>
-            {activeTool === "highlighter" && (
+
+            <button
+              onClick={() => toggleBookmark(currentPageIndex)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                currentPage.bookmarked
+                  ? "text-amber-500 hover:text-amber-600"
+                  : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              }`}
+              title={currentPage.bookmarked ? "Bookmarked Page" : "Bookmark this Page"}
+            >
+              <Star className={`w-4 h-4 ${currentPage.bookmarked ? "fill-amber-400 text-amber-400" : ""}`} />
+            </button>
+
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Page Navigation */}
+            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 text-xs text-slate-700 dark:text-slate-300 font-medium">
               <button
-                onClick={() => setStraightLineHighlighter(!straightLineHighlighter)}
-                className={`text-[10px] px-1 py-0.5 rounded font-bold ml-0.5 transition-colors ${
-                  straightLineHighlighter ? "bg-amber-400 text-slate-900" : "text-slate-400 hover:text-slate-600"
-                }`}
-                title="Snap highlight to straight horizontal/vertical text lines"
+                onClick={() => setCurrentPageIndex((prev) => Math.max(0, prev - 1))}
+                disabled={currentPageIndex === 0}
+                className="p-1 disabled:opacity-30 hover:text-blue-500 rounded transition-colors"
+                title="Previous Page"
               >
-                Line
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-            )}
-          </div>
-
-          {/* Eraser */}
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                setPreviousTool(activeTool)
-                setActiveTool("eraser")
-              }}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "eraser"
-                  ? "bg-white dark:bg-slate-700 text-rose-500 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Eraser"
-            >
-              <Eraser className="w-4 h-4" />
-            </button>
-            {activeTool === "eraser" && (
-              <div className="flex items-center gap-0.5 text-[11px] bg-white dark:bg-slate-700 rounded p-0.5">
-                <select
-                  value={eraserMode}
-                  onChange={(e) => setEraserMode(e.target.value as EraserMode)}
-                  className="bg-transparent border-none text-[10px] font-semibold outline-none text-slate-700 dark:text-slate-200"
-                >
-                  <option value="precision">Precision (Small)</option>
-                  <option value="standard">Standard</option>
-                  <option value="stroke">Entire Stroke</option>
-                </select>
-                <button
-                  onClick={() => setEraseHighlighterOnly(!eraseHighlighterOnly)}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
-                    eraseHighlighterOnly ? "bg-amber-100 text-amber-800" : "text-slate-400"
-                  }`}
-                  title="Erase Highlighter Only"
-                >
-                  Highlighter Only
-                </button>
-                <button
-                  onClick={() => setAutoDeselectEraser(!autoDeselectEraser)}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
-                    autoDeselectEraser ? "bg-rose-100 text-rose-800" : "text-slate-400"
-                  }`}
-                  title="Auto-Deselect: Automatically switch back to previous pen tool"
-                >
-                  Auto-Switch
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Lasso Tool */}
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                setPreviousTool(activeTool)
-                setActiveTool("lasso")
-              }}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "lasso"
-                  ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Lasso Selection"
-            >
-              <Lasso className="w-4 h-4" />
-            </button>
-            {activeTool === "lasso" && (
+              <span className="font-semibold px-1 text-[11px] tabular-nums">
+                {currentPageIndex + 1} / {doc.pages.length}
+              </span>
               <button
-                onClick={() => setLassoFilter((prev) => ({ ...prev, handwriting: !prev.handwriting }))}
-                className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                  lassoFilter.handwriting ? "bg-purple-100 text-purple-700" : "text-slate-400"
-                }`}
-                title="Toggle Handwriting Selection in Lasso"
+                onClick={() => setCurrentPageIndex((prev) => Math.min(doc.pages.length - 1, prev + 1))}
+                disabled={currentPageIndex === doc.pages.length - 1}
+                className="p-1 disabled:opacity-30 hover:text-blue-500 rounded transition-colors"
+                title="Next Page"
               >
-                Ink
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
-            )}
-          </div>
+            </div>
 
-          {/* Shape Tool */}
-          <div className="flex items-center gap-0.5">
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Undo / Redo */}
             <button
-              onClick={() => {
-                setPreviousTool(activeTool)
-                setActiveTool("shape")
-              }}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "shape"
-                  ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-semibold scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Shape Tool (Geometric Primitives)"
+              onClick={undo}
+              disabled={history.length === 0 || readOnly}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              title="Undo (Ctrl+Z)"
             >
-              {shapeToolPrimitive === "rect" && <Square className="w-4 h-4" />}
-              {shapeToolPrimitive === "ellipse" && <Circle className="w-4 h-4" />}
-              {shapeToolPrimitive === "line" && <Minus className="w-4 h-4" />}
-              {shapeToolPrimitive === "arrow" && <ArrowUpRight className="w-4 h-4" />}
+              <Undo2 className="w-4 h-4" />
             </button>
-            {activeTool === "shape" && (
-              <div className="flex items-center gap-0.5">
-                <select
-                  value={shapeToolPrimitive}
-                  onChange={(e) => setShapeToolPrimitive(e.target.value as ShapePrimitive)}
-                  className="text-[11px] bg-white dark:bg-slate-700 border-none rounded py-0.5 px-1 text-slate-700 dark:text-slate-200 outline-none"
-                >
-                  <option value="rect">Box</option>
-                  <option value="ellipse">Circle</option>
-                  <option value="line">Line</option>
-                  <option value="arrow">Arrow</option>
-                  <option value="triangle">Triangle</option>
-                </select>
-                <button
-                  onClick={() => setShapeFill(!shapeFill)}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
-                    shapeFill ? "bg-emerald-200 text-emerald-900" : "text-slate-400"
-                  }`}
-                  title="Shape Interior Fill"
-                >
-                  Fill
-                </button>
-                <button
-                  onClick={() => setSnapToOtherShapes(!snapToOtherShapes)}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold ${
-                    snapToOtherShapes ? "bg-emerald-200 text-emerald-900" : "text-slate-400"
-                  }`}
-                  title="Snap Endpoints to Other Shape Vertices"
-                >
-                  Snap
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Study Tape Tool */}
-          <div className="flex items-center gap-0.5">
             <button
-              onClick={() => {
-                setPreviousTool(activeTool)
-                setActiveTool("tape")
-              }}
-              className={`p-1.5 rounded-lg transition-all ${
-                activeTool === "tape"
-                  ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm scale-105"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Study Tape Tool: Paint opaque strips over answers, tap in study mode to reveal"
+              onClick={redo}
+              disabled={redoStack.length === 0 || readOnly}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-400 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              title="Redo (Ctrl+Y)"
             >
-              <Minus className="w-4 h-4 stroke-[4]" />
+              <Redo2 className="w-4 h-4" />
             </button>
-            {activeTool === "tape" && (
-              <div className="flex items-center gap-1 text-[10px] bg-white dark:bg-slate-700 rounded p-0.5">
-                <select
-                  value={tapePattern}
-                  onChange={(e) => setTapePattern(e.target.value as any)}
-                  className="bg-transparent border-none text-[10px] font-semibold outline-none"
-                >
-                  <option value="stripes">Stripes</option>
-                  <option value="dots">Dots</option>
-                  <option value="solid">Solid</option>
-                </select>
-                {["#f59e0b", "#3b82f6", "#ec4899", "#10b981"].map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setTapeColor(c)}
-                    className={`w-3.5 h-3.5 rounded-full border ${tapeColor === c ? "ring-1 ring-blue-500 scale-110" : ""}`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Text Box */}
-          <button
-            onClick={() => setActiveTool("textbox")}
-            className={`p-1.5 rounded-lg transition-all ${
-              activeTool === "textbox"
-                ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm scale-105"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Text Box"
-          >
-            <Type className="w-4 h-4" />
-          </button>
-
-          {/* Sticky Note */}
-          <button
-            onClick={() => setActiveTool("stickynote")}
-            className={`p-1.5 rounded-lg transition-all ${
-              activeTool === "stickynote"
-                ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm scale-105"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Sticky Note"
-          >
-            <StickyNote className="w-4 h-4" />
-          </button>
-
-          {/* Insert Image */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors"
-            title="Insert Image / Diagram"
-          >
-            <ImageIcon className="w-4 h-4" />
-          </button>
-
-          {/* Elements / Stickers Drawer */}
-          <button
-            onClick={() => setIsElementsDrawerOpen(!isElementsDrawerOpen)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isElementsDrawerOpen
-                ? "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400 shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Elements & Reusable Stickers"
-          >
-            <Sparkles className="w-4 h-4" />
-          </button>
-
-          {/* Interactive Straightedge Ruler */}
-          <button
-            onClick={() => setRulerState((prev) => ({ ...prev, active: !prev.active }))}
-            className={`p-1.5 rounded-lg transition-colors ${
-              rulerState.active
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Toggle Straightedge Ruler with Live Degree Readout"
-          >
-            <Compass className="w-4 h-4" />
-          </button>
-
-          {/* Laser Pointer with Mode & Color Popover */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                if (activeTool === "laser") {
-                  setLaserPopoverOpen(!laserPopoverOpen)
-                } else {
-                  setPreviousTool(activeTool)
-                  setActiveTool("laser")
-                  setLaserState((prev) => ({ ...prev, active: true }))
-                  setLaserPopoverOpen(true)
-                }
-              }}
-              className={`p-1.5 rounded-lg transition-colors ${
-                activeTool === "laser"
-                  ? "bg-rose-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-              }`}
-              title="Laser Pointer (Live Presentations)"
-            >
-              <Radio className="w-4 h-4" />
-            </button>
-            {activeTool === "laser" && laserPopoverOpen && (
-              <div className="absolute top-10 left-0 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-2 z-50 flex flex-col gap-2 w-44 animate-in fade-in select-none">
-                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-                  <span>Laser Mode</span>
-                  <button onClick={() => setLaserPopoverOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  <button
-                    onClick={() => setLaserState((prev) => ({ ...prev, mode: "trail" }))}
-                    className={`px-2 py-1 rounded text-[11px] font-medium ${
-                      laserState.mode === "trail"
-                        ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
-                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    }`}
-                  >
-                    Fading Trail
-                  </button>
-                  <button
-                    onClick={() => setLaserState((prev) => ({ ...prev, mode: "dot", trail: [] }))}
-                    className={`px-2 py-1 rounded text-[11px] font-medium ${
-                      laserState.mode === "dot"
-                        ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
-                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    }`}
-                  >
-                    Laser Dot
-                  </button>
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-500 font-medium">Color</span>
-                  <div className="flex items-center gap-1.5">
-                    {["#ef4444", "#10b981", "#06b6d4", "#ec4899"].map((col) => (
-                      <button
-                        key={col}
-                        onClick={() => setLaserState((prev) => ({ ...prev, color: col }))}
-                        className={`w-4 h-4 rounded-full border ${
-                          (laserState.color || "#ef4444") === col ? "ring-2 ring-rose-400 scale-110" : ""
-                        }`}
-                        style={{ backgroundColor: col }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Zoom Window (Handwriting Magnifier) */}
-          <button
-            onClick={() => setZoomWindowState((prev) => ({ ...prev, active: !prev.active }))}
-            className={`p-1.5 rounded-lg transition-colors ${
-              zoomWindowState.active
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900"
-            }`}
-            title="Handwriting Magnifier Zoom Window with Auto-Advance"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Right: Quick Colors, Sizes, Palm Rejection, Audio & Export */}
-        <div className="flex items-center gap-2">
-          {/* Audio Sync Engine Recording & Playback */}
-          <AudioSyncEngine
-            onRecordingStart={() => {
-              recordingStartTimeRef.current = Date.now()
-              setAudioEvents([])
-            }}
-            onRecordingStop={(recording) => {
-              recordingStartTimeRef.current = 0
-              setActiveRecording(recording)
-              const updatedDoc = {
-                ...doc,
-                audioRecordings: [...(doc.audioRecordings || []), recording],
-              }
-              commitDoc(updatedDoc)
-            }}
-            currentEvents={audioEvents}
-            activeRecording={activeRecording}
-            playbackTimeMs={playbackTimeMs}
-            isPlaybackActive={isPlaybackActive}
-            onSeekPlayback={(timeMs) => setPlaybackTimeMs(timeMs)}
-            onTogglePlayback={toggleAudioPlayback}
-          />
-
-          {/* 3 Quick Color Slots & Comprehensive Color Studio */}
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700 relative">
-            {quickColors.map((c, i) => (
+          {/* Center: Rock-Solid GoodNotes Inking & Toolset Island (Never shifts!) */}
+          <div className="flex items-center gap-1 bg-slate-100/90 dark:bg-slate-800/90 p-1 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-inner flex-shrink-0">
+            {/* Pens Group */}
+            <div className="flex items-center gap-0.5">
+              {/* Fountain Pen */}
               <button
-                key={i}
                 onClick={() => {
-                  if (activeQuickSlot === i) {
-                    setIsPenStudioOpen(false)
-                    setIsColorStudioOpen((prev) => !prev)
+                  if (activeTool === "fountain") {
+                    setIsColorStudioOpen(false)
+                    setIsPenStudioOpen((prev) => !prev)
                   } else {
-                    setActiveQuickSlot(i)
-                    setActiveColor(c)
+                    setPreviousTool(activeTool)
+                    setActiveTool("fountain")
                   }
                 }}
-                className={`w-5 h-5 rounded-full border-2 transition-transform ${
-                  activeQuickSlot === i
-                    ? "scale-125 border-blue-500 shadow-md ring-2 ring-blue-300/50"
-                    : "border-white dark:border-slate-700 hover:scale-110"
+                className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
+                  activeTool === "fountain"
+                    ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
                 }`}
-                style={{ backgroundColor: c }}
-                title={`Quick Color Slot ${i + 1} (Tap again to open Color Studio)`}
-              />
-            ))}
+                title="Fountain Pen (Calligraphic dynamic taper - Tap again for Pen Studio)"
+              >
+                <Pen className="w-4 h-4" />
+                {activeTool === "fountain" && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full absolute bottom-1 shadow-sm"
+                    style={{ backgroundColor: activeColor }}
+                  />
+                )}
+              </button>
 
-            {/* Color Studio Palette Trigger Button */}
-            <button
-              onClick={() => {
-                setIsPenStudioOpen(false)
-                setIsColorStudioOpen((prev) => !prev)
-              }}
-              className={`p-1 rounded-full transition-colors ml-0.5 ${
-                isColorStudioOpen
-                  ? "bg-purple-100 text-purple-600 dark:bg-purple-900/60 dark:text-purple-300 shadow-sm"
-                  : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-              }`}
-              title="Open Color Studio (Curated Palettes, Custom Spectrum & Hex)"
-            >
-              <Palette className="w-3.5 h-3.5" />
-            </button>
+              {/* Ballpoint Pen */}
+              <button
+                onClick={() => {
+                  if (activeTool === "ballpoint") {
+                    setIsColorStudioOpen(false)
+                    setIsPenStudioOpen((prev) => !prev)
+                  } else {
+                    setPreviousTool(activeTool)
+                    setActiveTool("ballpoint")
+                  }
+                }}
+                className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
+                  activeTool === "ballpoint"
+                    ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Ballpoint Pen (Uniform line weight - Tap again for Pen Studio)"
+              >
+                <Minus className="w-4 h-4 rotate-45 stroke-[2.5]" />
+                {activeTool === "ballpoint" && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full absolute bottom-1 shadow-sm"
+                    style={{ backgroundColor: activeColor }}
+                  />
+                )}
+              </button>
+
+              {/* Brush Pen */}
+              <button
+                onClick={() => {
+                  if (activeTool === "brush") {
+                    setIsColorStudioOpen(false)
+                    setIsPenStudioOpen((prev) => !prev)
+                  } else {
+                    setPreviousTool(activeTool)
+                    setActiveTool("brush")
+                  }
+                }}
+                className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
+                  activeTool === "brush"
+                    ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Brush Pen (High dynamic pressure & tilt - Tap again for Pen Studio)"
+              >
+                <Feather className="w-4 h-4" />
+                {activeTool === "brush" && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full absolute bottom-1 shadow-sm"
+                    style={{ backgroundColor: activeColor }}
+                  />
+                )}
+              </button>
+
+              {/* Highlighter */}
+              <button
+                onClick={() => {
+                  setPreviousTool(activeTool)
+                  setActiveTool("highlighter")
+                }}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "highlighter"
+                    ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Highlighter (Draws beneath dark text ink)"
+              >
+                <Highlighter className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Eraser & Lasso Group */}
+            <div className="flex items-center gap-0.5">
+              {/* Eraser */}
+              <button
+                onClick={() => {
+                  setPreviousTool(activeTool)
+                  setActiveTool("eraser")
+                }}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "eraser"
+                    ? "bg-white dark:bg-slate-700 text-rose-500 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Eraser (Tap to select; options float below)"
+              >
+                <Eraser className="w-4 h-4" />
+              </button>
+
+              {/* Lasso */}
+              <button
+                onClick={() => {
+                  setPreviousTool(activeTool)
+                  setActiveTool("lasso")
+                }}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "lasso"
+                    ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Lasso Selection (Move, Duplicate, Recolor, OCR)"
+              >
+                <Lasso className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Shape & Tape Group */}
+            <div className="flex items-center gap-0.5">
+              {/* Shape Tool */}
+              <button
+                onClick={() => {
+                  setPreviousTool(activeTool)
+                  setActiveTool("shape")
+                }}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "shape"
+                    ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Shape Tool (Geometric Primitives)"
+              >
+                {shapeToolPrimitive === "rect" && <Square className="w-4 h-4" />}
+                {shapeToolPrimitive === "ellipse" && <Circle className="w-4 h-4" />}
+                {shapeToolPrimitive === "line" && <Minus className="w-4 h-4" />}
+                {shapeToolPrimitive === "arrow" && <ArrowUpRight className="w-4 h-4" />}
+                {shapeToolPrimitive === "triangle" && <Triangle className="w-4 h-4" />}
+              </button>
+
+              {/* Study Tape */}
+              <button
+                onClick={() => {
+                  setPreviousTool(activeTool)
+                  setActiveTool("tape")
+                }}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "tape"
+                    ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Study Tape Tool: Paint opaque strips over answers, tap in read-only mode to reveal"
+              >
+                <Minus className="w-4 h-4 stroke-[4]" />
+              </button>
+            </div>
+
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Objects & Stickers Group */}
+            <div className="flex items-center gap-0.5">
+              {/* Text Box */}
+              <button
+                onClick={() => setActiveTool("textbox")}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "textbox"
+                    ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Rich Text Box"
+              >
+                <Type className="w-4 h-4" />
+              </button>
+
+              {/* Sticky Note */}
+              <button
+                onClick={() => setActiveTool("stickynote")}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                  activeTool === "stickynote"
+                    ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Collapsible Sticky Note"
+              >
+                <StickyNote className="w-4 h-4" />
+              </button>
+
+              {/* Insert Image */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 transition-colors"
+                title="Insert Image / Diagram"
+              >
+                <ImageIcon className="w-4 h-4" />
+              </button>
+
+              {/* Elements / Stickers Drawer */}
+              <button
+                onClick={() => setIsElementsDrawerOpen(!isElementsDrawerOpen)}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                  isElementsDrawerOpen
+                    ? "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400 font-semibold shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Elements & Reusable Stickers"
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Precision & Presentation Utilities Group */}
+            <div className="flex items-center gap-0.5">
+              {/* Interactive Straightedge Ruler */}
+              <button
+                onClick={() => setRulerState((prev) => ({ ...prev, active: !prev.active }))}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                  rulerState.active
+                    ? "bg-blue-600 text-white shadow-sm font-semibold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Straightedge Ruler with Live Degree Readout (Lock straight lines at any angle)"
+              >
+                <Compass className="w-4 h-4" />
+              </button>
+
+              {/* Laser Pointer */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    if (activeTool === "laser") {
+                      setLaserPopoverOpen(!laserPopoverOpen)
+                    } else {
+                      setPreviousTool(activeTool)
+                      setActiveTool("laser")
+                      setLaserState((prev) => ({ ...prev, active: true }))
+                      setLaserPopoverOpen(true)
+                    }
+                  }}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    activeTool === "laser"
+                      ? "bg-rose-600 text-white shadow-sm font-semibold"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                  }`}
+                  title="Laser Pointer (Live Presentations)"
+                >
+                  <Radio className="w-4 h-4" />
+                </button>
+
+                {/* Laser Popover */}
+                {activeTool === "laser" && laserPopoverOpen && (
+                  <div className="absolute top-10 left-0 bg-white dark:bg-[#1a1d24] rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-2 z-50 flex flex-col gap-2 w-44 animate-in fade-in select-none">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                      <span>Laser Mode</span>
+                      <button onClick={() => setLaserPopoverOpen(false)} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        onClick={() => setLaserState((prev) => ({ ...prev, mode: "trail" }))}
+                        className={`px-2 py-1 rounded text-[11px] font-medium ${
+                          laserState.mode === "trail"
+                            ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
+                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        Trail
+                      </button>
+                      <button
+                        onClick={() => setLaserState((prev) => ({ ...prev, mode: "dot", trail: [] }))}
+                        className={`px-2 py-1 rounded text-[11px] font-medium ${
+                          laserState.mode === "dot"
+                            ? "bg-rose-100 dark:bg-rose-950 text-rose-600 font-bold"
+                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        Dot
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 font-medium">Color</span>
+                      <div className="flex items-center gap-1.5">
+                        {["#ef4444", "#10b981", "#06b6d4", "#ec4899"].map((col) => (
+                          <button
+                            key={col}
+                            onClick={() => setLaserState((prev) => ({ ...prev, color: col }))}
+                            className={`w-4 h-4 rounded-full border ${
+                              (laserState.color || "#ef4444") === col ? "ring-2 ring-rose-400 scale-110" : ""
+                            }`}
+                            style={{ backgroundColor: col }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Zoom Window Magnifier */}
+              <button
+                onClick={() => setZoomWindowState((prev) => ({ ...prev, active: !prev.active }))}
+                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                  zoomWindowState.active
+                    ? "bg-blue-600 text-white shadow-sm font-semibold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50"
+                }`}
+                title="Handwriting Magnifier Zoom Window with Auto-Advance"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* 3 Quick Sizes */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">
-            {quickSizes.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => setActiveSize(s)}
-                className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
-                  activeSize === s ? "bg-white dark:bg-slate-700 shadow-sm" : "hover:bg-slate-200"
-                }`}
-                title={`Size: ${s}px`}
-              >
-                <div
-                  className="rounded-full bg-slate-800 dark:bg-slate-200"
-                  style={{ width: Math.min(s + 2, 14), height: Math.min(s + 2, 14) }}
+          {/* Right: Quick Colors, Sizes, Palm Rejection, Audio & Export */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Audio Sync Engine Recording & Playback */}
+            <AudioSyncEngine
+              onRecordingStart={() => {
+                recordingStartTimeRef.current = Date.now()
+                setAudioEvents([])
+              }}
+              onRecordingStop={(recording) => {
+                recordingStartTimeRef.current = 0
+                setActiveRecording(recording)
+                const updatedDoc = {
+                  ...doc,
+                  audioRecordings: [...(doc.audioRecordings || []), recording],
+                }
+                commitDoc(updatedDoc)
+              }}
+              currentEvents={audioEvents}
+              activeRecording={activeRecording}
+              playbackTimeMs={playbackTimeMs}
+              isPlaybackActive={isPlaybackActive}
+              onSeekPlayback={(timeMs) => setPlaybackTimeMs(timeMs)}
+              onTogglePlayback={toggleAudioPlayback}
+            />
+
+            {/* 3 Quick Color Slots & Comprehensive Color Studio */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-1.5 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+              {quickColors.map((c, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    if (activeQuickSlot === i) {
+                      setIsPenStudioOpen(false)
+                      setIsColorStudioOpen((prev) => !prev)
+                    } else {
+                      setActiveQuickSlot(i)
+                      setActiveColor(c)
+                    }
+                  }}
+                  className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                    activeQuickSlot === i
+                      ? "scale-115 border-blue-500 shadow-md ring-2 ring-blue-300/50"
+                      : "border-white dark:border-slate-700 hover:scale-110"
+                  }`}
+                  style={{ backgroundColor: c }}
+                  title={`Quick Color Slot ${i + 1} (Tap again to open Color Studio)`}
                 />
+              ))}
+
+              {/* Color Studio Palette Trigger Button */}
+              <button
+                onClick={() => {
+                  setIsPenStudioOpen(false)
+                  setIsColorStudioOpen((prev) => !prev)
+                }}
+                className={`p-1 rounded-full transition-colors ml-0.5 ${
+                  isColorStudioOpen
+                    ? "bg-purple-100 text-purple-600 dark:bg-purple-900/60 dark:text-purple-300 shadow-sm"
+                    : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+                title="Open Color Studio (Curated Palettes, Custom Spectrum & Hex)"
+              >
+                <Palette className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* 3 Quick Sizes */}
+            <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 px-1.5 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+              {quickSizes.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveSize(s)}
+                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors ${
+                    activeSize === s ? "bg-white dark:bg-slate-700 shadow-sm" : "hover:bg-slate-200 dark:hover:bg-slate-700"
+                  }`}
+                  title={`Size: ${s}px`}
+                >
+                  <div
+                    className="rounded-full bg-slate-800 dark:bg-slate-200"
+                    style={{ width: Math.min(s + 2, 12), height: Math.min(s + 2, 12) }}
+                  />
+                </button>
+              ))}
+            </div>
+
+            {/* Hardware Stylus & Palm Rejection Mode */}
+            <button
+              onClick={() => setDrawWithFinger(!drawWithFinger)}
+              className={`flex items-center gap-1 px-2 py-1 text-xs rounded-full font-medium transition-all ${
+                drawWithFinger
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                  : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+              }`}
+              title={
+                drawWithFinger
+                  ? "Finger Draw Active (Touch anywhere to draw or write)"
+                  : "Apple Pencil Mode (100% Palm Rejection - Only stylus draws)"
+              }
+            >
+              <Hand className="w-3.5 h-3.5" />
+              <span className="text-[11px] hidden sm:inline">{drawWithFinger ? "Finger" : "Pencil"}</span>
+              {stylusDetected && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Apple Pencil Active" />
+              )}
+            </button>
+
+            {/* Zoom Controls */}
+            <div className="flex items-center gap-0.5 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 text-[11px]">
+              <button
+                onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.15))}
+                className="p-1 hover:text-slate-900 dark:hover:text-white rounded"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => setZoomLevel(1.0)}
+                className="font-semibold px-1 hover:text-blue-500 tabular-nums"
+                title="Reset Zoom"
+              >
+                {Math.round(zoomLevel * 100)}%
+              </button>
+              <button
+                onClick={() => setZoomLevel((z) => Math.min(2.0, z + 0.15))}
+                className="p-1 hover:text-slate-900 dark:hover:text-white rounded"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Add Page Button */}
+            <button
+              onClick={() => addPage(currentPageIndex)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
+              title="Add Page After"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Add Page</span>
+            </button>
+
+            {/* Export SVG */}
+            <button
+              onClick={exportPageSvg}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              title="Export Page as Vector SVG"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+
+            {/* Clear Page */}
+            <button
+              onClick={clearCurrentPage}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+              title="Clear Current Page"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+
+            {/* Zen Fullscreen Mode Toggle */}
+            <button
+              onClick={() => setZenMode(!zenMode)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                zenMode
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
+              title={zenMode ? "Exit Fullscreen (Esc)" : "Zen Fullscreen Mode (Hide Sidebars)"}
+            >
+              {zenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </header>
+
+        {/* SECONDARY FLOATING CONTEXT SUB-BAR (Directly under toolbar when active tool has options) */}
+        {activeTool === "eraser" && (
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Mode</span>
+            {(["precision", "standard", "stroke"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setEraserMode(m)}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  eraserMode === m
+                    ? "bg-rose-500 text-white shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                {m === "precision" ? "Precision (8px)" : m === "standard" ? "Standard (18px)" : "Entire Stroke"}
+              </button>
+            ))}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+            <button
+              onClick={() => setEraseHighlighterOnly(!eraseHighlighterOnly)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                eraseHighlighterOnly
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              Highlighter Only
+            </button>
+            <button
+              onClick={() => setAutoDeselectEraser(!autoDeselectEraser)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                autoDeselectEraser
+                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              Auto-Switch to Pen
+            </button>
+          </div>
+        )}
+
+        {activeTool === "shape" && (
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Shape</span>
+            {(
+              [
+                { id: "rect", label: "Box", icon: Square },
+                { id: "ellipse", label: "Circle", icon: Circle },
+                { id: "line", label: "Line", icon: Minus },
+                { id: "arrow", label: "Arrow", icon: ArrowUpRight },
+                { id: "triangle", label: "Triangle", icon: Triangle },
+              ] as const
+            ).map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setShapeToolPrimitive(item.id as ShapePrimitive)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    shapeToolPrimitive === item.id
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{item.label}</span>
+                </button>
+              )
+            })}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+            <button
+              onClick={() => setShapeFill(!shapeFill)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                shapeFill
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              Fill Shape
+            </button>
+            <button
+              onClick={() => setSnapToOtherShapes(!snapToOtherShapes)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                snapToOtherShapes
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              Snap Endpoints
+            </button>
+            <button
+              onClick={() => setAutoShapeDetection(!autoShapeDetection)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                autoShapeDetection
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300"
+                  : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }`}
+            >
+              Auto-Snap (Draw & Hold)
+            </button>
+          </div>
+        )}
+
+        {activeTool === "lasso" && (
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Filter</span>
+            {(
+              [
+                { key: "handwriting", label: "Ink Handwriting" },
+                { key: "images", label: "Images" },
+                { key: "textBoxes", label: "Text Boxes" },
+                { key: "stickyNotes", label: "Sticky Notes" },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setLassoFilter((prev) => ({ ...prev, [f.key]: !prev[f.key] }))}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  lassoFilter[f.key]
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+              >
+                {f.label}
               </button>
             ))}
           </div>
+        )}
 
-          {/* Hardware Stylus & Palm Rejection Mode */}
-          <button
-            onClick={() => setDrawWithFinger(!drawWithFinger)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full font-medium transition-all ${
-              drawWithFinger
-                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300"
-                : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
-            }`}
-            title={
-              drawWithFinger
-                ? "Finger Draw Active (Touch anywhere to draw or write)"
-                : "Apple Pencil Mode (100% Palm Rejection - Only stylus draws)"
-            }
-          >
-            <Hand className="w-3.5 h-3.5" />
-            <span>{drawWithFinger ? "Finger Draw" : "Pencil Only"}</span>
-            {stylusDetected && (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Apple Pencil Active" />
-            )}
-          </button>
+        {activeTool === "tape" && (
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Pattern</span>
+            {(["stripes", "dots", "solid"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setTapePattern(p)}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize transition-all ${
+                  tapePattern === p
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Color</span>
+            <div className="flex items-center gap-1.5">
+              {["#f59e0b", "#3b82f6", "#ec4899", "#10b981"].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setTapeColor(c)}
+                  className={`w-4 h-4 rounded-full border transition-transform ${
+                    tapeColor === c ? "ring-2 ring-blue-500 scale-125" : "hover:scale-110"
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
-          {/* Auto-Shape Toggle */}
-          <button
-            onClick={() => setAutoShapeDetection(!autoShapeDetection)}
-            className={`px-2 py-1 text-[11px] rounded-md font-semibold transition-colors ${
-              autoShapeDetection
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                : "text-slate-400 hover:text-slate-600"
-            }`}
-            title="Auto-Shape Recognition: Draw and hold to snap"
-          >
-            Auto-Shape
-          </button>
-
-          {/* Zoom Controls */}
-          <div className="flex items-center gap-0.5 text-slate-600 dark:text-slate-300">
+        {activeTool === "highlighter" && (
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs animate-in fade-in slide-in-from-top-1 select-none">
             <button
-              onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.15))}
-              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-              title="Zoom Out"
+              onClick={() => setStraightLineHighlighter(!straightLineHighlighter)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+                straightLineHighlighter
+                  ? "bg-amber-400 text-slate-900 shadow-sm"
+                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
             >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setZoomLevel(1.0)}
-              className="text-[11px] font-semibold px-1 py-0.5 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-              title="Reset Zoom"
-            >
-              {Math.round(zoomLevel * 100)}%
-            </button>
-            <button
-              onClick={() => setZoomLevel((z) => Math.min(2.0, z + 0.15))}
-              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
+              <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Snap Straight Horizontal/Vertical Line</span>
             </button>
           </div>
-
-          {/* Add Page Button */}
-          <button
-            onClick={() => addPage(currentPageIndex)}
-            className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm"
-            title="Add Page After"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Page</span>
-          </button>
-
-          {/* Export SVG */}
-          <button
-            onClick={exportPageSvg}
-            className="p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
-            title="Export Page as Vector SVG"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          {/* Clear Page */}
-          <button
-            onClick={clearCurrentPage}
-            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
-            title="Clear Current Page"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-
-          {/* Zen Fullscreen Mode Toggle */}
-          <button
-            onClick={() => setZenMode(!zenMode)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              zenMode
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800"
-            }`}
-            title={zenMode ? "Exit Fullscreen (Esc)" : "Zen Fullscreen Mode (Hide Sidebars)"}
-          >
-            {zenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
+        )}
 
         {/* Backdrop to dismiss popovers when clicking outside */}
         {(isPenStudioOpen || isColorStudioOpen) && (
@@ -2171,9 +2283,9 @@ export default function NotebookBoard({
           />
         )}
 
-        {/* Floating Pen Studio Popover (Positioned directly below toolbar, free of overflow clipping) */}
+        {/* Floating Pen Studio Popover (Positioned directly below toolbar) */}
         {isPenStudioOpen && (
-          <div className="absolute top-full left-44 mt-1.5 z-50">
+          <div className="absolute top-full left-48 mt-1.5 z-50">
             <PenStudioPopover
               activeTool={activeTool}
               onSelectTool={(tool) => {
@@ -2196,7 +2308,7 @@ export default function NotebookBoard({
           </div>
         )}
 
-        {/* Floating Color Studio Popover (Positioned directly below toolbar, free of overflow clipping) */}
+        {/* Floating Color Studio Popover (Positioned directly below toolbar) */}
         {isColorStudioOpen && (
           <div className="absolute top-full right-44 mt-1.5 z-50">
             <ColorStudioPopover

@@ -70,12 +70,13 @@ export function snapToStraightLine(points: InkPoint[]): InkPoint[] {
 
 /**
  * Snaps a point to the straight edge of an on-screen interactive ruler.
+ * Returns the projected coordinates on the edge and which edge ("top" or "bottom") was snapped.
  */
 export function snapPointToRuler(
   pt: { x: number; y: number },
   ruler: RulerState,
-  threshold = 28
-): { x: number; y: number } | null {
+  threshold = 45
+): { x: number; y: number; edge: "top" | "bottom" } | null {
   if (!ruler.active) return null
 
   const rad = (ruler.angle * Math.PI) / 180
@@ -89,7 +90,7 @@ export function snapPointToRuler(
   // Distance along ruler length
   const rulerHalfWidth = (ruler.length || 500) / 2
   const along = vx * dirX + vy * dirY
-  if (Math.abs(along) > rulerHalfWidth + 20) return null
+  if (Math.abs(along) > rulerHalfWidth + 30) return null
 
   // Normal vector perpendicular to ruler
   const normX = -dirY
@@ -103,11 +104,12 @@ export function snapPointToRuler(
   const distToTop = Math.abs(perp - (-halfH))
   const distToBottom = Math.abs(perp - halfH)
 
-  if (distToTop <= threshold) {
+  if (distToTop <= threshold && distToTop <= distToBottom) {
     const diff = perp - (-halfH)
     return {
       x: pt.x - diff * normX,
       y: pt.y - diff * normY,
+      edge: "top",
     }
   }
 
@@ -116,6 +118,7 @@ export function snapPointToRuler(
     return {
       x: pt.x - diff * normX,
       y: pt.y - diff * normY,
+      edge: "bottom",
     }
   }
 

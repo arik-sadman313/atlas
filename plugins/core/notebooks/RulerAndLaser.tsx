@@ -236,7 +236,7 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
         transform={`translate(${ruler.x}, ${ruler.y}) rotate(${angle})`}
         className="ruler-group select-none"
       >
-        {/* Semi-transparent acrylic straightedge body */}
+        {/* Semi-transparent acrylic straightedge visual body (pointer-events-none so edges allow drawing) */}
         <rect
           x={-width / 2}
           y={-height / 2}
@@ -246,12 +246,35 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           fill="rgba(241, 245, 249, 0.88)"
           stroke="#94a3b8"
           strokeWidth={1.5}
-          className="backdrop-blur-md shadow-2xl cursor-grab active:cursor-grabbing"
+          className="backdrop-blur-md shadow-2xl pointer-events-none"
+        />
+
+        {/* Central Drag Handle Strip (Touch/Click here to move the ruler across the canvas) */}
+        <rect
+          x={-width / 2 + 26}
+          y={-18}
+          width={width - 52}
+          height={36}
+          rx={6}
+          fill="rgba(226, 232, 240, 0.35)"
+          stroke="rgba(148, 163, 184, 0.4)"
+          strokeDasharray="4,4"
+          className="cursor-grab active:cursor-grabbing hover:fill-blue-100/40 transition-colors"
           onPointerDown={handleRulerPointerDown}
           onPointerMove={handleRulerPointerMove}
           onPointerUp={handleRulerPointerUp}
           onPointerCancel={handleRulerPointerUp}
-        />
+        >
+          <title>Drag center to move ruler (Draw along top or bottom edge)</title>
+        </rect>
+
+        {/* Subtle grip indicators on left and right of degree readout */}
+        <g className="pointer-events-none opacity-40">
+          <circle cx={-60} cy={0} r={2} fill="#64748b" />
+          <circle cx={-50} cy={0} r={2} fill="#64748b" />
+          <circle cx={50} cy={0} r={2} fill="#64748b" />
+          <circle cx={60} cy={0} r={2} fill="#64748b" />
+        </g>
 
         {/* Center Live Degree Readout Pill (Draggable for Smooth Rotation) */}
         <g
@@ -385,6 +408,10 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
         <g
           transform={`translate(${width / 2 - 28}, 0)`}
           className="cursor-pointer hover:scale-110 transition-transform"
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            onChangeRuler({ ...ruler, angle: (ruler.angle + 45) % 360 })
+          }}
           onClick={(e) => {
             e.stopPropagation()
             onChangeRuler({ ...ruler, angle: (ruler.angle + 45) % 360 })
