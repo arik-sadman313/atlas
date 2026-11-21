@@ -37,6 +37,8 @@ import {
   Palette,
   Feather,
   Triangle,
+  RotateCw,
+  Camera,
   X,
 } from "lucide-react"
 import {
@@ -71,6 +73,7 @@ import {
   isBoxInLasso,
   translateStroke,
   scaleStroke,
+  rotateStroke,
   detectGeometricShape,
   snapToStraightLine,
   snapPointToRuler,
@@ -316,11 +319,15 @@ export default function NotebookBoard({
   const isDrawingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  const docRef = useRef<NotebookDocument>(doc)
+  docRef.current = doc
+
   const currentPage = doc.pages[currentPageIndex] || doc.pages[0]
 
   // Persist helper
   const commitDoc = useCallback(
     (newDoc: NotebookDocument) => {
+      docRef.current = newDoc
       setDoc(newDoc)
       if (onChange) {
         onChange(JSON.stringify(newDoc, null, "\t") + "\n")
@@ -388,11 +395,53 @@ export default function NotebookBoard({
         setIsElementsDrawerOpen(false)
         setSelectedStrokeIds(new Set())
         setSelectedBoxIds(new Set())
+        setSelectedImageIds(new Set())
       }
     }
+
+    const handlePaste = (e: ClipboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith("image/")) {
+          const file = items[i].getAsFile()
+          if (file) {
+            const reader = new FileReader()
+            reader.onload = () => {
+              const url = reader.result as string
+              const newImg: NotebookImage = {
+                id: `img_${Date.now()}`,
+                url,
+                x: 100,
+                y: 100,
+                width: 320,
+                height: 240,
+              }
+              pushHistory()
+              const updatedPages = [...docRef.current.pages]
+              const curP = updatedPages[currentPageIndex] || updatedPages[0]
+              updatedPages[currentPageIndex] = {
+                ...curP,
+                images: [...(curP.images || []), newImg],
+              }
+              commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
+            }
+            reader.readAsDataURL(file)
+            e.preventDefault()
+            break
+          }
+        }
+      }
+    }
+
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [undo, redo])
+    window.addEventListener("paste", handlePaste)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("paste", handlePaste)
+    }
+  }, [undo, redo, pushHistory, commitDoc, currentPageIndex])
 
   // Touch gesture arbitration for iPadOS / multi-touch devices (Pinch-to-zoom & two-finger pan)
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -490,8 +539,8 @@ export default function NotebookBoard({
       setStylusDetected(true)
     }
 
-    // Palm Rejection: reject finger touch drawing when Apple Pencil mode is active
-    if (e.pointerType === "touch" && !drawWithFinger && stylusDetected) {
+    // Palm Rejection: reject finger touch drawing when finger drawing is toggled off
+    if (e.pointerType === "touch" && !drawWithFinger) {
       return
     }
 
@@ -651,7 +700,11 @@ export default function NotebookBoard({
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setEditingBoxId(newBox.id)
-      setActiveTool("fountain")
+      setActiveTool(
+        previousTool && previousTool !== "textbox" && previousTool !== "stickynote"
+          ? previousTool
+          : "fountain"
+      )
       return
     }
 
@@ -806,14 +859,15 @@ export default function NotebookBoard({
           return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : img
         })
 
-        const updatedPages = [...doc.pages]
+        const updatedPages = [...docRef.current.pages]
         updatedPages[currentPageIndex] = {
           ...currentPage,
           strokes: updatedStrokes,
           textBoxes: updatedBoxes,
           images: updatedImages,
         }
-        setDoc((prev) => ({ ...prev, pages: updatedPages }))
+        docRef.current = { ...docRef.current, pages: updatedPages }
+        setDoc(docRef.current)
         return
       }
 
@@ -933,6 +987,7 @@ export default function NotebookBoard({
   // Pointer Up
   const handlePointerUp = () => {
     isDrawingRef.current = false
+    lastEraserPointRef.current = null
     if (shapeHoldTimerRef.current) clearTimeout(shapeHoldTimerRef.current)
 
     // Laser deactivation (keep trail for progressive decay!)
@@ -961,9 +1016,9 @@ export default function NotebookBoard({
         createdAt: Date.now(),
       }
       const updatedTapeStrips = [...(currentPage.tapeStrips || []), newTape]
-      const updatedPages = [...doc.pages]
+      const updatedPages = [...docRef.current.pages]
       updatedPages[currentPageIndex] = { ...currentPage, tapeStrips: updatedTapeStrips }
-      commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+      commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
       return
     }
 
@@ -977,7 +1032,7 @@ export default function NotebookBoard({
       if (isDraggingSelection) {
         setIsDraggingSelection(false)
         if (initialSelectionSnapshotRef.current) {
-          commitDoc(doc)
+          commitDoc(docRef.current)
           initialSelectionSnapshotRef.current = null
         }
         return
@@ -1130,6 +1185,47 @@ export default function NotebookBoard({
     if (activeImageId === imgId) setActiveImageId(null)
   }
 
+  // Start dragging / moving placed images
+  const startImageDrag = (e: React.PointerEvent, img: NotebookImage) => {
+    if (readOnly) return
+    e.stopPropagation()
+    setActiveImageId(img.id)
+    const startX = e.clientX
+    const startY = e.clientY
+    const origX = img.x
+    const origY = img.y
+    let hasMoved = false
+    let latestPages = docRef.current.pages
+
+    const onMove = (moveEv: PointerEvent) => {
+      hasMoved = true
+      const dx = (moveEv.clientX - startX) / zoomLevel
+      const dy = (moveEv.clientY - startY) / zoomLevel
+      const newX = Math.round(origX + dx)
+      const newY = Math.round(origY + dy)
+
+      const updated = (currentPage.images || []).map((i) =>
+        i.id === img.id ? { ...i, x: newX, y: newY } : i
+      )
+      latestPages = [...docRef.current.pages]
+      latestPages[currentPageIndex] = { ...currentPage, images: updated }
+      docRef.current = { ...docRef.current, pages: latestPages }
+      setDoc(docRef.current)
+    }
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      if (hasMoved) {
+        pushHistory()
+        commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
+      }
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
   // Start corner resizing for placed images
   const startImageResize = (
     e: React.PointerEvent,
@@ -1143,6 +1239,7 @@ export default function NotebookBoard({
     const origH = img.height
     const origX = img.x
     const origY = img.y
+    let latestPages = docRef.current.pages
 
     const onMove = (moveEv: PointerEvent) => {
       const dx = (moveEv.clientX - startX) / zoomLevel
@@ -1171,22 +1268,149 @@ export default function NotebookBoard({
       }
 
       const updated = (currentPage.images || []).map((i) =>
-        i.id === img.id ? { ...i, width: newW, height: newH, x: newX, y: newY } : i
+        i.id === img.id ? { ...i, width: Math.round(newW), height: Math.round(newH), x: Math.round(newX), y: Math.round(newY) } : i
       )
-      const updatedPages = [...doc.pages]
-      updatedPages[currentPageIndex] = { ...currentPage, images: updated }
-      setDoc((prev) => ({ ...prev, pages: updatedPages }))
+      latestPages = [...docRef.current.pages]
+      latestPages[currentPageIndex] = { ...currentPage, images: updated }
+      docRef.current = { ...docRef.current, pages: latestPages }
+      setDoc(docRef.current)
     }
 
     const onUp = () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       pushHistory()
-      commitDoc(doc)
+      commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
     }
 
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
+  }
+
+  // Rotate Lasso Selection (Strokes, Text Boxes, Images)
+  const rotateSelected = (angleDeg: number = 90) => {
+    if (!computedSelectionBounds) return
+    pushHistory()
+    const origin = {
+      x: (computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2,
+      y: (computedSelectionBounds.minY + computedSelectionBounds.maxY) / 2,
+    }
+    const rad = (angleDeg * Math.PI) / 180
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+
+    const updatedStrokes = currentPage.strokes.map((s) => {
+      if (selectedStrokeIds.has(s.id)) {
+        return rotateStroke(s, rad, origin)
+      }
+      return s
+    })
+
+    const updatedBoxes = (currentPage.textBoxes || []).map((b) => {
+      if (selectedBoxIds.has(b.id)) {
+        const bcx = b.x + b.width / 2
+        const bcy = b.y + b.height / 2
+        const dx = bcx - origin.x
+        const dy = bcy - origin.y
+        const ncx = origin.x + dx * cos - dy * sin
+        const ncy = origin.y + dx * sin + dy * cos
+        return {
+          ...b,
+          x: Math.round(ncx - b.width / 2),
+          y: Math.round(ncy - b.height / 2),
+        }
+      }
+      return b
+    })
+
+    const updatedImages = (currentPage.images || []).map((img) => {
+      if (selectedImageIds.has(img.id)) {
+        const icx = img.x + img.width / 2
+        const icy = img.y + img.height / 2
+        const dx = icx - origin.x
+        const dy = icy - origin.y
+        const ncx = origin.x + dx * cos - dy * sin
+        const ncy = origin.y + dx * sin + dy * cos
+        return {
+          ...img,
+          x: Math.round(ncx - img.width / 2),
+          y: Math.round(ncy - img.height / 2),
+        }
+      }
+      return img
+    })
+
+    const updatedPages = [...docRef.current.pages]
+    updatedPages[currentPageIndex] = {
+      ...currentPage,
+      strokes: updatedStrokes,
+      textBoxes: updatedBoxes,
+      images: updatedImages,
+    }
+    commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
+  }
+
+  // Capture selection as screenshot to clipboard
+  const captureSelectionScreenshot = async () => {
+    if (!computedSelectionBounds || !svgRef.current) return
+    const bounds = computedSelectionBounds
+    const pad = 16
+    const x = Math.max(0, bounds.minX - pad)
+    const y = Math.max(0, bounds.minY - pad)
+    const w = Math.max(20, bounds.maxX - bounds.minX + pad * 2)
+    const h = Math.max(20, bounds.maxY - bounds.minY + pad * 2)
+
+    try {
+      const svgClone = svgRef.current.cloneNode(true) as SVGSVGElement
+      svgClone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`)
+      svgClone.setAttribute("width", `${w}`)
+      svgClone.setAttribute("height", `${h}`)
+
+      const toRemove = svgClone.querySelectorAll(
+        ".lasso-selection-box, .laser-pointer-layer, .zoom-target-indicator, .image-selection-overlay"
+      )
+      toRemove.forEach((el) => el.remove())
+
+      const svgData = new XMLSerializer().serializeToString(svgClone)
+      const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" })
+      const url = URL.createObjectURL(svgBlob)
+
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.round(w * 2)
+        canvas.height = Math.round(h * 2)
+        const ctx = canvas.getContext("2d")
+        if (ctx) {
+          ctx.fillStyle =
+            currentPage.paperColor === "dark"
+              ? "#1e232a"
+              : currentPage.paperColor === "cream"
+              ? "#fefae0"
+              : "#ffffff"
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.scale(2, 2)
+          ctx.drawImage(img, 0, 0)
+          canvas.toBlob((blob) => {
+            if (blob) {
+              try {
+                navigator.clipboard?.write([new ClipboardItem({ "image/png": blob })])
+                alert("Selection screenshot copied to clipboard!")
+              } catch {
+                const a = document.createElement("a")
+                a.href = URL.createObjectURL(blob)
+                a.download = `notebook_selection_${Date.now()}.png`
+                a.click()
+              }
+            }
+          }, "image/png")
+        }
+        URL.revokeObjectURL(url)
+      }
+      img.src = url
+    } catch (err) {
+      console.warn("Screenshot capture failed:", err)
+    }
   }
 
   // Convert Selected Handwriting to Text
@@ -2384,6 +2608,43 @@ export default function NotebookBoard({
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = "copy"
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            const files = e.dataTransfer.files
+            if (files && files.length > 0) {
+              for (let i = 0; i < files.length; i++) {
+                if (files[i].type.startsWith("image/")) {
+                  const file = files[i]
+                  const reader = new FileReader()
+                  reader.onload = () => {
+                    const url = reader.result as string
+                    const newImg: NotebookImage = {
+                      id: `img_${Date.now()}_${i}`,
+                      url,
+                      x: 100 + i * 20,
+                      y: 100 + i * 20,
+                      width: 320,
+                      height: 240,
+                    }
+                    pushHistory()
+                    const updatedPages = [...docRef.current.pages]
+                    const curP = updatedPages[currentPageIndex] || updatedPages[0]
+                    updatedPages[currentPageIndex] = {
+                      ...curP,
+                      images: [...(curP.images || []), newImg],
+                    }
+                    commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
+                  }
+                  reader.readAsDataURL(file)
+                  break
+                }
+              }
+            }
+          }}
           className="flex-1 overflow-auto flex items-center justify-center p-8 relative touch-none"
         >
           {/* Scaled Notebook Page Canvas Wrapper */}
@@ -2415,6 +2676,22 @@ export default function NotebookBoard({
                   >
                     <Copy className="w-3.5 h-3.5" />
                     <span>Duplicate</span>
+                  </button>
+                  <button
+                    onClick={() => rotateSelected(90)}
+                    className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                    title="Rotate selected group 90 degrees"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>Rotate</span>
+                  </button>
+                  <button
+                    onClick={captureSelectionScreenshot}
+                    className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 font-semibold hover:underline"
+                    title="Capture screenshot of selected area to clipboard"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Screenshot</span>
                   </button>
                   <button
                     onClick={convertSelectedToText}
@@ -2485,8 +2762,17 @@ export default function NotebookBoard({
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onPointerLeave={() => setCanvasPointerPos(null)}
+              onPointerCancel={() => {
+                handlePointerUp()
+                setCanvasPointerPos(null)
+                lastEraserPointRef.current = null
+                setLaserState((prev) => ({ ...prev, current: null, active: false }))
+              }}
+              onPointerLeave={() => {
+                setCanvasPointerPos(null)
+                lastEraserPointRef.current = null
+                setLaserState((prev) => ({ ...prev, current: null }))
+              }}
             >
               <defs>{renderBackgroundPattern()}</defs>
 
@@ -2499,7 +2785,7 @@ export default function NotebookBoard({
                 fill={getBackgroundFill()}
               />
 
-              {/* Layer 1: Placed Images with Selection & Resize Handles */}
+              {/* Layer 1: Placed Images with Drag, Selection, Resize & Crop */}
               {(currentPage.images || []).map((img) => {
                 const isSelected = activeImageId === img.id || selectedImageIds.has(img.id)
                 return (
@@ -2510,7 +2796,13 @@ export default function NotebookBoard({
                       e.stopPropagation()
                       setActiveImageId(img.id)
                     }}
-                    className="cursor-pointer"
+                    onPointerDown={(e) => {
+                      if (readOnly) return
+                      if (activeTool === "image" || activeImageId === img.id) {
+                        startImageDrag(e, img)
+                      }
+                    }}
+                    className={isSelected ? "cursor-move" : "cursor-pointer"}
                   >
                     <image
                       href={img.url}
@@ -2566,6 +2858,35 @@ export default function NotebookBoard({
                           <circle cx={0} cy={0} r={10} fill="#ef4444" />
                           <line x1={-4} y1={-4} x2={4} y2={4} stroke="#ffffff" strokeWidth={2} />
                           <line x1={4} y1={-4} x2={-4} y2={4} stroke="#ffffff" strokeWidth={2} />
+                        </g>
+                        {/* Quick Crop button on right */}
+                        <g
+                          transform={`translate(${img.x + img.width + 12}, ${img.y + 18})`}
+                          className="cursor-pointer hover:scale-110 transition-transform"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            pushHistory()
+                            const insetX = Math.round(img.width * 0.08)
+                            const insetY = Math.round(img.height * 0.08)
+                            const updated = (currentPage.images || []).map((i) =>
+                              i.id === img.id
+                                ? {
+                                    ...i,
+                                    x: i.x + insetX,
+                                    y: i.y + insetY,
+                                    width: Math.max(40, i.width - insetX * 2),
+                                    height: Math.max(40, i.height - insetY * 2),
+                                  }
+                                : i
+                            )
+                            const updatedPages = [...docRef.current.pages]
+                            updatedPages[currentPageIndex] = { ...currentPage, images: updated }
+                            commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
+                          }}
+                        >
+                          <title>Crop margins (8%)</title>
+                          <circle cx={0} cy={0} r={10} fill="#3b82f6" />
+                          <path d="M-4,-2 L2,-2 L2,4 M4,2 L-2,2 L-2,-4" stroke="#ffffff" strokeWidth={1.5} fill="none" strokeLinecap="round" />
                         </g>
                       </g>
                     )}
@@ -2678,6 +2999,32 @@ export default function NotebookBoard({
                       strokeDasharray="4,4"
                       className="cursor-move"
                     />
+
+                    {/* Top Rotation Handle Stem and Circular Pin */}
+                    <line
+                      x1={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
+                      y1={computedSelectionBounds.minY - 6}
+                      x2={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
+                      y2={computedSelectionBounds.minY - 24}
+                      stroke="#3b82f6"
+                      strokeWidth={1.5}
+                    />
+                    <circle
+                      cx={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
+                      cy={computedSelectionBounds.minY - 24}
+                      r={7}
+                      fill="#3b82f6"
+                      stroke="#ffffff"
+                      strokeWidth={2}
+                      className="cursor-pointer hover:scale-125 transition-transform"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        rotateSelected(90)
+                      }}
+                    >
+                      <title>Rotate Selection 90°</title>
+                    </circle>
+
                     {/* Bottom-right Corner Scale Handle */}
                     <circle
                       cx={computedSelectionBounds.maxX + 6}
@@ -2689,21 +3036,22 @@ export default function NotebookBoard({
                       className="cursor-nwse-resize"
                       onPointerDown={(e) => {
                         e.stopPropagation()
-                        try {
-                          e.currentTarget.setPointerCapture(e.pointerId)
-                        } catch {}
                         const startX = e.clientX
                         const startY = e.clientY
                         const origW = computedSelectionBounds.maxX - computedSelectionBounds.minX
                         const origH = computedSelectionBounds.maxY - computedSelectionBounds.minY
                         const origin = { x: computedSelectionBounds.minX, y: computedSelectionBounds.minY }
                         const strokeSnapshot = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+                        const boxSnapshot = (currentPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
+                        const imgSnapshot = (currentPage.images || []).filter((i) => selectedImageIds.has(i.id))
+                        let latestPages = docRef.current.pages
 
                         const onMove = (moveEv: PointerEvent) => {
                           const dw = (moveEv.clientX - startX) / zoomLevel
                           const dh = (moveEv.clientY - startY) / zoomLevel
                           const sx = Math.max(0.2, (origW + dw) / Math.max(10, origW))
                           const sy = Math.max(0.2, (origH + dh) / Math.max(10, origH))
+
                           const updatedStrokes = currentPage.strokes.map((s) => {
                             if (selectedStrokeIds.has(s.id)) {
                               const orig = strokeSnapshot.find((x) => x.id === s.id)
@@ -2711,15 +3059,50 @@ export default function NotebookBoard({
                             }
                             return s
                           })
-                          const updatedPages = [...doc.pages]
-                          updatedPages[currentPageIndex] = { ...currentPage, strokes: updatedStrokes }
-                          setDoc((prev) => ({ ...prev, pages: updatedPages }))
+
+                          const updatedBoxes = (currentPage.textBoxes || []).map((b) => {
+                            if (selectedBoxIds.has(b.id)) {
+                              const orig = boxSnapshot.find((x) => x.id === b.id)
+                              if (!orig) return b
+                              const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
+                              const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
+                              const newW = Math.max(30, Math.round(orig.width * sx))
+                              const newH = Math.max(20, Math.round(orig.height * sy))
+                              const newFontSize = Math.max(8, Math.round((orig.fontSize || 16) * Math.min(sx, sy)))
+                              return { ...orig, x: newX, y: newY, width: newW, height: newH, fontSize: newFontSize }
+                            }
+                            return b
+                          })
+
+                          const updatedImages = (currentPage.images || []).map((img) => {
+                            if (selectedImageIds.has(img.id)) {
+                              const orig = imgSnapshot.find((x) => x.id === img.id)
+                              if (!orig) return img
+                              const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
+                              const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
+                              const newW = Math.max(20, Math.round(orig.width * sx))
+                              const newH = Math.max(20, Math.round(orig.height * sy))
+                              return { ...orig, x: newX, y: newY, width: newW, height: newH }
+                            }
+                            return img
+                          })
+
+                          latestPages = [...docRef.current.pages]
+                          latestPages[currentPageIndex] = {
+                            ...currentPage,
+                            strokes: updatedStrokes,
+                            textBoxes: updatedBoxes,
+                            images: updatedImages,
+                          }
+                          docRef.current = { ...docRef.current, pages: latestPages }
+                          setDoc(docRef.current)
                         }
+
                         const onUp = () => {
                           window.removeEventListener("pointermove", onMove)
                           window.removeEventListener("pointerup", onUp)
                           pushHistory()
-                          commitDoc(doc)
+                          commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
                         }
                         window.addEventListener("pointermove", onMove)
                         window.addEventListener("pointerup", onUp)
@@ -2844,21 +3227,23 @@ export default function NotebookBoard({
                       const startY = e.clientY
                       const origX = box.x
                       const origY = box.y
+                      let latestPages = docRef.current.pages
                       const onMove = (moveEv: PointerEvent) => {
                         const dx = (moveEv.clientX - startX) / zoomLevel
                         const dy = (moveEv.clientY - startY) / zoomLevel
                         const updatedBoxes = currentPage.textBoxes.map((b) =>
-                          b.id === box.id ? { ...b, x: origX + dx, y: origY + dy } : b
+                          b.id === box.id ? { ...b, x: Math.round(origX + dx), y: Math.round(origY + dy) } : b
                         )
-                        const updatedPages = [...doc.pages]
-                        updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
-                        setDoc((prev) => ({ ...prev, pages: updatedPages }))
+                        latestPages = [...docRef.current.pages]
+                        latestPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
+                        docRef.current = { ...docRef.current, pages: latestPages }
+                        setDoc(docRef.current)
                       }
                       const onUp = () => {
                         window.removeEventListener("pointermove", onMove)
                         window.removeEventListener("pointerup", onUp)
                         pushHistory()
-                        commitDoc(doc)
+                        commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
                       }
                       window.addEventListener("pointermove", onMove)
                       window.addEventListener("pointerup", onUp)
@@ -3022,7 +3407,8 @@ export default function NotebookBoard({
                     </div>
                   ) : (
                     <div
-                      className={`w-full h-[calc(100%-28px)] overflow-hidden whitespace-pre-wrap cursor-pointer ${
+                      onClick={() => !readOnly && setEditingBoxId(box.id)}
+                      className={`w-full h-[calc(100%-28px)] overflow-hidden whitespace-pre-wrap cursor-text ${
                         box.fontFamily === "serif"
                           ? "font-serif"
                           : box.fontFamily === "mono"
@@ -3034,7 +3420,7 @@ export default function NotebookBoard({
                         fontWeight: box.bold ? "bold" : "normal",
                         fontStyle: box.italic ? "italic" : "normal",
                       }}
-                      title="Double-click to edit text"
+                      title="Click to edit text"
                     >
                       {box.collapsed ? (box.text.split("\n")[0] || "Note...") : box.text}
                     </div>
@@ -3050,23 +3436,26 @@ export default function NotebookBoard({
                         const startY = e.clientY
                         const origW = box.width
                         const origH = box.height
+                        let latestPages = docRef.current.pages
+
                         const onMove = (moveEv: PointerEvent) => {
                           const dw = (moveEv.clientX - startX) / zoomLevel
                           const dh = (moveEv.clientY - startY) / zoomLevel
                           const updatedBoxes = currentPage.textBoxes.map((b) =>
                             b.id === box.id
-                              ? { ...b, width: Math.max(100, origW + dw), height: Math.max(40, origH + dh) }
+                              ? { ...b, width: Math.max(100, Math.round(origW + dw)), height: Math.max(40, Math.round(origH + dh)) }
                               : b
                           )
-                          const updatedPages = [...doc.pages]
-                          updatedPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
-                          setDoc((prev) => ({ ...prev, pages: updatedPages }))
+                          latestPages = [...docRef.current.pages]
+                          latestPages[currentPageIndex] = { ...currentPage, textBoxes: updatedBoxes }
+                          docRef.current = { ...docRef.current, pages: latestPages }
+                          setDoc(docRef.current)
                         }
                         const onUp = () => {
                           window.removeEventListener("pointermove", onMove)
                           window.removeEventListener("pointerup", onUp)
                           pushHistory()
-                          commitDoc(doc)
+                          commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
                         }
                         window.addEventListener("pointermove", onMove)
                         window.addEventListener("pointerup", onUp)
@@ -3096,12 +3485,15 @@ export default function NotebookBoard({
             activeTool={activeTool}
             onAddStroke={(s) => {
               pushHistory()
-              const updatedPages = [...doc.pages]
+              const audioOffset =
+                recordingStartTimeRef.current > 0 ? Date.now() - recordingStartTimeRef.current : undefined
+              const strokeWithAudio = audioOffset !== undefined ? { ...s, audioTimeOffset: audioOffset } : s
+              const updatedPages = [...docRef.current.pages]
               updatedPages[currentPageIndex] = {
                 ...currentPage,
-                strokes: [...currentPage.strokes, s],
+                strokes: [...currentPage.strokes, strokeWithAudio],
               }
-              commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+              commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
             }}
           />
         </div>

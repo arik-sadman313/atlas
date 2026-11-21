@@ -33,13 +33,6 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
 
   // Zoom window window position offset (draggable by header)
   const [windowOffset, setWindowOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const isDraggingHeaderRef = useRef(false)
-  const headerDragStartRef = useRef<{ clientX: number; clientY: number; startX: number; startY: number }>({
-    clientX: 0,
-    clientY: 0,
-    startX: 0,
-    startY: 0,
-  })
 
   if (!state.active) return null
 
@@ -129,33 +122,25 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
   // Handle Dragging Zoom Window Position
   const handleHeaderPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation()
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {}
-    isDraggingHeaderRef.current = true
-    headerDragStartRef.current = {
-      clientX: e.clientX,
-      clientY: e.clientY,
-      startX: windowOffset.x,
-      startY: windowOffset.y,
+    const startClientX = e.clientX
+    const startClientY = e.clientY
+    const startOffsetX = windowOffset.x
+    const startOffsetY = windowOffset.y
+
+    const onMove = (moveEv: PointerEvent) => {
+      setWindowOffset({
+        x: startOffsetX + (moveEv.clientX - startClientX),
+        y: startOffsetY + (moveEv.clientY - startClientY),
+      })
     }
-  }
 
-  const handleHeaderPointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingHeaderRef.current) return
-    const dx = e.clientX - headerDragStartRef.current.clientX
-    const dy = e.clientY - headerDragStartRef.current.clientY
-    setWindowOffset({
-      x: headerDragStartRef.current.startX + dx,
-      y: headerDragStartRef.current.startY + dy,
-    })
-  }
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
 
-  const handleHeaderPointerUp = (e: React.PointerEvent) => {
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId)
-    } catch {}
-    isDraggingHeaderRef.current = false
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
   }
 
   return (
@@ -172,9 +157,6 @@ export const ZoomWindow: React.FC<ZoomWindowProps> = ({
       <div
         className="flex items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs cursor-move select-none"
         onPointerDown={handleHeaderPointerDown}
-        onPointerMove={handleHeaderPointerMove}
-        onPointerUp={handleHeaderPointerUp}
-        onPointerCancel={handleHeaderPointerUp}
       >
         <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
           <GripHorizontal className="w-3.5 h-3.5 text-slate-400" />

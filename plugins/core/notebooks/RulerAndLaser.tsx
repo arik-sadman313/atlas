@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react"
+import React, { useEffect } from "react"
 import type { RulerState, LaserState } from "./types"
 
 interface RulerAndLaserProps {
@@ -16,18 +16,6 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
   onChangeLaser,
   zoomLevel,
 }) => {
-  const [isDraggingRuler, setIsDraggingRuler] = useState(false)
-  const [isRotatingRuler, setIsRotatingRuler] = useState(false)
-  const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null)
-  const dragStartRef = useRef<{ clientX: number; clientY: number; startLength: number; startAngle: number; startX: number; startY: number }>({
-    clientX: 0,
-    clientY: 0,
-    startLength: 500,
-    startAngle: 0,
-    startX: 0,
-    startY: 0,
-  })
-
   // Laser fading animation loop
   useEffect(() => {
     if (!laser.active && (!laser.trail || laser.trail.length === 0)) return
@@ -103,132 +91,102 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
     const angle = ruler.angle || 0
     const rad = (angle * Math.PI) / 180
 
-    // Handle Ruler Dragging
+    // Handle Ruler Dragging with Window Listeners
     const handleRulerPointerDown = (e: React.PointerEvent) => {
       e.stopPropagation()
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId)
-      } catch {}
-      setIsDraggingRuler(true)
-      dragStartRef.current = {
-        clientX: e.clientX,
-        clientY: e.clientY,
-        startLength: width,
-        startAngle: angle,
-        startX: ruler.x,
-        startY: ruler.y,
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      const startX = ruler.x
+      const startY = ruler.y
+
+      const onMove = (moveEv: PointerEvent) => {
+        const dx = (moveEv.clientX - startClientX) / zoomLevel
+        const dy = (moveEv.clientY - startClientY) / zoomLevel
+        onChangeRuler({
+          ...ruler,
+          x: Math.round(startX + dx),
+          y: Math.round(startY + dy),
+        })
       }
+
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove)
+        window.removeEventListener("pointerup", onUp)
+      }
+
+      window.addEventListener("pointermove", onMove)
+      window.addEventListener("pointerup", onUp)
     }
 
-    const handleRulerPointerMove = (e: React.PointerEvent) => {
-      if (!isDraggingRuler) return
-      const dx = (e.clientX - dragStartRef.current.clientX) / zoomLevel
-      const dy = (e.clientY - dragStartRef.current.clientY) / zoomLevel
-      onChangeRuler({
-        ...ruler,
-        x: dragStartRef.current.startX + dx,
-        y: dragStartRef.current.startY + dy,
-      })
-    }
-
-    const handleRulerPointerUp = (e: React.PointerEvent) => {
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId)
-      } catch {}
-      setIsDraggingRuler(false)
-    }
-
-    // Handle Ruler Length Resizing (left or right handle)
+    // Handle Ruler Length Resizing with Window Listeners
     const handleResizePointerDown = (e: React.PointerEvent, side: "left" | "right") => {
       e.stopPropagation()
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId)
-      } catch {}
-      setResizingSide(side)
-      dragStartRef.current = {
-        clientX: e.clientX,
-        clientY: e.clientY,
-        startLength: width,
-        startAngle: angle,
-        startX: ruler.x,
-        startY: ruler.y,
-      }
-    }
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      const startLength = width
 
-    const handleResizePointerMove = (e: React.PointerEvent) => {
-      if (!resizingSide) return
-      // Vector from ruler center to pointer in canvas coords
-      // Project pointer displacement along ruler orientation vector
-      const dx = (e.clientX - dragStartRef.current.clientX) / zoomLevel
-      const dy = (e.clientY - dragStartRef.current.clientY) / zoomLevel
-      const dirX = Math.cos(rad)
-      const dirY = Math.sin(rad)
-      const along = dx * dirX + dy * dirY
+      const onMove = (moveEv: PointerEvent) => {
+        const dx = (moveEv.clientX - startClientX) / zoomLevel
+        const dy = (moveEv.clientY - startClientY) / zoomLevel
+        const dirX = Math.cos(rad)
+        const dirY = Math.sin(rad)
+        const along = dx * dirX + dy * dirY
 
-      let newLen = width
-      if (resizingSide === "right") {
-        newLen = Math.max(180, Math.min(1800, dragStartRef.current.startLength + along * 2))
-      } else {
-        newLen = Math.max(180, Math.min(1800, dragStartRef.current.startLength - along * 2))
+        let newLen = width
+        if (side === "right") {
+          newLen = Math.max(180, Math.min(1800, startLength + along * 2))
+        } else {
+          newLen = Math.max(180, Math.min(1800, startLength - along * 2))
+        }
+
+        onChangeRuler({
+          ...ruler,
+          length: Math.round(newLen),
+        })
       }
 
-      onChangeRuler({
-        ...ruler,
-        length: Math.round(newLen),
-      })
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove)
+        window.removeEventListener("pointerup", onUp)
+      }
+
+      window.addEventListener("pointermove", onMove)
+      window.addEventListener("pointerup", onUp)
     }
 
-    const handleResizePointerUp = (e: React.PointerEvent) => {
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId)
-      } catch {}
-      setResizingSide(null)
-    }
-
-    // Handle Circular Rotation
+    // Handle Circular Rotation with Window Listeners
     const handleRotatePointerDown = (e: React.PointerEvent) => {
       e.stopPropagation()
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId)
-      } catch {}
-      setIsRotatingRuler(true)
-      dragStartRef.current = {
-        clientX: e.clientX,
-        clientY: e.clientY,
-        startLength: width,
-        startAngle: angle,
-        startX: ruler.x,
-        startY: ruler.y,
-      }
-    }
+      const startClientX = e.clientX
+      const startAngle = angle
 
-    const handleRotatePointerMove = (e: React.PointerEvent) => {
-      if (!isRotatingRuler) return
-      const dx = e.clientX - dragStartRef.current.clientX
-      // Compute delta angle
-      let newAngle = (dragStartRef.current.startAngle + dx * 0.4) % 360
-      if (newAngle < 0) newAngle += 360
+      const onMove = (moveEv: PointerEvent) => {
+        const dx = moveEv.clientX - startClientX
+        let newAngle = (startAngle + dx * 0.4) % 360
+        if (newAngle < 0) newAngle += 360
 
-      // Snap to common angles (0, 45, 90, 135, 180, 225, 270, 315)
-      const snaps = [0, 45, 90, 135, 180, 225, 270, 315, 360]
-      for (const snap of snaps) {
-        if (Math.abs(newAngle - snap) <= 2.5) {
-          newAngle = snap % 360
-          break
+        // Snap to common angles (0, 45, 90, 135, 180, 225, 270, 315)
+        const snaps = [0, 45, 90, 135, 180, 225, 270, 315, 360]
+        for (const snap of snaps) {
+          if (Math.abs(newAngle - snap) <= 2.5) {
+            newAngle = snap % 360
+            break
+          }
         }
+
+        onChangeRuler({
+          ...ruler,
+          angle: Math.round(newAngle),
+        })
       }
 
-      onChangeRuler({
-        ...ruler,
-        angle: Math.round(newAngle),
-      })
-    }
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove)
+        window.removeEventListener("pointerup", onUp)
+      }
 
-    const handleRotatePointerUp = (e: React.PointerEvent) => {
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId)
-      } catch {}
-      setIsRotatingRuler(false)
+      window.addEventListener("pointermove", onMove)
+      window.addEventListener("pointerup", onUp)
     }
 
     return (
@@ -261,9 +219,6 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           strokeDasharray="4,4"
           className="cursor-grab active:cursor-grabbing hover:fill-blue-100/40 transition-colors"
           onPointerDown={handleRulerPointerDown}
-          onPointerMove={handleRulerPointerMove}
-          onPointerUp={handleRulerPointerUp}
-          onPointerCancel={handleRulerPointerUp}
         >
           <title>Drag center to move ruler (Draw along top or bottom edge)</title>
         </rect>
@@ -281,9 +236,6 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           transform="translate(0, 0)"
           className="cursor-ew-resize"
           onPointerDown={handleRotatePointerDown}
-          onPointerMove={handleRotatePointerMove}
-          onPointerUp={handleRotatePointerUp}
-          onPointerCancel={handleRotatePointerUp}
         >
           <rect
             x={-38}
@@ -355,9 +307,6 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           transform={`translate(${-width / 2}, 0)`}
           className="cursor-ew-resize group/resizer"
           onPointerDown={(e) => handleResizePointerDown(e, "left")}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={handleResizePointerUp}
-          onPointerCancel={handleResizePointerUp}
         >
           <circle
             cx={0}
@@ -382,9 +331,6 @@ export const RulerOverlay: React.FC<RulerAndLaserProps> = ({
           transform={`translate(${width / 2}, 0)`}
           className="cursor-ew-resize group/resizer"
           onPointerDown={(e) => handleResizePointerDown(e, "right")}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={handleResizePointerUp}
-          onPointerCancel={handleResizePointerUp}
         >
           <circle
             cx={0}

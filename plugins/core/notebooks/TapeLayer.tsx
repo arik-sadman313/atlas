@@ -55,6 +55,12 @@ export const TapeLayer: React.FC<TapeLayerProps> = ({
             className={`transition-all duration-300 ${
               isStudyMode ? "cursor-pointer" : "cursor-default"
             }`}
+            onPointerDown={(e) => {
+              if (isStudyMode) {
+                e.stopPropagation()
+                onToggleReveal?.(tape.id)
+              }
+            }}
             onClick={(e) => {
               if (isStudyMode) {
                 e.stopPropagation()

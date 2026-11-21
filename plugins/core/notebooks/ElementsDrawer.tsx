@@ -252,7 +252,7 @@ export const ElementsDrawer: React.FC<ElementsDrawerProps> = ({
                   e.stopPropagation()
                   onDeleteCustomElement(elem.id)
                 }}
-                className="absolute top-1 right-1 p-1 text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-1 right-1 p-1 text-rose-400 hover:text-rose-600 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 title="Delete Element"
               >
                 <Trash2 className="w-3.5 h-3.5" />

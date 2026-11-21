@@ -160,7 +160,7 @@ export const DocumentNavigationDrawer: React.FC<DocumentNavigationDrawerProps> =
               <div className="flex items-center justify-between w-full mt-1.5 px-0.5 text-xs text-slate-600 dark:text-slate-400">
                 <span className="font-semibold text-[11px]">Page {idx + 1}</span>
 
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
