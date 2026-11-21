@@ -1,0 +1,515 @@
+// Vaultite Cloud (plugins/core/mcp/cloud.ts) against a fake relay speaking its protocol: sign-in, the tunnel, Connect,
+// and shared folders' guests at share-<handle> (plugins/core/share/gateway.ts).
+// Its own servers and temp folders; WRITES only to the vault copy given.
+//   node web/qa/mcpcloud.mjs <vault copy>
+import { spawnSync } from "node:child_process"
+import crypto from "node:crypto"
+import fs from "node:fs"
+import http from "node:http"
+import os from "node:os"
+import path from "node:path"
+import { WebSocketServer } from "ws"
+import { apiAt, freePort, launch, qa, until, wait } from "./lib/qa.mjs"
+import { testServer } from "../../tools/test/lib.ts"
+
+const { args: [VAULT], check, watch, noErrors, done } = await qa(import.meta.url, { chrome: false })
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "vaultite-qa-mcpcloud-"))
+
+/** cloud.vaultite.com as the protocol says it behaves: one-time codes redeemed for a token, one Mac per account. */
+async function fakeRelay() {
+  const port = await freePort()
+  const url = `http://127.0.0.1:${port}`
+  const r = { url, names: [], revoked: [], tokens: new Set(), codes: new Set(), conn: null, conns: 0, frames: [], pending: new Map(), n: 0, slow: 0,
+    key: crypto.randomBytes(32).toString("base64url"), sockets: new Map() }
+  const body = (req) => new Promise((res) => { let s = ""; req.on("data", (c) => (s += c)); req.on("end", () => res(s ? JSON.parse(s) : {})) })
+  const send = (res, status, d) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(d)) }
+  const server = http.createServer(async (req, res) => {
+    const d = await body(req)
+    if (req.url === "/api/device/redeem") {
+      if (r.slow > 0) { r.slow--; return send(res, 429, { error: "slow_down" }) }
+      const code = String(d.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+      if (!r.codes.delete(code) || !d.name) return send(res, 400, { error: "invalid" })
+      r.names.push(d.name)
+      for (const t of r.tokens) r.tokens.delete(t) // one Mac per account: the one before is revoked
+      const token = crypto.randomBytes(16).toString("hex")
+      r.tokens.add(token)
+      r.conn?.close(4000, `replaced by ${d.name}`)
+      return send(res, 200, { token, handle: "alice", url: "https://alice.vaultite.app" })
+    }
+    if (req.url === "/api/device/revoke") {
+      const t = String(req.headers.authorization ?? "").replace(/^Bearer /, "")
+      r.revoked.push(t); r.tokens.delete(t)
+      return send(res, 200, { ok: true })
+    }
+    send(res, 404, { error: "not_found" })
+  })
+  const wss = new WebSocketServer({ noServer: true })
+  server.on("upgrade", (req, socket, head) => {
+    const t = String(req.headers.authorization ?? "").replace(/^Bearer /, "")
+    if (req.url !== "/api/tunnel" || !r.tokens.has(t)) { socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"); return }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (r.conn) r.conn.close(4000, "replaced by this machine again")
+      r.conn = ws; r.conns++
+      ws.on("message", (m) => {
+        const f = JSON.parse(String(m))
+        r.frames.push(f)
+        if (f.t === "hello" && r.key) ws.send(JSON.stringify({ t: "connect", key: r.key }))
+        const so = r.sockets.get(f.id)
+        if (so) {
+          if (f.t === "wsok" || f.t === "wsno") { so.status = f.t === "wsok" ? 101 : f.status; so.opened() }
+          else if (f.t === "wsmsg") so.messages.push(f.text ?? Buffer.from(f.data, "base64").toString())
+          else if (f.t === "wsclose") so.closed = f.code ?? 1000
+        }
+        const p = r.pending.get(f.id)
+        if (!p) return
+        if (f.t === "res") { p.status = f.status; p.headers = f.headers }
+        else if (f.t === "data") { p.chunks.push({ at: Date.now(), text: Buffer.from(f.chunk, "base64").toString() }); p.onData?.() }
+        else if (f.t === "end" || f.t === "err") { p.error = f.t === "err" ? f.message : null; r.pending.delete(f.id); p.done() }
+      })
+      ws.on("close", () => { if (r.conn === ws) r.conn = null })
+    })
+  })
+  await new Promise((res) => server.listen(port, "127.0.0.1", res))
+  /** A code as /connect shows one after signing in. */
+  r.newCode = () => { const c = `BCDF${String(++r.n).padStart(4, "0")}`; r.codes.add(c); return `${c.slice(0, 4)}-${c.slice(4)}` }
+  /** A request through the tunnel: its status, headers, chunks as they came, and text. */
+  r.request = (method, p, { headers = [], body, onData, guest } = {}) => {
+    const id = `r${++r.n}`
+    const out = { id, status: 0, headers: [], chunks: [], error: undefined, onData }
+    const done = new Promise((res) => { out.done = res })
+    r.pending.set(id, out)
+    const host = headers.some(([k]) => k.toLowerCase() === "x-forwarded-host") ? [] : [["x-forwarded-host", "alice.vaultite.app"]]
+    r.conn?.send(JSON.stringify({ t: "req", id, method, path: p, headers: [["host", "alice.vaultite.app"], ["x-forwarded-proto", "https"], ...host, ...headers], ...(body ? { body: Buffer.from(body).toString("base64") } : {}), ...(guest ? { guest: true } : {}) }))
+    out.finished = Promise.race([done, wait(10_000)]).then(() => ({ ...out, text: out.chunks.map((c) => c.text).join("") }))
+    return out
+  }
+  /** Vaultite Cloud's x-vaultite-cloud for the owner: claims signed with the key it handed the Mac. */
+  r.sign = (claims = {}, key = r.key) => {
+    const body = Buffer.from(JSON.stringify({ sub: "u1", handle: "alice", role: "owner", exp: Math.floor(Date.now() / 1000) + 300, ...claims })).toString("base64url")
+    return `${body}.${crypto.createHmac("sha256", key).update(body).digest("base64url")}`
+  }
+  /** A WebSocket relayed to the Mac (Connect): its status once answered, its messages, its close code. */
+  r.socket = (p, headers = [], guest = false) => {
+    const id = `w${++r.n}`
+    const so = { id, status: 0, messages: [], closed: 0 }
+    so.ready = new Promise((res) => { so.opened = res })
+    r.sockets.set(id, so)
+    const host = guest ? "share-alice.vaultite.app" : "alice.vaultite.app"
+    r.conn?.send(JSON.stringify({ t: "ws", id, path: p, headers: [["host", host], ["x-forwarded-host", host], ...headers], ...(guest ? { guest: true } : {}) }))
+    so.send = (text) => r.conn?.send(JSON.stringify({ t: "wsmsg", id, text }))
+    so.close = () => r.conn?.send(JSON.stringify({ t: "wsclose", id, code: 1000 }))
+    return so
+  }
+  r.close = () => { for (const c of wss.clients) c.terminate(); server.close() }
+  return r
+}
+
+/** A stand-in for the public listener: an echo, an SSE stream, and one that never ends. */
+async function fakeTarget() {
+  const port = await freePort()
+  const t = { port, closed: [] }
+  const server = http.createServer((req, res) => {
+    if (req.url === "/sse") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
+      res.write("data: one\n\n")
+      setTimeout(() => res.write("data: two\n\n"), 400)
+      setTimeout(() => res.end(), 800)
+      return
+    }
+    if (req.url === "/slow") { req.on("close", () => t.closed.push("slow")); res.writeHead(200); res.write("start"); return }
+    let s = ""
+    req.on("data", (c) => (s += c))
+    req.on("end", () => { res.writeHead(201, { "Content-Type": "application/json", "Set-Cookie": "a=1" }); res.end(JSON.stringify({ method: req.method, url: req.url, headers: req.headers, body: s })) })
+  })
+  await new Promise((res) => server.listen(port, "127.0.0.1", res))
+  t.close = () => server.close()
+  return t
+}
+
+const servers = []
+function serve(local, port) {
+  const proc = testServer({ stdio: "ignore",
+    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", VAULTITE_VAULT: VAULT, VAULTITE_LOCAL: local, VAULTITE_CLOUD: relay.url } })
+  servers.push({ proc, port })
+  return proc
+}
+/** A server and its terminal keeper stopped; resolved once it exited (its claim on the vault let go). */
+function stop({ proc, port }) {
+  const exited = proc.exitCode === null ? new Promise((res) => proc.once("exit", res)) : Promise.resolve()
+  if (proc.exitCode === null) proc.kill()
+  try { process.kill(Number(fs.readFileSync(path.join(os.tmpdir(), `vaultite-ptyd1-vaultite-${port}.sock.pid`), "utf8"))) } catch {}
+  spawnSync("tmux", ["-L", `vaultite-${port}`, "kill-server"], { stdio: "ignore" })
+  return exited
+}
+function stopAll() { for (const s of servers) void stop(s) }
+
+const relay = await fakeRelay()
+const target = await fakeTarget()
+let cloud, browser
+try {
+  // --- the tunnel on its own (cloud.ts in this process, to a stand-in listener)
+  process.env.VAULTITE_LOCAL = path.join(TMP, "unit")
+  const { Cloud } = await import("../../plugins/core/mcp/cloud.ts")
+  const { RELAY_HEADER } = await import("../../plugins/core/mcp/public.ts")
+  let cfg = {}
+  const notices = []
+  const plugin = { secrets: () => structuredClone(cfg), saveSecrets: (d) => { if (d === null) delete cfg.mcp; else cfg.mcp = d } }
+  cloud = new Cloud(plugin, async () => target.port, relay.url)
+  cloud.onChange = (s) => notices.push(s.state)
+  check("signed out at first", cloud.status().state === "off" && cloud.status().url === null, cloud.status())
+  const p0 = await cloud.signIn()
+  check("without a code: still off, and where to get one", p0.state === "off" && p0.connectUrl === `${relay.url}/connect` && relay.names.length === 0, p0)
+  const bad0 = await cloud.signIn("ZZZZ-ZZZZ").then(() => null, (e) => e)
+  check("a wrong code: refused (400), nothing kept", bad0?.status === 400 && !cfg.mcp?.cloud && cloud.status().state === "off", String(bad0))
+  relay.slow = 1
+  const slow0 = await cloud.signIn(relay.newCode()).then(() => null, (e) => e)
+  check("429 slow_down: says to wait", slow0?.status === 429 && /wait/.test(slow0.message), String(slow0))
+  const first = relay.newCode()
+  await cloud.signIn(first.toLowerCase())
+  check("the code redeemed, it connects", !!(await until(() => cloud.status().state === "connected", 8000)), cloud.status())
+  check("it names this machine", typeof relay.names[0] === "string" && relay.names[0].length > 0, relay.names)
+  check("a code works once", (await cloud.signIn(first).then(() => null, (e) => e))?.status === 400 && cloud.status().state === "connected")
+  check("the token is kept in data/config.json's mcp.cloud", cfg.mcp?.cloud?.token?.length === 32 && cfg.mcp.cloud.handle === "alice", Object.keys(cfg.mcp?.cloud ?? {}))
+  check("its MCP address", cloud.status().url === "https://alice.vaultite.app/mcp", cloud.status())
+  check("the token isn't in its status", !JSON.stringify(cloud.status()).includes(cfg.mcp.cloud.token))
+
+  const echo = await relay.request("POST", "/echo?x=1", { headers: [["content-type", "application/json"], [RELAY_HEADER, "forged"], ["connection", "keep-alive"], ["tailscale-user-login", "alice@example.com"], ["x-vaultite-client", "app"], ["forwarded", "for=127.0.0.1"]], body: '{"hi":1}' }).finished
+  const e = JSON.parse(echo.text || "{}")
+  check("a request is forwarded: method, path, body", echo.status === 201 && e.method === "POST" && e.url === "/echo?x=1" && e.body === '{"hi":1}', echo)
+  check("with the forwarded host and proto, and this process's mark (not the relay's)", e.headers?.["x-forwarded-host"] === "alice.vaultite.app" && e.headers["x-forwarded-proto"] === "https" && e.headers[RELAY_HEADER]?.length > 20 && e.headers[RELAY_HEADER] !== "forged", e.headers)
+  check("never Tailscale's, the app's own or Forwarded headers", !Object.keys(e.headers ?? {}).some((k) => /^(tailscale-|forwarded$|x-vaultite-client)/.test(k)), e.headers)
+  check("to the listener, not the relay's host", e.headers?.host === `127.0.0.1:${target.port}`, e.headers?.host)
+  check("the answer's headers come back, without hop-by-hop ones", echo.headers.some(([k, v]) => k.toLowerCase() === "set-cookie" && v === "a=1") && !echo.headers.some(([k]) => /^(connection|transfer-encoding)$/i.test(k)), echo.headers)
+
+  const sse = await relay.request("GET", "/sse").finished
+  const gap = sse.chunks.length >= 2 ? sse.chunks[1].at - sse.chunks[0].at : 0
+  check("SSE streams chunk by chunk, as it's written", sse.status === 200 && sse.text === "data: one\n\ndata: two\n\n" && gap > 250, { chunks: sse.chunks, gap })
+
+  const slow = relay.request("GET", "/slow", { onData: () => {} })
+  await until(() => slow.chunks.length > 0, 8000)
+  relay.conn.send(JSON.stringify({ t: "cancel", id: slow.id }))
+  check("cancel aborts the request to the listener", !!(await until(() => target.closed.includes("slow"), 3000)), target.closed)
+  check("and sends nothing more for it", !relay.frames.some((f) => f.id === slow.id && (f.t === "end" || f.t === "err")))
+
+  const bad = await relay.request("GET", "http://127.0.0.1:1/api/state").finished
+  check("a path that isn't one is refused", bad.error && bad.status === 0, bad)
+  const pongs = relay.frames.filter((f) => f.t === "pong").length
+  relay.conn.send(JSON.stringify({ t: "ping" }))
+  check("ping gets pong", !!(await until(() => relay.frames.filter((f) => f.t === "pong").length > pongs, 2000)))
+
+  const conns = relay.conns
+  relay.conn.terminate()
+  check("a dropped tunnel reconnects", !!(await until(() => relay.conns > conns && cloud.status().state === "connected", 6000)) && notices.includes("reconnecting"), notices)
+
+  const beforeMove = relay.conns
+  relay.conn.send(JSON.stringify({ t: "handle", handle: "Evil!", url: "https://evil.example" }))
+  relay.conn.send(JSON.stringify({ t: "handle", handle: "alice-new", url: "https://alice-new.evil.example" }))
+  relay.conn.send(JSON.stringify({ t: "handle", handle: "alice-new", url: "https://alice-new.vaultite.app" }))
+  relay.conn.close(4002, "handle changed")
+  check("the account's new handle (the relay's word): kept, and it reconnects at once", !!(await until(() => relay.conns > beforeMove && cloud.status().state === "connected", 4000))
+    && cfg.mcp.cloud.handle === "alice-new" && cloud.status().url === "https://alice-new.vaultite.app/mcp" && cloud.guestUrl() === "https://share-alice-new.vaultite.app" && !!cfg.mcp.cloud.token, cloud.status())
+  relay.conn.close(4000, "replaced by Bob's MacBook")
+  await wait(2500)
+  const before = relay.conns
+  check("4000: another machine took over, named, and not fought", cloud.status().state === "replaced" && relay.conns === before && cloud.status().message === "Replaced by Bob's MacBook", cloud.status())
+  await cloud.signIn()
+  check("sign in again: this machine takes it back", !!(await until(() => cloud.status().state === "connected", 8000)) && relay.conns === before + 1)
+
+  relay.conn.close(4001, "revoked")
+  check("4001: signed out here, token forgotten", !!(await until(() => cloud.status().state === "off", 8000)) && !cfg.mcp?.cloud && /ended/.test(cloud.status().message), { s: cloud.status(), cfg })
+
+  await cloud.signIn(relay.newCode())
+  await until(() => cloud.status().state === "connected", 8000)
+  relay.tokens.delete(cfg.mcp?.cloud?.token)
+  relay.conn.terminate()
+  check("401 when reconnecting: signed out here", !!(await until(() => cloud.status().state === "off", 6000)) && !cfg.mcp?.cloud, cloud.status())
+
+  await cloud.signIn(relay.newCode())
+  await until(() => cloud.status().state === "connected", 8000)
+  const replacedToken = cfg.mcp.cloud.token
+  await fetch(`${relay.url}/api/device/redeem`, { method: "POST", body: JSON.stringify({ code: relay.newCode(), name: "Bob's MacBook" }) })
+  check("another machine redeems a code: replaced, named", !!(await until(() => cloud.status().state === "replaced", 8000)) && /Bob's MacBook/.test(cloud.status().message), cloud.status())
+  await cloud.signIn()
+  check("Use this machine with a revoked token: signed out, told to get a new code", !!(await until(() => cloud.status().state === "off", 4000)) && !cfg.mcp?.cloud && /Bob's MacBook.*new code/.test(cloud.status().message) && !relay.tokens.has(replacedToken), cloud.status())
+
+  await cloud.signIn(relay.newCode())
+  await until(() => cloud.status().state === "connected", 8000)
+  const token = cfg.mcp.cloud.token
+  const out = await cloud.signOut()
+  check("sign out revokes the token, forgets it and closes the tunnel", out.state === "off" && relay.revoked.includes(token) && !cfg.mcp?.cloud && !!(await until(() => relay.conn === null, 2000)), { out, revoked: relay.revoked })
+  cloud.stop()
+
+  // --- a server: Vaultite Cloud alone (no mcp.public), signed in through its ops
+  const local = path.join(TMP, "server")
+  fs.mkdirSync(local, { recursive: true })
+  const port = await freePort()
+  const BASE = `http://127.0.0.1:${port}`
+  serve(local, port)
+  await until(async () => { try { return (await fetch(`${BASE}/api/state`)).ok } catch { return false } }, 40_000)
+  const opCall = async (id, headers = {}, params = {}) => { const r = await fetch(`${BASE}/api/ops/${id}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(params) }); return { status: r.status, body: await r.json().catch(() => null) } }
+  const listed = await (await fetch(`${BASE}/api/mcp/connections`)).json()
+  check("Connections: Cloud off, no address", listed.cloud?.state === "off" && listed.url === null && listed.cloud.url === null, listed)
+  check("only this machine's owner may sign in", (await opCall("mcp.cloud-sign-in", { "X-Forwarded-For": "203.0.113.9" })).status === 403)
+  const ops = await (await fetch(`${BASE}/api/ops`)).json()
+  const ids = (ops.ops ?? ops).map((o) => o.id)
+  check("the ops are listed", ["mcp.cloud-sign-in", "mcp.cloud-sign-out", "mcp.cloud-status"].every((i) => ids.includes(i)), ids.filter((i) => i.startsWith("mcp")))
+  browser = await launch()
+  const page = watch(await browser.newPage({ viewport: { width: 1200, height: 800 } }))
+  const popups = []
+  page.on("popup", (p) => { popups.push(p.url()); void p.close() })
+  await page.goto(`${BASE}/#view/connections`)
+  await page.waitForSelector("[data-app-list]", { timeout: 20_000 }).catch(() => {})
+  check("Connections lists the four apps and another app, none connected", (await page.$$eval("[data-app-list] [data-guide-for]", (els) => els.map((e) => e.dataset.guideFor))).join() === "claude,chatgpt,muse,grok-bot,other"
+    && !(await page.$("[data-app-connected]")) && !(await page.$("[data-waiting]")))
+  await page.click("[data-guide-for=muse]")
+  await page.waitForSelector("[data-setup=muse] [data-cloud-sign-in]", { timeout: 5000 }).catch(() => {})
+  check("with no address, an app's sheet starts with Vaultite Cloud's sign-in", await page.isVisible("[data-setup=muse] [data-cloud-sign-in]") && !(await page.isVisible("[data-setup=muse] [data-guide]")))
+  await page.keyboard.press("Escape")
+  await page.waitForSelector("[data-setup]", { state: "detached", timeout: 5000 }).catch(() => {})
+  await page.click("[data-connections] [data-cloud-sign-in]", { timeout: 20_000 })
+  check("Connections: Sign in opens /connect and asks for its code", await page.isVisible("[data-cloud-code]") && !!(await until(() => popups.includes(`${relay.url}/connect`), 3000)), popups)
+  await page.fill("[data-cloud-code]", "zzzz-zzzz")
+  await page.click("[data-cloud-redeem]")
+  await wait(800)
+  check("a wrong code says so and keeps the field", await page.isVisible("[data-cloud-code]") && /doesn't work/.test(await page.textContent("body")))
+  await page.fill("[data-cloud-code]", relay.newCode().toLowerCase())
+  await page.click("[data-cloud-redeem]")
+  await page.waitForSelector("[data-cloud-state=connected]", { timeout: 15_000 }).catch(() => {})
+  check("then shows it connected, and the address", await page.isVisible("[data-cloud-state=connected]") && (await page.textContent("[data-cloud-url]"))?.includes("https://alice.vaultite.app/mcp"))
+  await page.waitForSelector("[data-connect-app]", { timeout: 10_000 }).catch(() => {})
+  check("Connect: Connections says the phone and web reach this Mac at the handle's address", /phone and any browser/.test(await page.textContent("[data-connect-app]").catch(() => "") ?? "")
+    && (await page.textContent("[data-connect-url]"))?.includes("https://alice.vaultite.app"))
+  await page.click("[data-guide-for=claude]")
+  await page.waitForSelector("[data-setup=claude] [data-connect-code]", { timeout: 5000 }).catch(() => {})
+  check("Set up Claude opens a sheet with its steps (open, copy the name and the address) and the code field", await page.isVisible("[data-setup=claude] [data-guide=claude] [data-guide-open]")
+    && (await page.locator("[data-setup=claude] [data-guide-copy]").count()) === 2 && await page.isVisible("[data-setup=claude] [data-connect-code]"),
+    [await page.isVisible("[data-setup=claude] [data-guide=claude] [data-guide-open]"), await page.locator("[data-setup=claude] [data-guide-copy]").count(), await page.locator("[data-setup]").count()])
+  await page.screenshot({ path: path.join(os.tmpdir(), "vaultite-qa-connections-claude.png") })
+  await page.keyboard.press("Escape")
+  await page.waitForSelector("[data-setup]", { state: "detached", timeout: 5000 }).catch(() => {})
+  await page.click("[data-guide-for=chatgpt]")
+  await page.waitForSelector("[data-setup=chatgpt] [data-connect-code]", { timeout: 5000 }).catch(() => {})
+  check("Set up ChatGPT's sheet has its own steps, with Vaultite's icon", !(await page.isVisible("[data-guide=claude]"))
+    && (await page.getAttribute("[data-setup=chatgpt] [data-connector-icon]", "href")) === "https://alice.vaultite.app/icon.png")
+  await page.keyboard.press("Escape")
+  await page.waitForSelector("[data-setup]", { state: "detached", timeout: 5000 }).catch(() => {})
+  for (const id of ["grok-bot", "muse"]) {
+    await page.click(`[data-guide-for=${id}]`)
+    await page.waitForSelector(`[data-setup=${id}] [data-connect-code]`, { timeout: 5000 }).catch(() => {})
+    check(`Set up ${id}: a message to send it with the address, and the code field`, (await page.textContent(`[data-setup=${id}]`))?.includes("Copy message") && await page.isVisible(`[data-setup=${id}] [data-connect-code]`))
+    await page.screenshot({ path: path.join(os.tmpdir(), `vaultite-qa-connections-${id}.png`) })
+    await page.keyboard.press("Escape")
+    await page.waitForSelector("[data-setup]", { state: "detached", timeout: 5000 }).catch(() => {})
+  }
+  await page.screenshot({ path: path.join(os.tmpdir(), "vaultite-qa-connections.png") })
+  await page.setViewportSize({ width: 390, height: 844 })
+  // (laid out again for the new width first: until then a label measures 0 wide)
+  check("on a phone each app's row names it whole, nothing wider than the screen", !!(await until(async () => (await page.innerText("[data-guide-for=grok-bot]")).startsWith("Grok Bot")
+    && await page.$eval("[data-connections]", (el) => el.scrollWidth <= el.clientWidth), 5000)), await page.innerText("[data-guide-for=grok-bot]").catch(() => ""))
+  await page.screenshot({ path: path.join(os.tmpdir(), "vaultite-qa-connections-phone.png") })
+  await page.setViewportSize({ width: 1200, height: 800 })
+  const connected = await until(async () => { const s = (await opCall("mcp.cloud-status")).body; return s?.state === "connected" && s }, 8000)
+  check("mcp.cloud-status: connected, with its address", connected?.url === "https://alice.vaultite.app/mcp", connected)
+  check("the token is in data/config.json, not the vault", JSON.parse(fs.readFileSync(path.join(local, "config.json"), "utf8")).mcp?.cloud?.token?.length > 0
+    && !fs.readdirSync(VAULT, { recursive: true }).map(String).some((f) => f.includes(".vaultite") && f.endsWith(".json") && fs.readFileSync(path.join(VAULT, f), "utf8").includes("alice.vaultite.app")))
+  const text = await (await fetch(`${BASE}/api/ops/mcp.cloud-status?as=text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).text()
+  check("its text names the address", text.includes("https://alice.vaultite.app/mcp"), text)
+
+  const through = (method, p, opts) => relay.request(method, p, opts).finished
+  const meta = JSON.parse((await through("GET", "/.well-known/oauth-authorization-server")).text || "{}")
+  check("through the relay: OAuth addresses from the forwarded host", meta.issuer === "https://alice.vaultite.app" && meta.token_endpoint === "https://alice.vaultite.app/token", meta)
+  const other = JSON.parse((await through("GET", "/.well-known/oauth-protected-resource", { headers: [["x-forwarded-host", "bob.vaultite.app"]] })).text || "{}")
+  check("the relay's host is the one used", other.resource === "https://bob.vaultite.app/mcp", other)
+  check("only the public listener is reachable", (await through("GET", "/api/state")).status === 404 && (await through("GET", "/api/mcp/connections")).status === 404 && (await through("POST", "/api/ops/terminal.list", { body: "{}" })).status === 404)
+  const mainMeta = await fetch(`${BASE}/.well-known/oauth-authorization-server`, { headers: { "X-Forwarded-Host": "evil.example" } })
+  const mainText = await mainMeta.text()
+  check("the app's port never answers as the public listener", !/"issuer"|https?:\/\/evil\.example/.test(mainText), [mainMeta.status, mainText.slice(0, 120)])
+
+  // An app connects through the relay: register, sign in with the code, tokens, MCP.
+  const REDIRECT = "https://claude.ai/api/mcp/auth_callback"
+  const reg = JSON.parse((await through("POST", "/register", { headers: [["content-type", "application/json"]], body: JSON.stringify({ client_name: "Lighthouse AI", redirect_uris: [REDIRECT] }) })).text || "{}")
+  const verifier = crypto.randomBytes(32).toString("base64url")
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url")
+  const q = new URLSearchParams({ response_type: "code", client_id: reg.client_id ?? "", redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "s1" })
+  const signInPage = (await through("GET", `/authorize?${q}`)).text
+  const code = /<div class="code"[^>]*>(?:<span[^>]*>)?([^<]+)</.exec(signInPage)?.[1]?.replace(/\s/g, "")
+  const sid = /const id = "([^"]+)"/.exec(signInPage)?.[1]
+  check("the sign-in page comes through the relay", !!code && !!sid, signInPage.slice(0, 200))
+  check("it carries Vaultite's logo", signInPage.includes('<img src="/icon.svg"') && (await through("GET", "/icon.svg")).status === 200)
+  await page.waitForSelector("[data-waiting]", { timeout: 10_000 }).catch(() => {})
+  check("Connections leads with the sign-in waiting for its code, naming the app", /Lighthouse AI is waiting for its code/.test(await page.textContent("[data-waiting]").catch(() => "") ?? ""))
+  await page.screenshot({ path: path.join(os.tmpdir(), "vaultite-qa-connections-waiting.png") })
+  await page.fill("[data-waiting] [data-connect-code]", code ?? "")
+  await page.keyboard.press("Enter")
+  await page.waitForSelector("[data-waiting]", { state: "detached", timeout: 10_000 }).catch(() => {})
+  check("the owner types its code there, and the row goes", !(await page.$("[data-waiting]")) && !!(await until(async () => (await (await fetch(`${BASE}/api/mcp/connections`)).json()).finishing?.some((f) => f.name === "Lighthouse AI"), 3000)))
+  const st = JSON.parse((await through("GET", `/authorize/status?id=${encodeURIComponent(sid ?? "")}`)).text || "{}")
+  const back = new URL(st.to ?? "https://x.invalid/")
+  check("it goes back to the app with the Cloud's address as issuer", back.searchParams.get("iss") === "https://alice.vaultite.app" && back.searchParams.get("state") === "s1", st)
+  const tok = JSON.parse((await through("POST", "/token", { headers: [["content-type", "application/x-www-form-urlencoded"]], body: String(new URLSearchParams({ grant_type: "authorization_code", code: back.searchParams.get("code") ?? "", client_id: reg.client_id ?? "", redirect_uri: REDIRECT, code_verifier: verifier })) })).text || "{}")
+  check("tokens through the relay", !!tok.access_token, tok)
+  const rpc = async (method, params) => JSON.parse((await through("POST", "/mcp", { headers: [["content-type", "application/json"], ["authorization", `Bearer ${tok.access_token}`]], body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).text || "{}")
+  const init = await rpc("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "lighthouse" }, capabilities: {} })
+  check("MCP through the relay, its logo at the Cloud's address", init.result?.serverInfo?.icons?.[0]?.src === "https://alice.vaultite.app/icon.png", init)
+  const found = await rpc("tools/call", { name: "search", arguments: { query: "Alice" } })
+  check("a tool runs through the relay", found.result?.isError === false, found)
+  // Its page: open from its row, made read only (the server then lists and runs only reads), renamed.
+  await page.waitForSelector("[data-connection] >> text=Lighthouse AI", { timeout: 10_000 }).catch(() => {})
+  // (its "connected" toast can lie over the row, and stays while the mouse is on it)
+  await page.mouse.move(5, 5)
+  await page.waitForFunction(() => !document.querySelector("[data-sonner-toast]"), null, { timeout: 20_000 }).catch(() => {})
+  await page.click("[data-connection] >> text=Lighthouse AI")
+  await page.waitForSelector("[data-connection-sheet]", { timeout: 5000 }).catch(() => {})
+  check("a connected app opens its page, with its access", await page.isVisible("[data-connection-sheet] [role=radiogroup]"))
+  await page.click("[data-connection-sheet] [role=radio] >> text=Read only")
+  const ro = await until(async () => (await (await fetch(`${BASE}/api/mcp/connections`)).json()).connections?.find((c) => c.name === "Lighthouse AI")?.access === "read", 5000)
+  const roTools = (await rpc("tools/list", {})).result?.tools?.map((t) => t.name) ?? []
+  const roWrite = await rpc("tools/call", { name: "call", arguments: { id: "note.create", params: { title: "Read only check" } } })
+  check("Read only: only reading tools, and a write refused saying so", !!ro && roTools.includes("search") && !roTools.includes("write_note")
+    && roWrite.result?.isError === true && /read-only access/.test(roWrite.result?.content?.[0]?.text) && !fs.existsSync(path.join(VAULT, "Notes/Read only check.md")), [roTools, roWrite])
+  await page.screenshot({ path: path.join(os.tmpdir(), "vaultite-qa-connections-app.png") })
+  await page.click("[data-connection-sheet] [role=radio] >> text=Read and write")
+  await page.fill("[data-connection-name]", "Lighthouse Desk")
+  await page.keyboard.press("Enter")
+  check("Rename: the connection takes the new name", !!(await until(async () => (await (await fetch(`${BASE}/api/mcp/connections`)).json()).connections?.some((c) => c.name === "Lighthouse Desk" && c.access === "write"), 5000)))
+  await page.keyboard.press("Escape")
+  await page.waitForSelector("[data-connection-sheet]", { state: "detached", timeout: 5000 }).catch(() => {})
+  const owner = await rpc("tools/call", { name: "call", arguments: { id: "mcp.cloud-sign-out" } })
+  check("an app can't sign the Mac out", owner.result?.isError === true, owner)
+  // Forged headers through the relay: Tailscale Serve's login (one the terminal lets in), the app's own.
+  await apiAt(`${BASE}/`)("PATCH", "config/plugin/terminal", { allowUsers: ["alice@example.com"] }) // (this machine's, set by its owner)
+  for (const id of ["terminal.list", "terminal", "mcp.cloud-status"]) {
+    const r = JSON.parse((await through("POST", "/mcp", { headers: [["content-type", "application/json"], ["authorization", `Bearer ${tok.access_token}`], ["tailscale-user-login", "alice@example.com"], ["x-vaultite-client", "app"]],
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "call", arguments: { id } } }) })).text || "{}")
+    check(`through the relay, a forged Tailscale login can't run an owner op (${id})`, r.result?.isError === true, r)
+  }
+  const unauth = await through("POST", "/mcp", { headers: [["content-type", "application/json"]], body: "{}" })
+  check("no token: 401 naming the Cloud's metadata", unauth.status === 401 && unauth.headers.some(([k, v]) => k.toLowerCase() === "www-authenticate" && v.includes("https://alice.vaultite.app/.well-known")), unauth.headers)
+
+  // --- Connect: the app for its owner, signed by the relay with the key it handed this Mac
+  const status = (await opCall("mcp.cloud-status")).body
+  check("Connect: the relay's key makes the app's address known", status?.app === "https://alice.vaultite.app", status)
+  const signed = (extra = [], claims) => [["x-vaultite-cloud", relay.sign(claims)], ...extra]
+  const home = await through("GET", "/", { headers: signed([["accept", "text/html"]]) })
+  check("Connect: a signed request gets the app's page", home.status === 200 && home.text.includes('<script type="module"') && !home.headers.some(([k]) => k.toLowerCase() === "access-control-allow-origin"), [home.status, home.text.slice(0, 120)])
+  const asset = /src="\.?\/?(assets\/[^"]+\.js)"/.exec(home.text)?.[1]
+  check("Connect: and its assets", !!asset && (await through("GET", `/${asset}`, { headers: signed() })).status === 200, asset)
+  const state = await through("GET", "/api/state", { headers: signed() })
+  check("Connect: and /api", state.status === 200 && state.text.length > 100, state.status)
+  check("Connect: unsigned, /api stays MCP's 404", (await through("GET", "/api/state")).status === 404)
+  check("Connect: another key's signature is refused", (await through("GET", "/api/state", { headers: [["x-vaultite-cloud", relay.sign({}, "not-the-key")]] })).status === 401)
+  check("Connect: an expired one too", (await through("GET", "/api/state", { headers: signed([], { exp: 1000 }) })).status === 401)
+  check("Connect: another handle's too", (await through("GET", "/api/state", { headers: signed([], { handle: "bob" }) })).status === 401)
+  check("Connect: a viewer's too (owner only)", (await through("GET", "/api/state", { headers: signed([], { role: "viewer" }) })).status === 401)
+  const signedMeta = JSON.parse((await through("GET", "/.well-known/oauth-authorization-server", { headers: signed() })).text || "{}")
+  check("Connect: MCP's routes stay MCP's, signed or not", signedMeta.issuer === "https://alice.vaultite.app", signedMeta)
+  const origin = ["origin", "https://alice.vaultite.app"]
+  const readOp = await through("POST", "/api/ops/docs.read", { headers: signed([origin, ["content-type", "application/json"]]), body: "{}" })
+  check("Connect: an op from the app's page runs", readOp.status === 200, [readOp.status, readOp.text.slice(0, 200)])
+  const evil = await through("POST", "/api/ops/docs.read", { headers: signed([["origin", "https://evil.example"], ["content-type", "application/json"]]), body: "{}" })
+  check("Connect: a write from another site's page is refused", evil.status === 403, evil.status)
+  for (const [m, p] of [["POST", "/api/ops/terminal.list"], ["POST", "/api/ops/mcp.cloud-sign-out"], ["POST", "/api/ops/dispatch.run"], ["GET", "/api/vaults"], ["POST", "/api/mcp/connect"]]) {
+    const r = await through(m, p, { headers: signed([origin, ["content-type", "application/json"]]), ...(m === "POST" ? { body: p === "/api/mcp/connect" ? '{"ownerTools":true}' : "{}" } : {}) })
+    check(`Connect: owner tools are off over the relay (${m} ${p})`, r.status === 403, [r.status, r.text.slice(0, 160)])
+  }
+  const live = relay.socket("/api/events", signed([origin]))
+  await Promise.race([live.ready, wait(8000)])
+  await until(() => live.messages.length > 0, 5000)
+  check("Connect: the live WebSocket comes through the tunnel and says hello", live.status === 101 && JSON.parse(live.messages[0] ?? "{}").type === "hello", live)
+  const n0 = live.messages.length
+  fs.writeFileSync(path.join(VAULT, "Connect live check.md"), "# Live\n")
+  check("Connect: a change on disk reaches it live", !!(await until(() => live.messages.slice(n0).some((m) => m.includes("Connect live check")), 8000)), live.messages.slice(n0))
+  fs.rmSync(path.join(VAULT, "Connect live check.md"), { force: true })
+  live.close()
+  const term = relay.socket("/api/terminals", signed([origin]))
+  await Promise.race([term.ready, wait(8000)])
+  check("Connect: a terminal's WebSocket is refused", term.status === 403, term)
+  const plain = relay.socket("/api/events", [origin])
+  await Promise.race([plain.ready, wait(8000)])
+  check("Connect: unsigned, no WebSocket", plain.status === 404, plain)
+  const foreignWs = relay.socket("/api/events", signed([["origin", "https://evil.example"]]))
+  await Promise.race([foreignWs.ready, wait(8000)])
+  check("Connect: a WebSocket from another site's page is refused", foreignWs.status === 403, foreignWs)
+  const on = await fetch(`${BASE}/api/mcp/connect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"ownerTools":true}' })
+  const termOn = await through("POST", "/api/ops/terminal.list", { headers: signed([origin, ["content-type", "application/json"]]), body: "{}" })
+  check("Connect: owner tools turned on from this Mac answer over the relay", on.status === 200 && termOn.status !== 403, [on.status, termOn.status, termOn.text.slice(0, 160)])
+  await fetch(`${BASE}/api/mcp/connect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"ownerTools":false}' })
+  check("Connect: and off again", (await through("POST", "/api/ops/terminal.list", { headers: signed([origin, ["content-type", "application/json"]]), body: "{}" })).status === 403)
+
+  // --- shared folders' guests at share-alice.vaultite.app: the relay's frames say `guest`, and reach Sharing only
+  // (shared as the user's own vau, which needs no yes from the phone)
+  check("the Mac tells the relay it serves guests", relay.frames.some((f) => f.t === "hello" && f.features?.includes("share")))
+  fs.mkdirSync(path.join(VAULT, "Guest check"), { recursive: true })
+  fs.writeFileSync(path.join(VAULT, "Guest check", "Hello.md"), "# Hello\n")
+  let tried = null
+  const made = await until(async () => { tried = await opCall("share.create", { "X-Vaultite-Client": "cli" }, { folder: "Guest check", guest: "Grace", role: "read" }); return tried.status === 200 && tried.body }, 8000)
+  check("signed in, a share's link is at the guests' host", String(made?.link).startsWith("https://share-alice.vaultite.app/s/"), made ?? tried)
+  const GUEST = [["x-forwarded-host", "share-alice.vaultite.app"]], link = String(made?.link).split("/s/")[1]
+  const invite = await through("GET", `/s/${link}`, { headers: GUEST, guest: true })
+  const cookie = String(invite.headers.find(([k]) => k.toLowerCase() === "set-cookie")?.[1] ?? "").split(";")[0]
+  const theirs = await through("GET", `/s/${made?.id}/api/state`, { headers: [...GUEST, ["cookie", cookie]], guest: true })
+  check("a guest's link through the tunnel sets their cookie, and their folder answers", invite.status === 302 && cookie.startsWith(`vs_${made?.id}=`) && theirs.status === 200, [invite.status, cookie, theirs.status])
+  const notTheirs = [await through("POST", "/mcp", { headers: [...GUEST, ["content-type", "application/json"]], body: "{}", guest: true }),
+    await through("GET", "/api/state", { headers: signed(GUEST), guest: true }), await through("GET", "/", { headers: signed([...GUEST, ["accept", "text/html"]]), guest: true })]
+  check("a guest's frame never reaches MCP or Connect, signed or not", notTheirs.every((r) => r.status === 404), notTheirs.map((r) => r.status))
+  const guestOrigin = ["origin", "https://share-alice.vaultite.app"]
+  const theirLive = relay.socket(`/s/${made?.id}/api/events`, [guestOrigin, ["cookie", cookie]], true)
+  await Promise.race([theirLive.ready, wait(8000)])
+  await until(() => theirLive.messages.length > 0, 5000)
+  check("a guest's live WebSocket comes through the tunnel and says hello", theirLive.status === 101 && JSON.parse(theirLive.messages[0] ?? "{}").type === "hello", theirLive)
+  theirLive.close()
+  const appLive = relay.socket("/api/events", signed([guestOrigin]), true)
+  await Promise.race([appLive.ready, wait(8000)])
+  check("a guest's frame opens no app WebSocket, signed or not", appLive.status === 404, appLive)
+  await opCall("share.revoke", { "X-Vaultite-Client": "cli" }, { id: made?.id })
+  fs.rmSync(path.join(VAULT, "Guest check"), { recursive: true, force: true })
+
+  relay.conn.close(4000, "replaced by this machine again")
+  await page.waitForSelector("[data-cloud-state=replaced]", { timeout: 15_000 }).catch(() => {})
+  check("Connections shows another machine took over", await page.isVisible("[data-cloud-state=replaced]"))
+  await page.click("[data-cloud-take-over]").catch(() => {})
+  await page.waitForSelector("[data-cloud-state=connected]", { timeout: 15_000 }).catch(() => {})
+  check("Use this machine connects it again", await page.isVisible("[data-cloud-state=connected]") && !!relay.conn)
+  await page.click("[data-cloud-sign-out]")
+  await page.keyboard.press("Enter")
+  await page.waitForSelector("[data-cloud-sign-in]", { timeout: 10_000 }).catch(() => {})
+  check("Sign out (confirmed) revokes and forgets", await page.isVisible("[data-cloud-sign-in]") && relay.revoked.length === 2 && !!(await until(() => relay.conn === null, 3000)) && (await opCall("mcp.cloud-status")).body?.state === "off")
+  noErrors()
+  const how = await (await fetch(`${BASE}/api/ops/mcp.cloud-sign-in?as=text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).text()
+  check("mcp.cloud-sign-in without a code: where to get one", how.includes(`${relay.url}/connect`) && how.includes("vau cloud sign-in <code>"), how)
+  const wrong = await opCall("mcp.cloud-sign-in", {}, { code: "ZZZZ-ZZZZ" })
+  check("mcp.cloud-sign-in with a wrong code: 400 saying so", wrong.status === 400 && /doesn't work/.test(wrong.body?.error), wrong)
+  const right = await opCall("mcp.cloud-sign-in", {}, { code: relay.newCode() })
+  check("mcp.cloud-sign-in with a code: connects", right.status === 200 && !!(await until(async () => (await opCall("mcp.cloud-status")).body?.state === "connected", 8000)), right)
+  const out3 = await opCall("mcp.cloud-sign-out")
+  check("mcp.cloud-sign-out", out3.body?.state === "off" && relay.revoked.length === 3, out3)
+
+  // --- a server with its own tunnel too (mcp.public) and signed in from before: both addresses, the same listener
+  const local2 = path.join(TMP, "server2")
+  fs.mkdirSync(local2, { recursive: true })
+  const port2 = await freePort(), pubPort = await freePort()
+  const t2 = crypto.randomBytes(16).toString("hex")
+  relay.tokens.add(t2)
+  fs.writeFileSync(path.join(local2, "config.json"), JSON.stringify({ mcp: { public: { url: `http://127.0.0.1:${pubPort}`, port: pubPort }, cloud: { token: t2, handle: "alice", url: "https://alice.vaultite.app" } } }))
+  const conns2 = relay.conns
+  // (one server per vault on a machine: the first one goes first)
+  await browser.close()
+  browser = null
+  await stop(servers[0])
+  serve(local2, port2)
+  check("signed in from before, it connects on start", !!(await until(() => relay.conns > conns2 && relay.conn, 40_000)))
+  const both = await (await fetch(`http://127.0.0.1:${port2}/api/mcp/connections`)).json()
+  check("Connections lists both addresses", both.url === `http://127.0.0.1:${pubPort}/mcp` && both.cloud?.url === "https://alice.vaultite.app/mcp" && both.cloud.state === "connected", both)
+  const direct = await (await fetch(`http://127.0.0.1:${pubPort}/.well-known/oauth-authorization-server`, { headers: { "X-Forwarded-Host": "evil.example", "X-Vaultite-Relay": "guess" } })).json()
+  check("the owner's tunnel: its own address, a forwarded host isn't believed", direct.issuer === `http://127.0.0.1:${pubPort}`, direct)
+  const viaRelay = JSON.parse((await through("GET", "/.well-known/oauth-authorization-server")).text || "{}")
+  check("the relay: the Cloud's address, same listener", viaRelay.issuer === "https://alice.vaultite.app", viaRelay)
+} finally {
+  cloud?.stop()
+  await browser?.close()
+  stopAll()
+  relay.close()
+  target.close()
+  fs.rmSync(TMP, { recursive: true, force: true })
+}
+await done()

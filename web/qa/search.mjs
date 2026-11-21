@@ -1,0 +1,178 @@
+// Search (core/search.ts, components/SearchPalette.tsx, pages/Search.tsx, core/searchquery.ts): the quick switcher
+// marks what matched in the grey text too (a word found only in a note's body shows the part around it), files found by
+// their text come under "In files", pages aren't found by their folder's name, an operator query lists files only with
+// what it asks for in words, a bad query says why, a running terminal is found by name, a full path opens it. The search tab lists the
+// operators while empty (a click adds one), marks matched lines (as they read, not as written), and its options (match case, sort, collapse, more
+// context, explain) are saved in .vaultite/plugins/search/data.json. Phones at 390px: no horizontal overflow.
+// WRITES a "Qa search" folder, a note in Notes/ and the search plugin's settings (put back), runs a shell.
+//   node web/qa/search.mjs <base url> <vault path> [out dir]
+import { execFileSync } from "node:child_process"
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs"
+import path from "node:path"
+import { qa, until, wait } from "./lib/qa.mjs"
+const { args: [B, VAULT, OUT = "/tmp/search-shots/"], browser, check, watch, done } = await qa(import.meta.url)
+mkdirSync(OUT, { recursive: true })
+const shot = async (page, name) => { const f = `${OUT}${name}.png`; await page.screenshot({ path: f }); try { execFileSync("sips", ["-Z", "1200", f], { stdio: "ignore" }) } catch { /* no sips */ } }
+
+const DIR = "Qa search"
+const put = (rel, text) => { mkdirSync(path.dirname(path.join(VAULT, rel)), { recursive: true }); writeFileSync(path.join(VAULT, rel), text) }
+put(`${DIR}/Budget plan.md`, "---\ntags: [qa-search]\nstatus: seed\n---\n# Rent\nPay the rent and buy food.\n- [ ] call the **landlord** about [[Heating|the heating]]\n\nSomething else entirely.\n")
+put(`${DIR}/Heating log.md`, "The landlord came about the heating.\n")
+for (let i = 1; i <= 9; i++) put(`${DIR}/Ledger ${i}.md`, "A page of the ledger.\n")
+put("Notes/Qa airship.md", "---\ntype: note\nkind: idea\nstatus: seed\nid: qa-airship\n---\nA long opening that goes on about weather, maps, routes, fuel, crews and the price of tickets before it finally names the zeppelin we want.\n")
+const SETTINGS = path.join(VAULT, ".vaultite/plugins/search/data.json")
+const before = existsSync(SETTINGS) ? readFileSync(SETTINGS, "utf8") : null
+
+const page = watch(await browser.newPage({ viewport: { width: 1280, height: 800 } }))
+const rows = () => page.$$eval('[role="listbox"] > :not([role="group"]), [role="listbox"] > [role="group"] > *',(els) => els.map((e) => ({ heading: e.getAttribute("role") === "presentation", text: e.textContent.trim(), marks: [...e.querySelectorAll("mark")].map((m) => m.textContent) })))
+const palette = async (q) => {
+  if (!(await page.$('[role="dialog"][aria-label="Search"]'))) { await page.keyboard.press("ControlOrMeta+o"); await until(() => page.$('[role="dialog"][aria-label="Search"]'), 8000) }
+  await page.fill('[role="dialog"][aria-label="Search"] input', q)
+  await wait(700)
+  return rows()
+}
+
+try {
+  await page.goto(`${B}#file/${encodeURIComponent("Welcome.md")}`)
+  await until(() => page.$(".cm-editor, main"), 15000)
+  await wait(1500)
+
+  // Pages aren't found by their folder.
+  let r = await palette("dashboards")
+  check("a page isn't found by its folder's name", !r.some((x) => /^Today\s*Page/.test(x.text)), r.map((x) => x.text))
+  // A word only in a note's body: the part around it, marked.
+  r = await palette("zeppelin")
+  const air = r.find((x) => x.text.startsWith("Qa airship"))
+  check("a note found by its body shows the part with the word", !!air && air.text.includes("…") && air.marks.includes("zeppelin"), r)
+  await shot(page, "palette-body")
+  // Found by the server's text search: under "In files", the word marked.
+  r = await palette("landlord")
+  const head = r.findIndex((x) => x.heading && x.text === "In files")
+  const budget = r.findIndex((x) => x.text.startsWith("Budget plan"))
+  check("words inside files come under In files", head >= 0 && budget > head, r)
+  check("with the word marked in the line", r[budget]?.marks.includes("landlord"), r[budget])
+  r = await palette("l")
+  check("...one letter: nothing from inside files", !r.some((x) => x.heading && x.text === "In files"), r)
+  await shot(page, "palette-in-files")
+  // Title marks and meta marks together.
+  r = await palette("budget rent")
+  const both = r.find((x) => x.text.startsWith("Budget plan"))
+  check("a title word and a text word are both marked", both && both.marks.includes("Budget") && both.marks.some((m) => /rent/i.test(m)), r)
+  // Operators: files only, what it asks for in words.
+  r = await palette("tag:qa-search [status:seed]")
+  check("an operator query says what it asks for", r[0]?.text.startsWith("Files where it's tagged #qa-search"), r[0])
+  check("and lists the files", r.some((x) => x.text.startsWith("Budget plan")) && !r.some((x) => x.text.startsWith("Qa airship")), r)
+  await shot(page, "palette-operators")
+  r = await palette('"open')
+  check("a query it can't read says why", r.some((x) => x.text.includes("A quote isn't closed")) || (await page.textContent('[role="dialog"]')).includes("A quote isn't closed"), r)
+  await page.keyboard.press("Escape")
+
+  const full = path.join(path.resolve(VAULT), DIR, "Budget plan.md")
+  r = await palette(full)
+  check("a full path in the vault opens it, first", r[0]?.text.startsWith(`Open ${DIR}/Budget plan.md`), r.map((x) => x.text))
+  check("...and is listed once", r.filter((x) => x.text.includes("Budget plan") && !x.text.startsWith("Search the web")).length === 1, r.map((x) => x.text))
+  await shot(page, "palette-path")
+  r = await palette(`file://${encodeURI(full)}`)
+  check("a file:// URL in the vault opens it, first, not read as a query", r[0]?.text.startsWith(`Open ${DIR}/Budget plan.md`), r.map((x) => x.text))
+  r = await palette(`${path.resolve(VAULT)}/${DIR}/`)
+  check("a folder's full path opens the folder", r[0]?.text.startsWith(`Open ${DIR}`) && r[0].text.includes("Folder in the vault"), r.map((x) => x.text))
+  r = await palette(`${path.resolve(VAULT)}/${DIR}/Nothing here.png`)
+  check("a path to nothing offers no Open, searching the web stays", !r.some((x) => x.text.startsWith("Open")) && r.some((x) => x.text.startsWith("Search the web")), r.map((x) => x.text))
+  r = await palette(path.resolve(VAULT, ".."))
+  check("outside the vault a browser offers no Open", !r.some((x) => x.text.startsWith("Open")), r.map((x) => x.text))
+  r = await palette("https://example.com/qa")
+  check("a full address opens it, first", r[0]?.text.startsWith("Open example.com/qa"), r.map((x) => x.text))
+  await palette(full)
+  await page.keyboard.press("Enter")
+  check("Enter on the path opens the file", await until(() => page.evaluate(() => decodeURIComponent(location.hash).includes("Budget plan.md")), 5000), await page.evaluate(() => location.hash))
+
+  // A running terminal is found by name.
+  await page.goto(`${B}#view/terminal%2Fqasearch`)
+  await wait(3000)
+  await page.goto(`${B}#file/${encodeURIComponent("Welcome.md")}`)
+  await wait(1200)
+  r = await palette("termin")
+  check("a running terminal is found", r.some((x) => /^Terminal/.test(x.text)), r.map((x) => x.text))
+  await shot(page, "palette-terminal")
+  await page.keyboard.press("Escape")
+
+  // The search tab: operators while empty, a click adds one.
+  await page.goto(`${B}#view/search`)
+  await until(() => page.$("[data-search-view]"), 8000)
+  check("the empty search tab lists the operators", (await page.textContent("[data-search-view]")).includes("in the file's name"), null)
+  await shot(page, "tab-empty")
+  await page.click('[aria-label="Search syntax"] button:has-text("tag:")')
+  check("a click adds the operator", (await page.inputValue('[aria-label="Search the vault"]')) === "tag:", await page.inputValue('[aria-label="Search the vault"]'))
+  // (…and gives the field back the keyboard, its caret after it, a frame later: filled before, the words land after "tag:")
+  check("… the field has the keyboard again", await until(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") === "Search the vault"), 3000))
+  await page.fill('[aria-label="Search the vault"]', "rent food")
+  // (wait for its lines' marks: the file may be listed before its lines are)
+  const lineMarksOf = () => page.$$eval('[data-search-file="Qa search/Budget plan.md"] li mark', (ms) => ms.map((m) => m.textContent))
+  await until(async () => { const ms = await lineMarksOf(); return ms.includes("rent") && ms.includes("food") }, 8000)
+  const lineMarks = await lineMarksOf()
+  check("the tab marks the words in each line", lineMarks.includes("rent") && lineMarks.includes("food"), lineMarks)
+  await page.fill('[aria-label="Search the vault"]', "landlord")
+  const asRead = await until(() => page.$$eval('[data-search-file="Qa search/Budget plan.md"] li button', (els) => els.map((e) => e.textContent.trim()).find((t) => t.includes("landlord"))), 8000)
+  check("… a line reads as text, marked there: no task box, stars or brackets", asRead === "call the landlord about the heating"
+    && await page.$eval('[data-search-file="Qa search/Budget plan.md"] li mark', (m) => m.textContent) === "landlord", asRead)
+  const chevron = (name) => page.$eval(`[data-search-file="Qa search/${name}.md"] button[aria-expanded]`, (b) => b.getAttribute("aria-expanded")).catch(() => null)
+  await page.click('[data-search-file="Qa search/Budget plan.md"] button[aria-expanded]')
+  check("a click folds a file's lines", await until(async () => (await chevron("Budget plan")) === "false", 3000))
+  await page.click('[aria-label="Search options"]'); await page.click('text="Collapse results"')
+  await until(async () => (await chevron("Heating log")) === "false", 5000)
+  check("...Collapse results folds every file, the click forgotten", await chevron("Budget plan") === "false")
+  await page.click('[aria-label="Search options"]'); await page.click('text="Collapse results"')
+  await until(async () => (await chevron("Heating log")) === "true", 5000)
+  check("...and off, every file unfolds", await chevron("Budget plan") === "true")
+  const showAll = () => page.locator('section[aria-label="Names"] button', { hasText: /^Show all/ })
+  await page.fill('[aria-label="Search the vault"]', "ledger")
+  check("names past eight: Show all", !!(await until(async () => (await showAll().count()) === 1, 8000)))
+  await showAll().click()
+  check("...a click shows them all", !!(await until(async () => (await showAll().count()) === 0, 3000)))
+  await page.fill('[aria-label="Search the vault"]', "ledge")
+  check("...another query: eight again", !!(await until(async () => (await showAll().count()) === 1, 8000)))
+  await page.fill('[aria-label="Search the vault"]', "rent food")
+  await wait(700)
+  await shot(page, "tab-plain")
+  // Options: more context, saved in the vault.
+  await page.click('[aria-label="Search options"]')
+  await page.click('text="Show more context"')
+  await until(() => page.$('[data-search-file="Qa search/Budget plan.md"] [data-ctx]'), 8000)
+  check("more context shows lines around a match", !!(await page.$('[data-search-file="Qa search/Budget plan.md"] [data-ctx]')), null)
+  check("and is saved in the vault", await until(() => existsSync(SETTINGS) && JSON.parse(readFileSync(SETTINGS, "utf8")).context === 2, 8000), existsSync(SETTINGS) && readFileSync(SETTINGS, "utf8"))
+  // Match case.
+  await page.fill('[aria-label="Search the vault"]', "Rent")
+  await page.click('[aria-label="Match case"]')
+  await wait(1200)
+  const cased = await page.$$eval('[data-search-file="Qa search/Budget plan.md"] li:not(:has([data-ctx])) mark', (ms) => ms.map((m) => m.textContent))
+  check("match case marks only that case", cased.length > 0 && cased.every((m) => m === "Rent"), cased)
+  await page.click('[aria-label="Match case"]')
+  // Operators in the tab: explained, a property query lists the file without lines.
+  await page.fill('[aria-label="Search the vault"]', "line:(landlord heating)")
+  await until(() => page.$("[data-search-explain]"), 8000)
+  check("the tab explains an operator query", (await page.textContent("[data-search-explain]")).includes('a line has "landlord" and "heating"'), await page.textContent("[data-search-explain]"))
+  await shot(page, "tab-operators")
+  await page.fill('[aria-label="Search the vault"]', "(rent")
+  await until(() => page.$('[role="alert"]'), 8000)
+  check("a bad query says why in the tab", (await page.textContent('[role="alert"]')).includes("isn't closed"), null)
+
+  // Phone: no horizontal overflow.
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await phone.goto(`${B}#view/search`)
+  await until(() => phone.$("[data-search-view]"), 8000)
+  await wait(800)
+  const wide = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  check("phone: the search tab fits 390px", wide <= 0, wide)
+  await shot(phone, "phone-tab")
+} finally {
+  if (before === null) rmSync(SETTINGS, { force: true }); else writeFileSync(SETTINGS, before)
+  rmSync(path.join(VAULT, DIR), { recursive: true, force: true })
+  rmSync(path.join(VAULT, "Notes/Qa airship.md"), { force: true })
+  // End the shell it started, like the Terminals panel's x (?end=1 on its socket).
+  await page.evaluate((b) => new Promise((done) => {
+    const s = new WebSocket(`${b.replace(/^http/, "ws").replace(/\/$/, "")}/api/terminal/qasearch?end=1`)
+    s.onclose = s.onerror = () => done(); setTimeout(done, 2000)
+  }), B).catch(() => {})
+  await browser.close()
+}
+await done()

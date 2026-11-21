@@ -1,0 +1,112 @@
+// .vaultite/grants.json's answers: "ask": a write wanted it before the user was asked; "not now": refused.
+import type { Plugin } from "./plugins.ts"
+import { enabled } from "./plugins.ts"
+import type { Item, Vault } from "./vault.ts"
+import { isObj } from "./values.ts"
+import { logger } from "./log.ts"
+
+const log = logger("grants")
+
+export type WriteDecl = { folder?: string; file?: string; why: string
+  /** Written by the writer machine only (core/app.ts). */
+  generated?: boolean }
+export type Answer = "allowed" | "not now" | "ask"
+/** `answer` null: never asked. */
+export type Grant = { plugin: string; name: string; on: boolean; place: string; folder: boolean; why: string; answer: Answer | null
+  at: string }
+
+const GRANTS = "grants"
+const ANSWERS: Answer[] = ["allowed", "not now", "ask"]
+
+const cleanPath = (s: string) => s.trim().replace(/^\/+|\/+$/g, "")
+
+function writesOf(p: Plugin): WriteDecl[] {
+  return (Array.isArray(p.manifest.writes) ? p.manifest.writes as unknown[] : []).flatMap((w): WriteDecl[] => {
+    if (!isObj(w) || typeof w.why !== "string") return []
+    const gen = w.generated === true ? { generated: true } : {}
+    if (typeof w.folder === "string" && cleanPath(w.folder)) return [{ folder: cleanPath(w.folder), why: w.why.trim(), ...gen }]
+    if (typeof w.file === "string" && cleanPath(w.file)) return [{ file: cleanPath(w.file), why: w.why.trim(), ...gen }]
+    return []
+  })
+}
+
+const keyOf = (w: WriteDecl) => (w.folder ?? w.file)!
+
+function answers(vault: Vault): Record<string, Record<string, Answer>> {
+  let raw: Item = {}
+  try { raw = vault.config(GRANTS) } catch { /* unreadable for now: nothing granted */ }
+  const out: Record<string, Record<string, Answer>> = {}
+  for (const [id, v] of Object.entries(raw)) {
+    if (!isObj(v)) continue
+    const mine = Object.entries(v).filter(([, a]) => ANSWERS.includes(a as Answer))
+    if (mine.length) out[id] = Object.fromEntries(mine) as Record<string, Answer>
+  }
+  return out
+}
+
+function foldersOf(vault: Vault, p: Plugin, w: WriteDecl) {
+  const out: string[] = []
+  for (const k of [...p.kinds, ...vault.kinds.filter((x) => !p.kinds.includes(x))]) {
+    if (k.folder !== w.folder) continue
+    try { const h = vault.home(k.collection); if (h) out.push(h) } catch { /* not registered here */ }
+  }
+  return [...new Set([...out, w.folder!])]
+}
+
+function covers(vault: Vault, p: Plugin, w: WriteDecl, rel: string) {
+  if (w.file) return rel === w.file
+  return foldersOf(vault, p, w).some((f) => rel === f || rel.startsWith(`${f}/`))
+}
+
+/** May plugin `id`, acting on its own, write `rel`? Only where it declared and the user allowed; what it generates, only
+ *  on the writer machine (`writerHere`), so two machines never rebuild one file at once. */
+export function may(vault: Vault, plugins: Plugin[], id: string, rel: string, writerHere = true) {
+  const p = plugins.find((x) => x.id === id)
+  if (!p) return false
+  const mine = answers(vault)[id] ?? {}
+  return writesOf(p).some((w) => mine[keyOf(w)] === "allowed" && covers(vault, p, w, rel) && (writerHere || !w.generated))
+}
+
+export function generated(vault: Vault, plugins: Plugin[], id: string, rel: string) {
+  const p = plugins.find((x) => x.id === id)
+  return !!p && writesOf(p).some((w) => w.generated && covers(vault, p, w, rel))
+}
+
+export function grantList(vault: Vault, plugins: Plugin[]): Grant[] {
+  const on = enabled(vault, plugins), all = answers(vault)
+  return plugins.flatMap((p) => writesOf(p).map((w) => ({
+    plugin: p.id, name: p.manifest.name ?? p.id, on: on.has(p.id), place: keyOf(w), folder: !!w.folder, why: w.why,
+    answer: all[p.id]?.[keyOf(w)] ?? null, at: w.file ?? foldersOf(vault, p, w)[0],
+  })))
+}
+
+export function answer(vault: Vault, p: Plugin, allow: boolean, place?: string) {
+  const decls = writesOf(p).filter((w) => !place || keyOf(w) === place)
+  if (!decls.length) return []
+  const cur = isObj(vault.config(GRANTS)[p.id]) ? vault.config(GRANTS)[p.id] as Item : {}
+  const next = { ...cur, ...Object.fromEntries(decls.map((w) => [keyOf(w), allow ? "allowed" : "not now"])) }
+  vault.patchConfig(GRANTS, { [p.id]: next })
+  return decls.map(keyOf)
+}
+
+const told = new Set<string>()
+
+export function refused(vault: Vault, plugins: Plugin[], id: string, rel: string) {
+  const p = plugins.find((x) => x.id === id)
+  const w = p ? writesOf(p).find((d) => covers(vault, p, d, rel)) : undefined
+  const key = `${vault.path}\0${id}\0${w ? keyOf(w) : rel}`
+  if (!told.has(key)) {
+    told.add(key)
+    log.warn(w ? `write refused: ${id} may not write ${rel} on its own until you allow it (${id}'s settings, Writes on its own)`
+      : `write refused: ${id} wrote ${rel} on its own, which its manifest's writes doesn't declare`)
+  }
+  if (!p || !w || (answers(vault)[id] ?? {})[keyOf(w)]) return false
+  try {
+    const cur = isObj(vault.config(GRANTS)[id]) ? vault.config(GRANTS)[id] as Item : {}
+    vault.patchConfig(GRANTS, { [id]: { ...cur, [keyOf(w)]: "ask" } })
+    return true
+  } catch (e) {
+    log.error("couldn't mark the write as one to ask about", e, { plugin: id })
+    return false
+  }
+}

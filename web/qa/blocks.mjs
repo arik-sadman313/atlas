@@ -1,0 +1,86 @@
+// The block contract (core/blocks.ts): options checked against the plugin's declaration, quiet lines in live preview,
+// suggestions in source mode. WRITES to the vault: throwaway server only.
+//   node web/qa/blocks.mjs <base url> <vault path> [out dir]
+import { readFileSync } from "node:fs"
+import { SHOTS, palette, qa, until, wait } from "./lib/qa.mjs"
+const { args: [B, VAULT, OUT = SHOTS], browser, check, watch, done } = await qa(import.meta.url)
+const read = (p) => readFileSync(`${VAULT}/${p}`, "utf8")
+const post = (path, body) => fetch(`${B}api/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+
+const NOTE = "Qa blocks/Options.md"
+const body = "Intro line.\n\n```block-week-goals\ntitel: Mine\n```\n\n```block-graph\ndepth: 9\n```\n\n```block-area\n```\n\n" +
+  "```block-errors\ntitle: Qa errors\n```\n\n```base\nfilters: file.inFolder(\"Qa blocks\")\nviews:\n  - type: table\n    name: Qa base\n```\n\nEnd line.\n"
+await fetch(`${B}api/file?path=${encodeURIComponent(NOTE)}`, { method: "DELETE" })
+await post("file", { path: NOTE, text: `---\ntype: note\nkind: note\n---\n\n${body}` })
+
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
+const page = watch(await ctx.newPage())
+const notes = page.locator("[data-block-notes]")
+const editing = async () => (await page.locator(".vau-editor .cm-content[contenteditable=true]").count()) > 0
+
+await page.goto(`${B}#file/${encodeURIComponent(NOTE)}`); await wait(1800)
+await palette(page, "Switch to reading view")
+check("the note opens in reading", !(await editing()))
+check("its blocks are drawn", await page.locator(".cm-block-block").count() >= 4 || (await page.locator(".cm-block").count()) >= 4)
+check("reading: no option notes, the blocks draw clean", (await notes.count()) === 0)
+await page.screenshot({ path: `${OUT}blocks-reading.png` })
+
+await palette(page, "Switch to live preview")
+check("live preview", await editing())
+await wait(600)
+const texts = await notes.allInnerTexts()
+check(`live preview: an unknown option is noted under its block (${JSON.stringify(texts)})`, texts.some((t) => t === "Unknown option titel (did you mean title?)"))
+check("…a wrong value too", texts.some((t) => t === "depth should be one of 1, 2, 3, 4, 5, not 9"))
+check("…and a required option left out", texts.some((t) => t === "area is required"))
+check("a ```base fence has none (its YAML is a base, not options)", !texts.some((t) => /filters|views/i.test(t)))
+check("option names are drawn as code", await page.locator('[data-block-notes="week-goals"] code', { hasText: "titel" }).count() === 1)
+const box = await page.locator('[data-block-notes="week-goals"]').boundingBox()
+check(`the note is one quiet line (${box?.height}px)`, box && box.height < 30)
+await page.locator('[data-block-notes="week-goals"]').scrollIntoViewIfNeeded()
+await page.screenshot({ path: `${OUT}blocks-notes.png` })
+check("the block with a note is still drawn", await page.locator(".cm-content", { hasText: "This week" }).count() > 0)
+
+await fetch(`${B}api/file`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: NOTE, text: read(NOTE).replace("titel: Mine", "title: Mine") }) })
+check("fixed on disk, its note goes", await until(async () => !(await notes.allInnerTexts()).some((t) => t.includes("titel")), 10000))
+
+await palette(page, "Switch to source mode")
+const menu = page.locator(".cm-tooltip-autocomplete")
+await page.locator(".vau-editor .cm-line", { hasText: "depth: 9" }).first().click()
+await page.keyboard.press("End"); await page.keyboard.press("Enter")
+await page.keyboard.type("he"); await wait(500)
+const labels = (await menu.locator("li").allInnerTexts().catch(() => [])).map((t) => t.split(/\s/)[0])
+check(`typing in a block suggests its options, not the ones it has (${labels.join(", ")})`, await menu.isVisible() && labels.includes("height") && !labels.includes("depth"))
+await page.screenshot({ path: `${OUT}blocks-suggest.png` })
+await page.keyboard.press("Enter"); await page.keyboard.type("280")
+check("a pick goes in as `key: ` and the value follows", await until(async () => /```block-graph\ndepth: 9\nheight: 280\n```/.test(read(NOTE))))
+await page.locator(".vau-editor .cm-line", { hasText: "title: Qa errors" }).first().click()
+await page.keyboard.press("End"); await page.keyboard.press("Enter")
+await page.keyboard.type("sou"); await wait(400)
+await page.keyboard.press("Enter"); await page.keyboard.type("s"); await wait(500)
+const values = (await menu.locator("li").allInnerTexts().catch(() => [])).map((t) => t.split(/\s/)[0])
+check(`after an enum's key, its values (${values.join(", ")})`, values.includes("server"))
+await page.keyboard.press("Enter")
+check("…and the value goes in", await until(async () => /title: Qa errors\nsource: server\n/.test(read(NOTE))))
+await page.locator(".vau-editor .cm-line", { hasText: "End line." }).first().click()
+await page.keyboard.press("End"); await page.keyboard.press("Enter")
+await page.keyboard.type("de"); await wait(400)
+check("outside a block, no option suggestions", !(await menu.isVisible()))
+await page.keyboard.press("Escape")
+
+await palette(page, "Switch to live preview")
+await page.locator(".vau-editor .cm-line", { hasText: "Intro line." }).first().click()
+await page.keyboard.press("End"); await page.keyboard.press("Enter"); await page.keyboard.press("Enter")
+await page.keyboard.type("/area"); await wait(500)
+const pick = menu.locator("li", { hasText: /^Area/ })
+if (await pick.count()) await pick.first().click(); else await page.keyboard.press("Enter")
+await wait(300); await page.keyboard.type("workouts")
+check("a block from the slash menu comes with its required options, the cursor at the first", await until(async () => /```block-area\narea: workouts\n```/.test(read(NOTE))))
+
+await page.goto(`${B}#plugins`); await wait(1500)
+const heads = await page.locator("[data-plugin-category]").evaluateAll((els) => els.map((e) => e.dataset.pluginCategory))
+check(`sections are categories (${heads.join(", ")})`, heads[0] === "navigation" && !heads.some((h) => /built-in|core|vault|community/i.test(h)))
+await page.screenshot({ path: `${OUT}blocks-plugins.png` })
+await page.locator('[data-plugin-category=navigation] [data-plugin-row]').first().click({ force: true }); await wait(800)
+check("a plugin's page, in Settings, a way back to Plugins", (await page.locator('[data-settings-section^="plugin:"]').count()) === 1 && (await page.locator("[data-settings-crumb=plugins]").count()) === 1)
+
+await done()

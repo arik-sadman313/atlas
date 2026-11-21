@@ -1,0 +1,175 @@
+// Who's signed in to a site, as its own pages ask it.
+import { z } from "zod"
+
+export type Who = { account: string; more?: string[]; avatar?: string }
+const FIELDS = z.record(z.string(), z.unknown())
+type Fields = z.infer<typeof FIELDS>
+const obj = (v: unknown): Fields => FIELDS.safeParse(v).data ?? {}
+export const nonempty = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "")
+
+const X_LOOK = `(() => { const a = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]'); const img = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"] img')
+  return a ? { handle: (a.getAttribute("href") || "").slice(1), avatar: img ? img.src : "" } : null })()`
+
+export type Rule = {
+  /** A "who am I" address its own pages ask, read by `read`; `text`: a page, not JSON. */
+  url?: string; text?: true; method?: "POST"
+  headers?: Record<string, string>
+  /** Asked from an open page of the site when there is one, as its own scripts would. */
+  page?: true
+  /** The login's cookie, by its name, which alone says it's signed in (and that it's still the same login). */
+  signed?: RegExp
+  /** Sites the same login covers, by the name of its cookie there. */
+  with?: Record<string, RegExp>
+  /** Read off an open page instead (`code` in a world of its own): who, false when plainly signed out, null unsure. */
+  look?: { code: string; read: (v: unknown) => Who | false | null }
+  read?: (body: unknown, cookie: (domain: string, name: string) => Promise<string>, url: string) => Who | string | null | Promise<Who | string | null>
+}
+
+export const at = (v: unknown, path: string) => nonempty(path.split(".").reduce((o, k) => obj(o)[k], v))
+const handle = (v: string, max = 30) => (new RegExp(`^[\\w.]{1,${max}}$`).test(v) ? `@${v}` : null)
+
+const WHATSAPP_LOOK = `(() => { if (document.querySelector("#pane-side")) return { phone: String(localStorage.getItem("last-wid-md") || "") }
+  return document.querySelector("[data-ref] canvas") ? { out: true } : null })()`
+
+const GOOGLE_LOGIN_COOKIES = /^(SID|__Secure-3PSID|LOGIN_INFO)$/
+
+export const ACCOUNTS: Record<string, Rule> = {
+  "claude.ai": { url: "https://claude.ai/api/account", page: true, signed: /^sessionKey/, read: (b) => at(b, "email_address") || at(b, "account.email_address") || at(b, "full_name") },
+  "chatgpt.com": { url: "https://chatgpt.com/api/auth/session", page: true, read: (b) => ({ account: at(b, "user.email") || at(b, "user.name"), avatar: at(b, "user.image") }) },
+  "perplexity.ai": { url: "https://www.perplexity.ai/api/auth/session", page: true, read: (b) => at(b, "user.email") || at(b, "user.username") },
+  // (the list Chrome asks for its own sign-in: every Google account signed in, the first the default one)
+  "google.com": { url: "https://accounts.google.com/ListAccounts?gpsia=1&source=ChromiumBrowser&json=standard", method: "POST", text: true,
+    signed: /^SID$/, with: { "youtube.com": GOOGLE_LOGIN_COOKIES, "google.*": GOOGLE_LOGIN_COOKIES }, read: (b) => googleAccounts(String(b)) },
+  "reddit.com": { url: "https://www.reddit.com/api/me.json", page: true, read: (b) => {
+    const name = at(b, "data.name")
+    return name ? { account: `u/${name}`, avatar: at(b, "data.icon_img").replace(/&amp;/g, "&") } : null
+  } },
+  "github.com": { url: "https://github.com/", text: true, signed: /^user_session$/, read: (b) => {
+    const login = /<meta name="user-login" content="([A-Za-z0-9-]{1,39})"/.exec(String(b))?.[1]
+    return login ? { account: login, avatar: `https://github.com/${login}.png?size=64` } : null
+  } },
+  // (its API takes the web session's cookie)
+  "gitlab.com": { url: "https://gitlab.com/api/v4/user", read: (b) => ({ account: at(b, "username"), avatar: at(b, "avatar_url") }) },
+  // (its page names the signed-in user among others: theirs is the one whose id the twid cookie has; its bot check
+  "x.com": { url: "https://x.com/home", text: true, signed: /^auth_token$/, look: { code: X_LOOK, read: xLooked }, read: async (b, cookie) => {
+    const id = /u%3D(\d+)|u=(\d+)/.exec(decodeURIComponent(await cookie("x.com", "twid")))?.slice(1).find(Boolean)
+    if (!id) return null
+    const html = String(b), i = html.indexOf(`"id_str":"${id}"`)
+    if (i < 0) return null
+    const rest = html.slice(i + 10, i + 6000), own = rest.slice(0, (rest.indexOf('"id_str":"') + 1 || rest.length + 1) - 1)
+    const name = /"screen_name":"(\w{1,15})"/.exec(own)?.[1]
+    const pic = /"profile_image_url_https":"([^"]+)"/.exec(own)?.[1]?.replace(/\\\//g, "/")
+    return name ? { account: `@${name}`, avatar: pic ?? "" } : null
+  } },
+  // (its web app's id, as its pages send it)
+  "instagram.com": { url: "https://www.instagram.com/api/v1/accounts/edit/web_form_data/", headers: { "x-ig-app-id": "936619743392459" }, signed: /^sessionid$/,
+    read: (b) => handle(at(b, "form_data.username")) },
+  // (any page of its has the user it's for; c_user, the login's user id, says which)
+  "facebook.com": { url: "https://www.facebook.com/settings/", text: true, page: true, signed: /^c_user$/, read: async (b, cookie) => facebookName(String(b), await cookie("facebook.com", "c_user")) },
+  // (/in/me/ takes you to your own profile: its address names you)
+  "linkedin.com": { url: "https://www.linkedin.com/in/me/", text: true, signed: /^li_at$/, read: (_b, _c, url) => {
+    const slug = decodeURIComponent(/linkedin\.com\/in\/([^/?#]+)/.exec(url)?.[1] ?? "")
+    return slug && slug !== "me" && /^[\p{L}\p{N}_-]{3,100}$/u.test(slug) ? slug : null
+  } },
+  // (slack.com's settings take you to your last workspace's, whose page says your email there)
+  "slack.com": { url: "https://slack.com/account/settings", text: true, signed: /^d$/, read: (b) => {
+    const email = /Your email address is <strong>([^<\s]{3,200})<\/strong>/.exec(String(b))?.[1]
+    return email && /^[^@]+@[^@]+$/.test(email) ? email : null
+  } },
+  "whatsapp.com": { look: { code: WHATSAPP_LOOK, read: (v) => looked(v, (o) => phoneOf(nonempty(o.phone))) } },
+  "cloudflare.com": { url: "https://dash.cloudflare.com/api/v4/user", headers: { "x-cross-site-security": "dash" }, signed: /^vses2$/, read: (b) => at(b, "result.email") },
+  "cursor.com": { url: "https://cursor.com/api/auth/me", signed: /^WorkosCursorSessionToken$/, read: (b) => ({ account: at(b, "email"), avatar: at(b, "picture") }) },
+  // An Apple Account (developer.apple.com's, App Store Connect's): the session App Store Connect's pages ask for
+  "apple.com": { url: "https://appstoreconnect.apple.com/olympus/v1/session", signed: /^myacinfo$/, read: (b) => at(b, "user.emailAddress") || at(b, "user.fullName") },
+  "wikipedia.org": { url: "https://en.wikipedia.org/w/api.php?action=query&meta=userinfo&format=json", read: (b) => {
+    const u = obj(obj(obj(b).query).userinfo)
+    return Number(u.id) > 0 && !("anon" in u) ? nonempty(u.name) || null : null // (signed out, it names your IP address)
+  } },
+  "amazon.com": { url: "https://www.amazon.com/", text: true, page: true, signed: /^at-main$/, read: (b) => {
+    const name = /id="nav-link-accountList-nav-line-1"[^>]*>\s*Hello, ([^<]{1,60}?)\s*</.exec(String(b))?.[1]
+    return name && !/^sign in$/i.test(name) ? name : null
+  } },
+  "stripe.com": { signed: /^__Host-session$/ },
+  "producthunt.com": { url: "https://www.producthunt.com/", text: true, page: true, read: (b) => productHuntViewer(String(b)) },
+  "substack.com": { url: "https://substack.com/api/v1/user/profile/self", signed: /^substack\.sid$/, read: (b) => {
+    const name = at(b, "handle")
+    return name ? { account: `@${name}`, avatar: at(b, "photo_url") } : at(b, "name") || null
+  } },
+  "notion.so": { signed: /^token_v2$/ },
+  "figma.com": { signed: /^figma\.authn$/ },
+  "spotify.com": { signed: /^sp_dc$/ },
+  "netflix.com": { signed: /^NetflixId$/ },
+  "tiktok.com": { url: "https://www.tiktok.com/passport/web/account/info/?aid=1459", signed: /^sessionid$/, read: (b) => handle(at(b, "data.username"), 24) },
+  "twitch.tv": { signed: /^auth-token$/, read: async (_b, cookie) => /^\w{3,25}$/.exec(await cookie("twitch.tv", "login"))?.[0] ?? null },
+  "grok.com": { signed: /^sso$/, with: { "x.ai": /^sso$/ } },
+  // Hacker News: its login cookie is "<name>&<hash>"
+  "ycombinator.com": { signed: /^user$/, read: async (_b, cookie) => /^[\w-]{2,15}(?=&)/.exec(await cookie("news.ycombinator.com", "user"))?.[0] ?? null },
+}
+
+function looked(v: unknown, name: (o: Fields) => string | null): Who | false | null {
+  const o = FIELDS.safeParse(v).data
+  return !o ? null : o.out ? false : { account: name(o) ?? "" }
+}
+
+/** WhatsApp's own id for the number ("5511987654321:12@c.us", maybe quoted) → "+5511987654321". */
+export function phoneOf(wid: string) {
+  const n = /^"?(\d{8,15})[:@]/.exec(wid)?.[1]
+  return n ? `+${n}` : ""
+}
+
+export function facebookName(html: string, id: string) {
+  const i = html.indexOf('"CurrentUserInitialData"')
+  if (i < 0 || !/^\d+$/.test(id)) return null
+  const data = html.slice(i, i + 3000)
+  if (/"USER_ID":"(\d+)"/.exec(data)?.[1] !== id) return null
+  const name = /"NAME":"((?:[^"\\]|\\.)+)"/.exec(data)?.[1]
+  try { return name ? nonempty(JSON.parse(`"${name}"`)) || null : null } catch { return null }
+}
+
+export function productHuntViewer(html: string): Who | null {
+  const i = html.indexOf('"viewer":{"__typename":"Viewer"')
+  if (i < 0) return null
+  const viewer = html.slice(i, i + 20_000)
+  if (!viewer.includes('"isLoggedIn":true')) return null
+  const user = viewer.indexOf('"user":{')
+  const name = user < 0 ? undefined : /"username":"([\w-]{1,40})"/.exec(viewer.slice(user))?.[1]
+  const email = /"email":"([^"@\s]{1,100}@[^"\s]{1,100})"/.exec(viewer)?.[1]
+  return name ? { account: `@${name}` } : email ? { account: email } : null
+}
+
+export const covers = (key: string, site: string) => key.endsWith(".*") ? site.startsWith(key.slice(0, -1)) && site !== `${key.slice(0, -2)}.com` : site === key
+
+export function xLooked(v: unknown): Who | null {
+  const o = obj(v), handle = nonempty(o.handle)
+  return /^\w{1,15}$/.test(handle) ? { account: `@${handle}`, avatar: nonempty(o.avatar) } : null
+}
+
+const LISTED = z.tuple([z.unknown(), z.array(z.unknown())], z.unknown())
+/** Google's ListAccounts answer (JSON, or JSON inside the page it sometimes is): its accounts still signed in. */
+export function googleAccounts(text: string): Who | null {
+  const t = text.replace(/\\x22/g, '"').replace(/\\u0022/g, '"').replace(/\\\//g, "/")
+  const at = t.indexOf('["gaia.l.a.r"')
+  if (at < 0) return null
+  let rows: unknown[]
+  try { rows = LISTED.safeParse(JSON.parse(jsonEnd(t, at))).data?.[1] ?? [] } catch { return null }
+  const found = rows.flatMap((r) => {
+    if (!Array.isArray(r) || r[0] !== "gaia.l.a") return []
+    const email = nonempty(r[3])
+    // ([14] is 1 for an account signed out but remembered)
+    return email.includes("@") && r[14] !== 1 ? [{ email, photo: nonempty(r[4]) }] : []
+  })
+  if (!found.length) return null
+  return { account: found[0].email, more: found.slice(1).map((f) => f.email), avatar: found[0].photo }
+}
+function jsonEnd(t: string, at: number) {
+  let depth = 0, str = false
+  for (let i = at; i < t.length; i++) {
+    const c = t[i]
+    if (str) { if (c === "\\") i++; else if (c === '"') str = false; continue }
+    if (c === '"') str = true
+    else if (c === "[") depth++
+    else if (c === "]" && --depth === 0) return t.slice(at, i + 1)
+  }
+  return t.slice(at)
+}
+

@@ -1,0 +1,69 @@
+import { Component, Fragment, type ReactNode } from "react"
+import { Button } from "@/components/Button"
+import { ErrorDetails } from "@/components/kit"
+import { isStaleBuild, recoverFromStaleBuild } from "@/core/errors"
+
+type Props = {
+  children: ReactNode
+  what: string
+  size?: "tab" | "small"
+  reset?: string
+  close?: () => void
+}
+type State = { failed: boolean; error: unknown; reset?: string; tries: number; stale: "waiting" | "failed" | null }
+
+/** Calls a plugin's `render` while drawing, inside the Guard around it (called by the parent, what it throws would
+ *  pass the Guard by). */
+export function Drawn({ draw }: { draw: () => ReactNode }) { return <>{draw()}</> }
+
+type Caught = { failed: boolean; error: unknown; reset?: string }
+export class Catch extends Component<{ children: ReactNode; fallback: (error: unknown) => ReactNode; reset?: string; onError?: (e: unknown) => void }, Caught> {
+  state: Caught = { failed: false, error: null, reset: this.props.reset }
+  static getDerivedStateFromError(error: unknown) { return { failed: true, error } }
+  static getDerivedStateFromProps(p: { reset?: string }, s: { reset?: string }) { return p.reset === s.reset ? null : { failed: false, error: null, reset: p.reset } }
+  componentDidCatch(e: unknown) { this.props.onError?.(e) }
+  render() { return this.state.failed ? this.props.fallback(this.state.error) : this.props.children }
+}
+
+const textOf = (e: unknown) => (e instanceof Error ? e.stack || `${e.name}: ${e.message}` : String(e))
+
+export class Guard extends Component<Props, State> {
+  state: State = { failed: false, error: null, reset: this.props.reset, tries: 0, stale: null }
+  static getDerivedStateFromError(error: unknown): Partial<State> { return { failed: true, error, stale: isStaleBuild(error) ? "waiting" : null } }
+  static getDerivedStateFromProps(p: Props, s: State): Partial<State> | null {
+    return p.reset === s.reset ? null : { failed: false, error: null, reset: p.reset, stale: null }
+  }
+  componentDidCatch(error: unknown) {
+    if (isStaleBuild(error)) void recoverFromStaleBuild(error, false).then((reloading) => { if (!reloading && this.state.error === error) this.setState({ stale: "failed" }) })
+  }
+  retry = () => this.setState((s) => ({ failed: false, error: null, tries: s.tries + 1, stale: null }))
+  render() {
+    const { what, size = "small", close, children } = this.props
+    const { failed, error, tries, stale } = this.state
+    if (!failed) return <Fragment key={tries}>{children}</Fragment>
+    const message = textOf(error)
+    if (size === "small") {
+      return (
+        <p role="alert" data-guard-failed={what} className="px-2 py-1 text-[13px] text-muted-foreground">
+          {stale === "waiting" ? "Reconnecting…" : <>{what} couldn't be drawn. <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={this.retry}>Try again</button></>}
+        </p>
+      )
+    }
+    return (
+      <div role="alert" data-guard-failed={what} className="mx-auto max-w-[720px] px-8 pt-12 pb-6">
+        <h2 className="text-[17px] font-semibold">{stale === "waiting" ? "Reconnecting to Vaultite…" : `${what} couldn't be drawn`}</h2>
+        <p className="mt-1 text-[15px] text-muted-foreground">
+          {stale === "waiting" ? "Part of the app didn't load. It reloads once the server answers."
+            : "The rest of the app still works. Try again; if it keeps happening, it's a bug: the details help whoever fixes it."}
+        </p>
+        {stale !== "waiting" && <>
+          <div className="mt-4 flex gap-2">
+            <Button look="outline" onClick={stale === "failed" ? () => location.reload() : this.retry}>{stale === "failed" ? "Reload" : "Try again"}</Button>
+            {close && <Button look="outline" onClick={close}>Close tab</Button>}
+          </div>
+          <ErrorDetails className="mt-3" text={`${what} couldn't be drawn\n${message}`} />
+        </>}
+      </div>
+    )
+  }
+}

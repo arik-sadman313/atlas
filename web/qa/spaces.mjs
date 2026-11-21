@@ -1,0 +1,152 @@
+// Workspaces as spaces (plugins/core/workspaces): each one's icon, colour and Browser container, swiped between, and
+// shown on the phone. Writes plugins.json and the workspaces' files (put back): throwaway only.
+//   node web/qa/spaces.mjs <base url> <vault path>
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import path from "node:path"
+import { qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+import { setAsideWorkspaces, workspaces, wsDir } from "./lib/wsfiles.mjs"
+const { args: [B, VAULT], browser, check, watch, done } = await qa(import.meta.url)
+
+const PLUGINS = path.join(VAULT, ".vaultite/plugins.json")
+const pluginsBefore = readFileSync(PLUGINS, "utf8")
+const putBack = setAsideWorkspaces(B)
+writeFileSync(PLUGINS, JSON.stringify({ ...JSON.parse(pluginsBefore), enabled: [...(JSON.parse(pluginsBefore).enabled ?? []), "workspaces"] }, null, 2) + "\n")
+mkdirSync(wsDir(VAULT), { recursive: true })
+writeFileSync(path.join(wsDir(VAULT), "1.json"), JSON.stringify({ name: "Writing" }) + "\n")
+writeFileSync(path.join(wsDir(VAULT), "2.json"), JSON.stringify({ name: "Reading" }) + "\n")
+const LONG = "Research for the quarterly planning offsite in Lisbon"
+writeFileSync(path.join(wsDir(VAULT), "3.json"), JSON.stringify({ name: LONG }) + "\n")
+
+const SWITCHER = "aside [data-workspace-switcher]"
+/** A CSS colour as the screen draws it (sRGB 0-255), in the page. */
+const drawn = (page, css) => page.evaluate((c) => { const x = document.createElement("canvas").getContext("2d"); x.fillStyle = c; x.fillRect(0, 0, 1, 1); return [...x.getImageData(0, 0, 1, 1).data].slice(0, 3) }, css)
+const far = (a, b) => Math.max(...a.map((x, i) => Math.abs(x - b[i])))
+
+try {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "light" })
+  const page = watch(await ctx.newPage(), { console: true, ignore: /favicon|Failed to load resource|WebSocket/ }), ui = app(page)
+  const submenu = async (row) => { const n = await page.locator("[role=menu]").count(); await row.hover(); await page.locator("[role=menu]").nth(n).waitFor() }
+  await page.goto(B)
+  await page.waitForSelector(SWITCHER, { timeout: 30000 })
+  const lit = () => page.$eval(SWITCHER, (e) => e.getAttribute("data-workspace-switcher"))
+  const bg = async () => drawn(page, await page.$eval("aside[data-side=left]", (e) => getComputedStyle(e).backgroundColor))
+  const pick = async (...names) => {
+    await page.click(SWITCHER, { button: "right" })
+    for (const [i, name] of names.entries()) {
+      const row = page.locator("[role=menu] [role^=menuitem]", { hasText: new RegExp(`^${name}`) }).last()
+      if (i < names.length - 1) await submenu(row); else await row.click()
+    }
+    await ui.idle()
+  }
+  const plain = await bg()
+
+  await pick("Change icon")
+  await page.waitForSelector("[role=dialog] input", { timeout: 5000 })
+  const offered = await until(async () => { const t = await page.$$eval("[role=dialog] [role=option]:not([data-glyph-none])", (els) => els.map((e) => e.dataset.glyph)); return t.length >= 30 && t }, 5000)
+  const numberCell = await page.$eval("[role=dialog] [role=option]", (e) => ({ none: e.dataset.glyphNone === "true", label: e.getAttribute("aria-label"), current: e.className.includes("ring-"), on: e.getAttribute("aria-selected") }))
+  check("Change icon: first its own number (no icon), the current one, selected", numberCell.none && numberCell.label === "Its number, 1" && numberCell.current && numberCell.on === "true", numberCell)
+  check("Change icon: the app's common icons first, not the alphabet's start", offered?.[0] === "activity" && offered.slice(0, 30).includes("dumbbell") && !offered.slice(0, 30).includes("a-arrow-down"), offered?.slice(0, 6))
+  await page.keyboard.type("book-open"); await ui.idle(); await page.keyboard.press("Enter")
+  await until(() => workspaces(B)[0]?.icon, 5000)
+  check("Change icon: kept in its file", workspaces(B)[0]?.icon === "book-open", workspaces(B)[0])
+  check("… and shown for its number", await until(() => page.$(`${SWITCHER} [data-workspace-icon=book-open]`), 3000))
+  await page.click(SWITCHER, { button: "right" })
+  const items = await page.$$eval("[role=menu] [role^=menuitem]", (els) => els.map((e) => e.textContent.trim()))
+  check("its menu has no Remove icon", items.some((t) => t.startsWith("Change icon")) && !items.some((t) => t.startsWith("Remove icon")), items)
+  await page.keyboard.press("Escape"); await ui.idle()
+  await pick("Change icon")
+  await page.locator("[role=dialog] [data-glyph-none]").click()
+  check("Change icon: its own number takes the icon off", !!(await until(() => !workspaces(B)[0]?.icon, 5000)), workspaces(B)[0])
+  await pick("Change icon")
+  await page.waitForSelector("[role=dialog] input", { timeout: 5000 })
+  await page.keyboard.type("book-open"); await ui.idle(); await page.keyboard.press("Enter")
+  await until(() => workspaces(B)[0]?.icon, 5000)
+
+  // The list: like a menu, the highlight follows the keyboard and a check marks the one that's on.
+  await page.click(SWITCHER); await page.waitForSelector("[data-workspace-list] [data-workspace]"); await page.keyboard.press("ArrowDown"); await ui.idle()
+  const listed = await page.$$eval("[data-workspace-list] [data-workspace]", (els) => els.map((e) => ({ on: e.getAttribute("aria-pressed") === "true", check: !!e.querySelector("svg.lucide-check"), bg: getComputedStyle(e).backgroundColor, focus: e === document.activeElement })))
+  check("the list: only the focused row is lit, a check on the current one", listed[0]?.on && listed[0].check && !listed[1].check && listed[1].focus && listed[0].bg !== listed[1].bg && /, 0\)$|transparent/.test(listed[0].bg), listed)
+  await page.hover("[data-workspace-list] [data-workspace='3']"); await page.locator(".tooltip").waitFor()
+  check("… a name cut off shows whole on hover", await page.evaluate(() => document.querySelector(".tooltip")?.textContent) === LONG)
+  await page.keyboard.press("Escape"); await ui.idle()
+
+  // The colour: the sidebars take a little of it, light and dark, and lose it with No colour.
+  await pick("Colour", "Teal")
+  await until(() => workspaces(B)[0]?.tint === "teal", 5000)
+  const teal = await bg()
+  check("Colour: kept, and the sidebar takes a little of it (light)", workspaces(B)[0]?.tint === "teal" && far(teal, plain) >= 3 && far(teal, plain) <= 40, { plain, teal })
+  const icon = await page.$eval(`${SWITCHER} [data-workspace-icon] svg`, (e) => getComputedStyle(e).color)
+  const tealIs = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--teal").trim())
+  check("… the icon in it", far(await drawn(page, icon), await drawn(page, tealIs)) <= 2, [icon, tealIs])
+  await page.emulateMedia({ colorScheme: "dark" }); await ui.idle()
+  const dark = await bg()
+  const darkPlain = await drawn(page, await page.evaluate(() => { const r = document.documentElement, v = r.style.getPropertyValue("--space-tint"); r.style.removeProperty("--space-tint"); const c = getComputedStyle(document.querySelector("aside[data-side=left]")).backgroundColor; r.style.setProperty("--space-tint", v); return c }))
+  check("… quiet in dark too: tinted, still dark", far(dark, darkPlain) >= 3 && far(dark, darkPlain) <= 30 && Math.max(...dark) < 70, { dark, darkPlain })
+  await page.emulateMedia({ colorScheme: "light" }); await ui.idle()
+
+  // The container: the Browser's, listed; the menu's row says which.
+  await page.click(SWITCHER, { button: "right" })
+  await submenu(page.locator("[role=menu] [role^=menuitem]", { hasText: /^Container/ }))
+  const boxes = await page.locator("[role=menu]").last().locator("[role^=menuitem]").allInnerTexts()
+  check("Container: the Browser's containers to pick from", ["No container", "Personal", "Work"].every((b) => boxes.some((x) => x.startsWith(b))), boxes)
+  await page.locator("[role=menu]").last().locator("[role^=menuitem]", { hasText: /^Work/ }).click()
+  await until(() => workspaces(B)[0]?.container === "work", 5000)
+  check("… kept in its file", workspaces(B)[0]?.container === "work", workspaces(B)[0])
+  await ui.idle()
+  await ui.menu.context(page.locator(SWITCHER))
+  check("… and named in the menu", (await page.locator("[role=menu] [role^=menuitem]", { hasText: /^Container/ }).innerText()).includes("Work"))
+  await page.keyboard.press("Escape")
+
+  // Its settings: the three, as they are.
+  await pick("Settings")
+  await page.waitForSelector("[data-workspace-settings]", { timeout: 8000 })
+  const rows = await page.$$eval("[data-workspace-settings] [data-setting]", (els) => els.map((e) => e.getAttribute("data-setting")))
+  check("Settings: icon, colour and container rows", ["icon", "tint", "container"].every((r) => rows.includes(r)) && (await page.innerText("[data-workspace-container]")) === "Work"
+    && (await page.innerText("[data-workspace-tint]")).includes("Teal"), rows)
+  await page.keyboard.press("Escape"); await until(async () => !(await page.$("[data-workspace-settings]")), 3000); await ui.idle()
+
+  // A two-finger swipe over the sidebar: to the next workspace and back; up and down scrolls, never switches.
+  // (one event a swipe's worth: on a busy machine, a swipe's many small ones arrive too far apart to add up)
+  await page.mouse.move(120, 420)
+  await page.mouse.wheel(100, 4)
+  check("a swipe sideways over the sidebar goes to the next workspace", await until(async () => (await lit()) === "2", 3000), await lit())
+  // (a whole workspace put in place just shows: only tabs the user opens grow in)
+  const tabW = () => page.$$eval("[data-tab-strip] [role=tab]", (els) => els.map((e) => Math.round(e.getBoundingClientRect().width)))
+  const first = await tabW(); await ui.idle()
+  check("… its tabs show at once, none growing in", JSON.stringify(first) === JSON.stringify(await tabW()), [first, await tabW()])
+  check("… where the sidebars lose the colour (it has none)", far(await bg(), plain) <= 1, [await bg(), plain])
+  await ui.idle()
+  await page.mouse.wheel(-100, 4)
+  check("… and back", await until(async () => (await lit()) === "1", 3000), await lit())
+  await ui.idle()
+  await page.mouse.wheel(20, 200)
+  await ui.idle()
+  check("an up-and-down swipe doesn't switch", (await lit()) === "1", await lit())
+  await ctx.close()
+
+  const pctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })
+  const P = watch(await pctx.newPage(), { console: true, ignore: /favicon|Failed to load resource|WebSocket/ })
+  await P.goto(B)
+  await P.waitForSelector("[data-tabs-button]", { timeout: 30000 }); await app(P).idle()
+  await P.click("[data-tabs-button]")
+  await P.locator("[data-tabs-workspace]").waitFor({ timeout: 5000 })
+  check("phone: the tab list's title shows the workspace's icon", await until(() => P.$("[data-tabs-workspace] [data-tabs-workspace-icon]"), 5000))
+  await P.click("[data-tabs-workspace]")
+  const marks = await until(() => P.$$eval("[role=menu] [role=menuitemradio]", (els) => els.map((e) => e.querySelector("[data-workspace-icon]")?.getAttribute("data-workspace-icon") ?? e.textContent.trim())), 3000)
+  check("… its menu shows each workspace's mark, as the computer's list does", marks?.[0] === "book-open" && marks?.[1] === "2Reading", marks)
+  const fits = await P.$eval("[role=menu]", (m) => ({ right: Math.round(m.getBoundingClientRect().right), w: innerWidth, cut: [...m.querySelectorAll(".truncate")].some((t) => t.scrollWidth > t.clientWidth) }))
+  check("… within the screen, a long name cut off", fits.right <= fits.w && fits.cut, fits)
+  await P.locator("[role=menu] [role^=menuitem]", { hasText: /^Rename$/ }).click()
+  const field = P.locator("[role=dialog] input")
+  await field.waitFor({ timeout: 5000 })
+  check("phone: Rename in the title's menu asks for its name, the one it has typed", (await field.inputValue()) === "Writing", await field.inputValue())
+  await field.fill("Drafts"); await field.press("Enter")
+  check("… Enter renames it: the title, and its file", !!(await until(async () => (await P.locator("[data-tabs-title]").innerText()) === "Drafts" && workspaces(B)[0]?.name === "Drafts", 5000)),
+    [await P.locator("[data-tabs-title]").innerText(), workspaces(B)[0]])
+  await pctx.close()
+} finally {
+  writeFileSync(PLUGINS, pluginsBefore)
+  putBack()
+}
+await done()

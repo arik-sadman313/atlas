@@ -1,0 +1,60 @@
+import { useState } from "react"
+import { Brain, MessagesSquare, Upload } from "lucide-react"
+import { activeFile, definePlugin, Group, Panel, SettingRow } from "@vaultite"
+import { reviewItems } from "./note"
+import { applyReview, pickExport } from "./upload"
+
+const TINT = "var(--ai-import)"
+
+function ReviewCard({ path, body }: { path: string; body: string }) {
+  const [busy, setBusy] = useState(false)
+  const items = reviewItems(body)
+  const ticked = items.filter((i) => i.done).length
+  const add = async () => { setBusy(true); try { await applyReview(path) } finally { setBusy(false) } }
+  return (
+    <Panel title="Memories to review" icon={Brain} tint={TINT}>
+      <p className="text-[15px] leading-[20px] text-muted-foreground">
+        {items.length
+          ? `${items.length} to review, ${ticked} ticked. Ticked ones go into ME.md (About me, or How to work with me) or the person's file in People, by their label.`
+          : "Nothing left to review."}
+      </p>
+      {items.length > 0 && (
+        <button type="button" onClick={add} disabled={!ticked || busy} data-memory-add
+          className="mt-3 cursor-pointer text-[15px] font-semibold text-primary disabled:cursor-default disabled:text-muted-foreground">
+          {busy ? "Adding…" : ticked ? `Add ${ticked} ticked` : "Tick the ones to add"}
+        </button>
+      )}
+    </Panel>
+  )
+}
+
+function SettingsPanel() {
+  return (
+    <div>
+      <Group>
+        <SettingRow label="Import from ChatGPT or Claude…" sub="Their export's zip (or its conversations.json): every chat becomes a note" onClick={pickExport} chevron={Upload} />
+      </Group>
+      <p className="mt-1.5 px-1 text-[13px] leading-[18px] text-muted-foreground">
+        ChatGPT: Settings, Data controls, Export data. Claude: Settings, Privacy, Export data. Each emails a link to a zip: download it
+        and pick it here. Importing again updates chats that changed and never makes a second copy.
+      </p>
+    </div>
+  )
+}
+
+
+const isReview = (path: string) => /(^|\/)Memories to review\.md$/.test(path)
+
+export default definePlugin({
+  files: { types: ["chat", "chat-project", "memory-review"], icon: MessagesSquare, tint: TINT },
+  commands: [
+    { id: "ai-import:import", name: "Import from ChatGPT or Claude…", run: pickExport },
+    { id: "ai-import:apply", name: "Add ticked memories", when: () => isReview(activeFile()?.path ?? ""), run: () => { const p = activeFile()?.path; if (p) void applyReview(p) } },
+  ],
+  fileMenu: (path) => (isReview(path) ? [{ label: "Add ticked memories", icon: Brain, section: "actions", run: () => applyReview(path) }] : []),
+  blocks: {
+    "memory-review": ({ path, body }) => <ReviewCard path={path} body={body} />,
+  },
+  settingsPanel: () => <SettingsPanel />,
+  settingsPanelFirst: true,
+})

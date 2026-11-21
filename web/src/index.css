@@ -1,0 +1,1607 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./shadcn.css";
+@import "./themes/gruvbox.css";
+@import "./themes/catppuccin.css";
+@import "./themes/nord.css";
+@import "./themes/dracula.css";
+@import "./themes/solarized.css";
+@import "./themes/tokyo-night.css";
+@import "./themes/rose-pine.css";
+@import "./themes/everforest.css";
+@import "./themes/kanagawa.css";
+@import "./themes/one.css";
+@import "./themes/ayu.css";
+@import "./themes/github.css";
+@import "./themes/flexoki.css";
+@import "./themes/amethyst.css";
+@import "./themes/paper.css";
+@source "../../plugins";
+/* (QA scripts' Playwright selectors would become rules: [data-x]:visible) */
+@source not "../qa";
+@source not "../../plugins/core/references/styles";
+@source not "../demo/research";
+
+@custom-variant dark (&:is(.dark *));
+/* md: is the desktop's layout, max-md: the phone's: what core/platform.ts chose (the root's data-phone), not the window's
+   width, so a phone turned sideways keeps its own. Rules here say the same: `:where([data-phone]) X` and
+   `X:where(:not([data-phone] *))`. (An ancestor, not :root: a copy of the page in a shadow root has none, and is a desktop's.) */
+@custom-variant md (&:where(:not([data-phone] *)));
+@custom-variant max-md (&:where([data-phone] *));
+
+@theme inline {
+    --font-mono: var(--font-code);
+    /* Settings' interface font (--font-ui, set on <html> by core/appearance.ts) before the default. */
+    --font-sans: var(--font-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif, 'Noto Color Emoji');
+    --font-rounded: ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    /* A workspace's tint (Workspaces' --space-tint), a little of it, as Arc colours its sidebar. */
+    --color-sidebar: color-mix(in oklab, var(--sidebar), var(--space-tint, var(--sidebar)) var(--space-mix));
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+    /* Tailwind's `transition-*` and tw-animate's `animate-in`/`animate-out` without a duration: the motion tokens, so
+       the Animation setting reaches them (`duration-(--motion)` for the others). */
+    --default-transition-duration: var(--motion-fast);
+    --default-transition-timing-function: var(--ease-out);
+    --animate-in: enter var(--tw-animation-duration,var(--tw-duration,var(--motion-fast)))var(--tw-ease,var(--ease-out))var(--tw-animation-delay,0s)var(--tw-animation-iteration-count,1)var(--tw-animation-direction,normal)var(--tw-animation-fill-mode,none);
+    --animate-out: exit var(--tw-animation-duration,var(--tw-duration,var(--motion-fast)))var(--tw-ease,var(--ease-out))var(--tw-animation-delay,0s)var(--tw-animation-iteration-count,1)var(--tw-animation-direction,normal)var(--tw-animation-fill-mode,none);
+}
+/* The shape's three radii (rounded-card, rounded-control, rounded-chip): a pane's card; a control (tabs, group chips,
+   fields); a chip set in a card's corner, concentric with it: the card's radius less its inset (--pane-gap). */
+@theme {
+    --radius-card: 10px;
+    --radius-control: 6px;
+    --radius-chip: 4px;
+}
+
+/* .scheme-preview: a Settings tile drawn in a scheme's own colours (themes/*.css match it too). */
+:root, .scheme-preview {
+    --background: #f2f2f7;
+    --foreground: #1c1c1e;
+    --card: #ffffff;
+    --card-foreground: #1c1c1e;
+    --popover: rgb(255 255 255 / 0.85);
+    --popover-foreground: #1c1c1e;
+    --primary: #007aff;
+    --primary-foreground: #ffffff;
+    --secondary: rgb(120 120 128 / 0.12);
+    --secondary-foreground: #1c1c1e;
+    --muted: rgb(120 120 128 / 0.12);
+    /* secondaryLabel, opaque (lucide's overlapping paths darken where a translucent stroke crosses: .text-tertiary) and
+       darker: 4.5:1 (WCAG AA) on --sidebar, as each scheme's is where its own text leaves room for it. */
+    --muted-foreground: #69696e;
+    --accent: rgb(120 120 128 / 0.12);
+    --accent-foreground: #1c1c1e;
+    --destructive: #ff3b30;
+    --border: rgb(60 60 67 / 0.29);                /* separator */
+    --input: rgb(60 60 67 / 0.18);
+    --ring: #007aff;
+    --chart-1: #007aff;
+    --chart-2: #6e6e73;
+    --chart-3: #ff2d55;
+    --chart-4: #af52de;
+    --chart-5: #34c759;
+    --radius: 0.625rem;
+    --glass-edge: rgb(255 255 255 / 0.75);
+    --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    --sidebar: #e9e9ee;
+    --space-mix: 9%;
+    --segment-on: var(--card);
+    /* Named colours (Apple system colours). Features use these, never raw hex, so a scheme can recolour everything. */
+    --red: #ff3b30; --orange: #ff9500; --yellow: #ffcc00; --green: #34c759; --teal: #30b0c7;
+    --blue: #007aff; --indigo: #5856d6; --purple: #af52de; --pink: #ff2d55; --gray: #8e8e93;
+    /* A colour as text (lib/ink.ts' `ink()`, `text-ink-(--red)`): its OKLCH lightness held in this range, so a tint reads
+       at 4.5:1 (WCAG AA) on a card, light or dark, keeping the scheme's hue and chroma. Fills and icons keep the colour. */
+    --ink-lo: 0; --ink-hi: 0.48; --ink-l: clamp(var(--ink-lo), l, var(--ink-hi));
+    /* Heading colours (editor: reading, live preview and source). Plain here; schemes may colour them. */
+    --h1: var(--foreground); --h2: var(--foreground); --h3: var(--foreground);
+    --h4: var(--muted-foreground); --h5: var(--muted-foreground); --h6: var(--muted-foreground);
+}
+/* Appearance settings (.vaultite/appearance.json; core/appearance.ts sets them on <html>): the fonts (textFont,
+   monoFont; --font-ui is the interface font, in @theme above). No font size: ⌘+ / ⌘- zoom the whole app. */
+:root {
+    --font-code: ui-monospace, 'SF Mono', Menlo, 'DejaVu Sans Mono', 'Noto Sans Mono', 'Liberation Mono', 'Ubuntu Mono', monospace;
+    /* A note's widest line in a tab (FileView), for snippets to change; ⌘+ zoom scales it. */
+    --line-width: 700px;
+}
+/* Titles and large headings: --font-heading when a snippet sets it (a bundle's look), else unset, so they keep the
+   font around them (the text font in a note). */
+.title-font, .note-prose :is(.h1, .h2, .h3), .vau-editor :is(.cm-h1, .cm-h2, .cm-h3), .dash-prose :is(h1, h2, h3) { font-family: var(--font-heading); }
+/* Density: comfortable spaces everything out by scaling Tailwind's spacing unit (paddings, gaps, row and bar heights:
+   the 28px rows become 31.5px, the 40px bars 45px, the file tree's rows 26px to 29.25px, the rail 44px to 49.5px). So a
+   size that should follow it is in spacing units (`h-7`, `pl-[calc(--spacing(2)-0.5px)]`, `space(n)` in inline styles,
+   `var(--spacing)` here); text sizes, icons given in px, hairlines and radii stay px. Compact is the default. */
+:root[data-density="comfortable"] { --spacing: 0.28125rem; }
+/* Motion (appearance `animation`; core/animation.ts reads the same for Web Animations): natural springs about 1% past
+   its place (Rex's: 0.25 s response, 0.82 damping), snappy is quicker and straight, off is instant. */
+:root {
+  --ease-out: cubic-bezier(0.2, 0, 0, 1); --motion-fast: 140ms; --motion: 220ms; --motion-spring: 295ms;
+  --spring: linear(0, 0.0155, 0.056, 0.1138, 0.1826, 0.2575, 0.3347, 0.4113, 0.4852, 0.5549, 0.6195, 0.6783, 0.7312, 0.7782, 0.8193, 0.855, 0.8856, 0.9115, 0.9331, 0.9511, 0.9657, 0.9774, 0.9867, 0.9938, 0.9992, 1.0031, 1.0059, 1.0076, 1.0086, 1.0089, 1.0088, 1.0084, 1.0077, 1.0069, 1.0059, 1.0049, 1.0038, 1.0028, 1.0018, 1.0009, 1);
+}
+:root[data-animation="snappy"] { --motion-fast: 90ms; --motion: 150ms; --motion-spring: 200ms; --spring: var(--ease-out); }
+:root[data-animation="off"] { --motion-fast: 0ms; --motion: 0ms; --motion-spring: 0ms; }
+/* A page of the sidebar's lists (SidebarRow, SidebarHeading, the panels: 13px text, h-7 rows), drawn a size up as one,
+   so every section has the same text, rows and inset: a blank tab (NewTab), the Recent files and Terminals tabs.
+   15px on computers; on phones 16px, rows 40px (its own spacing unit): a notch under a note's 17px, as a sidebar is. `.size-up-bleed`, on what holds it (zoom would
+   scale its own margin), pulls it out by its rows' inset, so their text lines up with the page's. */
+[data-size-up] { zoom: 1.1538; }
+/* A command's keys, drawn where it is (core/rebind.ts): clicking them changes its shortcut, so they look pressable. */
+[data-rebind] { cursor: pointer; border-radius: 6px; }
+[data-rebind]:hover, [data-rebinding] { background: var(--accent); }
+[data-rebinding] { outline: 1.5px solid var(--primary); }
+.size-up-bleed { margin-inline: calc(var(--spacing) * -1.5 * 1.1538); }
+:where([data-phone]) [data-size-up] { zoom: 1.2308; --spacing: 0.29rem; }
+:where([data-phone]) .size-up-bleed { margin-inline: calc(0.29rem * -1.5 * 1.2308); }
+
+
+.dark {
+    --background: #000000;
+    --foreground: #f5f5f7;
+    --card: #1c1c1e;
+    --card-foreground: #f5f5f7;
+    --popover: rgb(44 44 46 / 0.9);
+    --popover-foreground: #f5f5f7;
+    --primary: #0a84ff;
+    --primary-foreground: #ffffff;
+    --secondary: rgb(120 120 128 / 0.24);
+    --secondary-foreground: #f5f5f7;
+    --muted: rgb(120 120 128 / 0.24);
+    --muted-foreground: #98989f;
+    --accent: rgb(120 120 128 / 0.24);
+    --accent-foreground: #f5f5f7;
+    --destructive: #ff453a;
+    --border: rgb(84 84 88 / 0.65);
+    --input: rgb(255 255 255 / 0.15);
+    --ring: #0a84ff;
+    --chart-1: #0a84ff;
+    --chart-2: #98989d;
+    --chart-3: #ff375f;
+    --chart-4: #bf5af2;
+    --chart-5: #30d158;
+    --glass-edge: rgb(255 255 255 / 0.14);
+    --glass-shadow: none;
+    --sidebar: #111113;
+    --space-mix: 12%;
+    --segment-on: #636366;
+    --red: #ff453a; --orange: #ff9f0a; --yellow: #ffd60a; --green: #30d158; --teal: #40c8e0;
+    --blue: #0a84ff; --indigo: #5e5ce6; --purple: #bf5af2; --pink: #ff375f; --gray: #8e8e93;
+    --ink-lo: 0.8; --ink-hi: 1;
+}
+
+
+/* Plugins' tints: a plugin's manifest names a colour ("tint": "orange"), and core/plugins.ts makes --<plugin id> of it
+   (--today: var(--orange)) at the lowest specificity, so any scheme can set its own. Default keeps Apple's picks for
+   four of them. */
+:is(:root, .scheme-preview):is(:not([data-scheme]), [data-scheme="default"]) {
+    --health: #ff2d55; --projects: #af52de; --work: #a2845e; --notes: #5856d6;
+}
+:is(:root, .scheme-preview).dark:is(:not([data-scheme]), [data-scheme="default"]) {
+    --health: #ff375f; --projects: #bf5af2; --work: #ac8e68; --notes: #7d7aff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+@layer base {
+  html, body { -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+  /* iOS: no font inflation in landscape, no double-tap zoom delay. */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+  body { min-height: 100dvh; }
+  /* Chrome isn't text, as in a native app: nothing selects or calls out (iOS) but content, which opts in here or with
+     select-text (an error, a message, a diff). [data-chrome] is chrome again inside content (a note's views). */
+  html, :where([data-chrome]) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  :where(.cm-editor, .note-prose, .genui-block, pre, code, samp) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  /* What's pressed is never text, whatever is in it; a field always is. */
+  :where(button, summary, label, [role=button], [role=tab], [role=option], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=switch], [role=checkbox], [role=radio], .cm-gutters), :where(button, summary, label, [role=button], [role=tab], [role=option], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=switch], [role=checkbox], [role=radio], .cm-gutters) * {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  :where(input, textarea, [contenteditable]:not([contenteditable=false])) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  /* iOS: holding one of the app's own links (a file's row: #file/...) is a right-click (ContextMenu.tsx, watchHolds),
+     not the system's link preview. Web links keep theirs. */
+  a[href^="#"] { -webkit-touch-callout: none; }
+  /* A drag (core/drag.ts, a Resizer, any captured mouse or pen) or a finger held for a menu (ContextMenu.tsx):
+     nothing anywhere selects, extends a selection or calls out till it's let go. */
+  html:is([data-dragging], [data-held], [data-captured]) *, body[data-resizing] * {
+    -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important;
+  }
+  /* Dragging a Resizer: widths follow the pointer at once, and the cursor stays col-resize everywhere. */
+  body[data-resizing], body[data-resizing] * { cursor: col-resize !important; }
+  body[data-resizing="row"], body[data-resizing="row"] * { cursor: row-resize !important; }
+  /* (a floating pane moved by its bar, or resized by an edge or corner: Workspace.tsx) */
+  body[data-resizing="move"], body[data-resizing="move"] * { cursor: grabbing !important; }
+  body[data-resizing="ns"], body[data-resizing="ns"] * { cursor: ns-resize !important; }
+  body[data-resizing="ew"], body[data-resizing="ew"] * { cursor: ew-resize !important; }
+  body[data-resizing="nwse"], body[data-resizing="nwse"] * { cursor: nwse-resize !important; }
+  body[data-resizing="nesw"], body[data-resizing="nesw"] * { cursor: nesw-resize !important; }
+  body[data-resizing] * { transition: none !important; }
+  /* Loading (main.tsx, App.tsx): what the vault's state moves goes there at once, not with the transitions clicks get. */
+  body[data-arriving] * { transition: none !important; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  /* The ring settles onto what has the keyboard from a little out, as a Mac's does (not a list's rows: theirs is the
+     row's own light, and arrowing down a list would ripple). Anything with its own animation keeps it (this is base). */
+  :focus-visible:not([data-keyrow]) { animation: focus-ring var(--motion) var(--ease-out); }
+  @keyframes focus-ring { from { outline-offset: 6px; outline-color: transparent; } }
+  /* A row of a keyboard list with the keyboard (core/keylist.ts): highlighted like a hovered row, ringed inside in the
+     ring's colour, which every scheme keeps at 3:1 or more on its sidebar, page and cards. */
+  [data-keyrow]:focus-visible { outline: 1.5px solid var(--ring); outline-offset: -1.5px; border-radius: 5px; background-color: color-mix(in srgb, var(--foreground) 6%, transparent); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  html[data-animation="off"] *, html[data-animation="off"] *::before, html[data-animation="off"] *::after { animation: none !important; transition: none !important; }
+}
+
+/* A label too long for its place fades out at its end, as Rex's and browsers' tabs do, instead of an ellipsis. */
+/* `--fade-reserve`: room kept clear at its end (what's drawn over it on hover: SidebarRow's buttons), it fading before. */
+@property --fade-reserve { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@utility fade-end {
+  overflow: hidden; white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem - var(--fade-reserve)), transparent calc(100% - var(--fade-reserve)));
+}
+@utility glass {
+  background: var(--card);
+  box-shadow: var(--glass-shadow);
+}
+@utility glass-strong {
+  background: color-mix(in srgb, var(--popover) 80%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(200%);
+  backdrop-filter: blur(30px) saturate(200%);
+  box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 0 0 1px var(--border), var(--glass-shadow);
+}
+/* A colour token as text, at a lightness that reads (--ink-l): `text-ink-(--red)`, as lib/ink.ts' `ink()` for a style. */
+@utility text-ink-* {
+  color: oklch(from --value([*]) var(--ink-l) c h);
+}
+/* Over a Browser page (the window raised over it, plugins/core/web-viewer/layers.ts) nothing blurs it: solid there. */
+html[data-over-pages] .glass-strong { background: linear-gradient(var(--popover), var(--popover)) var(--background); }
+/* Icons: strokes must be an opaque colour (overlapping paths of a translucent stroke stack up and look patchy). For a
+   fainter icon, use a solid mix (.text-tertiary) or put opacity on the whole icon, which composites it once. */
+.text-tertiary { color: color-mix(in srgb, var(--muted-foreground) 55%, var(--card)); }
+/* The system's Increase contrast: quieter text and hairlines drawn nearer the text colour, in every scheme (!important:
+   above the schemes' own tokens; from foreground and background, as a property can't mix itself). */
+@media (prefers-contrast: more) {
+  :root, .scheme-preview {
+    /* (text near black on a light background, near white on a dark one, in the background's hue) */
+    --foreground: oklch(from var(--background) clamp(0.16, (0.6 - l) * 1000, 0.97) calc(c * 0.6) h) !important;
+    --muted-foreground: color-mix(in oklab, var(--foreground) 82%, var(--background)) !important;
+    --border: color-mix(in oklab, var(--foreground) 45%, var(--background)) !important;
+  }
+  .text-tertiary { color: var(--muted-foreground); }
+}
+/* Forced colours (Windows' contrast themes) drop box-shadows, which draw the focus rings: an outline in the system's. */
+@media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight !important; outline-offset: 1px; } }
+/* Text on a solid named colour (`--tint`: a tab group's chip, a swatch's check): white, or near black on a light one,
+   by its lightness, so every scheme's colours stay readable. */
+.on-tint { color: #fff; color: oklch(from var(--tint) clamp(0.22, (0.72 - l) * 1000, 1) 0 0); }
+/* The detail sheet on phones: the whole screen (vh fallback for browsers without dvh). */
+:where([data-phone]) .sheet-h { height: 100vh; height: 100dvh; max-height: none; }
+/* Phones: the bar floats above the screen's foot (components/PhoneBar.tsx); --phone-bar is how high its top is. What sits
+   above it (the page's end, a toast, the bar's menu) keeps clear of it with this. */
+:root { --phone-bar-gap: max(calc(env(safe-area-inset-bottom) - 0.75rem), 0.5rem); --phone-bar: calc(var(--phone-bar-gap) + 3rem);
+  --mini-player: 0px; --corner-cards: 0px; --trial-bar: 0px; --page-foot: calc(var(--phone-bar) + var(--mini-player) + var(--trial-bar)); }
+/* A bundle being tried (components/BundleTrial.tsx): its bar's height and a gap, which toasts sit above. */
+:root[data-trying] { --trial-bar: 44px; }
+:root[data-trying][data-phone] { --trial-bar: 62px; }
+/* The on-screen keyboard up (core/sight.ts: markKeyboard): the bar steps down out of the way, and toasts sit above the keys over
+   the keyboard instead of over the bar. */
+:root { --toast-floor: calc(var(--page-foot) + 0.75rem); --keyboard-cover: 0px; --key-bar: 0px; }
+:root[data-keyboard] { --toast-floor: calc(var(--keyboard-cover) + 0.5rem); }
+:root[data-keyboard] [data-phone-bar] { transform: translateY(100%); opacity: 0; visibility: hidden; pointer-events: none; }
+[data-phone-bar] { transition: transform var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out); }
+/* Scrolling down a page puts the header and the bar away (core/barhide.ts), as iOS apps do: the header keeps the status
+   bar's strip, the bar drops below the screen. A scroll up, a tap, the page's top or end, or another place brings them
+   back; only the user's own scrolling counts, never a place restored. With the keyboard up iOS pans the screen to the
+   caret, taking fixed things with it: the header follows what's seen (core/sight.ts: markKeyboard). */
+[data-phone-header] { transition: transform 280ms cubic-bezier(.32, .72, 0, 1); }
+/* A navigation bar as iOS draws one (PhoneHeader.tsx, the tab list's TabsHeader): clear at its page's top, its material
+   and a hairline once the page scrolls under it (data-scrolled: the window's, core/barhide.ts; a sheet's, DetailSheet.tsx). */
+[data-phone-header], [data-tabs-header] { box-shadow: 0 .5px 0 var(--border); }
+:root:not([data-scrolled]) [data-phone-header], dialog:not([data-scrolled]) [data-tabs-header] { background: none; box-shadow: none; backdrop-filter: none; }
+[data-bars-away]:not([data-keyboard]) [data-phone-header] { transform: translateY(-2.75rem); }
+[data-bars-away]:not([data-keyboard]) [data-phone-header] > div { opacity: 0; pointer-events: none; }
+[data-bars-away] [data-phone-bar] { transform: translateY(calc(100% + 2.5rem)); opacity: 0; pointer-events: none; transition-duration: 280ms; }
+@media (prefers-reduced-motion: reduce) { [data-phone-header], [data-phone-bar] { transition-property: opacity; } }
+.pb-safe { padding-bottom: calc(var(--page-foot) + 1.5rem); }
+.pb-safe:where(:not([data-phone] *)) { padding-bottom: calc(3rem + var(--mini-player) + var(--trial-bar)); }
+/* Phones: the screen between the header (3.5rem) and the bar and what sits on it, for what fills it (a canvas, a terminal);
+   it takes back .pb-safe's end room, so the page never scrolls under it, and reaches past the page's reading width to
+   the screen's sides (a turned phone's page is narrower than the screen). */
+.phone-fill { height: calc(100dvh - env(safe-area-inset-top) - 3.5rem - var(--page-foot)); margin: 0 calc(50% - 50vw + env(safe-area-inset-left) / 2 + env(safe-area-inset-right) / 2) -1.5rem; }
+
+/* Metrics use SF Pro Rounded, like Health and Fitness. */
+.num { font-family: var(--font-rounded); font-variant-numeric: tabular-nums; }
+/* Key symbols: macOS's system font has no ↵, and finding a font that does stalled the palette's first open by ~100 ms;
+   Lucida Grande is the one it found, named so it isn't looked for. */
+.font-keys { font-family: var(--font-sans), 'Lucida Grande'; }
+/* 0.5px hairlines on retina, like UIKit separators. Drawn as a background, not a border: a rounded row's border bends
+   at its corners, while this stays a straight line (its ends inside the corners clipped, like an inset separator). */
+/* (a tile under a device pixel draws or not by where the row falls, so rows of fractional height lost every other line:
+   the tile is a whole pixel, half of it the line where pixels are halves) */
+.hairline > :where(:not(:first-child)) {
+  background-image: linear-gradient(var(--border), var(--border));
+  background-size: 100% 1px; background-position: top; background-repeat: no-repeat;
+}
+@media (min-resolution: 2dppx) {
+  .hairline > :where(:not(:first-child)) { background-image: linear-gradient(var(--border) 50%, transparent 50%); }
+}
+/* A list drawn as two in a row (Settings > Pages: the pinned ones, which drag, then the rest) reads as one list: the
+   line between them is drawn too, so every row is separated whatever state it's in. */
+.hairline:not(:empty) + .hairline:not(:empty) { border-top: 0.5px solid var(--border); }
+
+/* Note reader (Notes tab): Markdown at iOS body size, Apple-style headings, hairline rules. */
+.note-prose { font-size: 17px; line-height: 26px; overflow-wrap: anywhere; }
+.note-prose > :first-child { margin-top: 0; }
+.note-prose :where(p, ul, ol, pre, blockquote, table, .md-table-view) { margin: 0 0 14px; }
+.note-prose .h1 { font-size: 24px; line-height: 30px; font-weight: 700; margin: 28px 0 10px; }
+.note-prose .h2 { font-size: 20px; line-height: 25px; font-weight: 700; margin: 28px 0 8px; }
+.note-prose .h3 { font-size: 17px; line-height: 22px; font-weight: 600; margin: 22px 0 6px; }
+.note-prose :where(.h4, .h5, .h6) { font-size: 15px; line-height: 20px; font-weight: 600; color: var(--muted-foreground); margin: 18px 0 4px; }
+.note-prose strong { font-weight: 600; }
+.note-prose :where(ul, ol) { padding-left: 1.35em; }
+.note-prose ul { list-style: disc; }
+.note-prose ol { list-style: decimal; }
+.note-prose ul ul { list-style: circle; }
+.note-prose li { padding-left: 0.15em; }
+.note-prose li + li { margin-top: 6px; }
+.note-prose li > :where(ul, ol) { margin: 6px 0 0; }
+.note-prose li > p { margin: 0; }
+.note-prose li::marker { color: var(--muted-foreground); }
+.note-prose ol > li::marker { font-variant-numeric: tabular-nums; }
+:is(.note-prose, .vau-editor .cm-block) li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.35em; }
+/* Checklists: rounded squares, filled with the Notes tint when done; the same in a note, a sheet, a dashboard and the
+   editor (.cm-task). */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; margin: 0 0.5em 0 0;
+  vertical-align: -4px; border-radius: 5px; border: 1.5px solid color-mix(in srgb, var(--muted-foreground) 70%, transparent); cursor: pointer; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) input[type="checkbox"]:disabled { cursor: default; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) input[type="checkbox"]:checked { border-color: var(--notes); background: var(--notes) center / 12px no-repeat
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.note-prose a { color: oklch(from var(--primary) var(--ink-l) c h); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); }
+.note-prose a:hover { text-decoration-color: currentColor; }
+/* Taller hit area for links inside running text (inline padding doesn't change the line height). */
+.note-prose a { padding-block: 5px; }
+.note-prose .wikilink { color: oklch(from var(--notes) var(--ink-l) c h); font-weight: 500; }
+:is(.note-prose, .dash-prose) .wikilink.person { color: oklch(from var(--people) var(--ink-l) c h); }
+:is(.note-prose, .dash-prose) .wikilink.book { color: oklch(from var(--learning) var(--ink-l) c h); }
+:is(.note-prose, .dash-prose) .wikilink.colleague { color: oklch(from var(--work) var(--ink-l) c h); }
+.note-prose .wikilink.missing { color: var(--muted-foreground); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; }
+.note-prose .wikilink { cursor: pointer; }
+/* In a sheet (a book's or a log's notes): the sheet's body size, headings a step smaller. */
+.note-prose.compact { font-size: 15px; line-height: 21px; }
+.note-prose.compact :where(p, ul, ol, pre, blockquote, table, .md-table-view) { margin-bottom: 10px; }
+.note-prose.compact > :last-child { margin-bottom: 0; }
+.note-prose.compact .h1 { font-size: 20px; line-height: 25px; margin: 20px 0 8px; }
+.note-prose.compact .h2 { font-size: 17px; line-height: 22px; margin: 18px 0 6px; }
+.note-prose.compact .h3 { font-size: 15px; line-height: 20px; margin: 16px 0 4px; }
+.note-prose.compact li + li { margin-top: 4px; }
+/* Inside a line of text (a timeline entry): only the marks, the text keeps its size. */
+.note-prose.inline { font-size: inherit; line-height: inherit; }
+.note-prose.inline a { padding-block: 0; }
+.note-prose code { font-family: var(--font-code); font-size: 0.85em; background: var(--muted);
+  border-radius: 5px; padding: 0.1em 0.35em; }
+.note-prose pre { background: color-mix(in srgb, var(--foreground) 5%, transparent); border-radius: 10px; padding: 12px 14px;
+  white-space: pre-wrap; font-size: 14px; line-height: 20px; }
+.note-prose pre code { background: none; padding: 0; font-size: inherit; }
+.note-prose blockquote { border-left: 3px solid color-mix(in srgb, var(--notes) 55%, transparent); padding-left: 14px;
+  color: color-mix(in srgb, var(--foreground) 80%, transparent); }
+.note-prose hr { border: 0; border-top: 0.5px solid var(--border); margin: 24px 0; }
+/* Tables: a grid of ruled cells with a tinted header row, the same in a note, a sheet, a dashboard and the editor. As
+   wide as their text up to the column, then they scroll sideways. */
+:is(.note-prose, .dash-prose, .vau-editor :is(.cm-block-table, .cm-block-callout, .cm-block-details, .cm-block-html)) table { display: block; width: max-content; max-width: 100%; overflow-x: auto;
+  overscroll-behavior-x: contain; border-collapse: collapse; font-size: 0.9375em; line-height: 1.45; }
+:is(.note-prose, .dash-prose, .vau-editor :is(.cm-block-table, .cm-block-callout, .cm-block-details, .cm-block-html)) :where(th, td) { text-align: left; vertical-align: top; padding: 5px 11px;
+  border: 1px solid var(--border); min-width: 3em; }
+:is(.note-prose, .dash-prose, .vau-editor :is(.cm-block-table, .cm-block-callout, .cm-block-details, .cm-block-html)) th { font-weight: 600; color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 4.5%, transparent); }
+.note-prose img { max-width: 100%; border-radius: 10px; }
+/* an https frame from raw HTML (a video): fits the column */
+:is(.note-prose, .vau-editor) iframe { max-width: 100%; border: 0; border-radius: 10px; }
+/* `![[Note]]` in running text: drawn in its place, as on a line of its own */
+.note-prose .md-embed { display: block; margin: 0.5em 0; }
+/* Filter chips: on phones one sideways-scrolling row, no scrollbar (faded at its edges: edge-fade-x); wrapped from md up. */
+:where([data-phone]) .chip-row { scrollbar-width: none; }
+:where([data-phone]) .chip-row::-webkit-scrollbar { display: none; }
+:where([data-phone]) .chip-row::after { content: ""; flex: 0 0 8px; }
+.chip-row:where(:not([data-phone] *)) { flex-wrap: wrap; overflow: visible; }
+
+/* Scrollbars are the system's where they overlay the page (a Mac's, phones'). Where they'd always show (platform.ts),
+   ours show only while scrolling, as a Mac's do; `[scrollbar-width:none]` still hides one (Chromium then skips these). */
+:root { color-scheme: light; --scrollbar: rgb(60 60 67 / 0.28); --scrollbar-hover: rgb(60 60 67 / 0.45); }
+.dark { color-scheme: dark; --scrollbar: rgb(235 235 245 / 0.22); --scrollbar-hover: rgb(235 235 245 / 0.38); }
+html[data-classic-scrollbars] ::-webkit-scrollbar { width: 12px; height: 12px; background: transparent; }
+html[data-classic-scrollbars] ::-webkit-scrollbar-thumb {
+  background: transparent padding-box; border: 3px solid transparent; border-radius: 12px; min-height: 32px; min-width: 32px;
+}
+html[data-classic-scrollbars] [data-scrolling]::-webkit-scrollbar-thumb { background-color: var(--scrollbar); }
+/* under the pointer it widens and darkens, as a Mac's does */
+html[data-classic-scrollbars] ::-webkit-scrollbar-thumb:hover, html[data-classic-scrollbars] ::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-hover); border-width: 2px;
+}
+html[data-classic-scrollbars] ::-webkit-scrollbar-corner { background: transparent; }
+/* A scroller that fades out at an edge while there's more past it: `edge-fade-x` (strips of chips, keys, tabs),
+   `edge-fade-y`, and `edge-fade-b` (the bottom only, under sticky headings). Driven by its own scroll, no JS: one that
+   doesn't overflow has no timeline, so no fade. */
+@property --fade-start { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fade-end { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes edge-fade-start { from { --fade-start: 0px; } to { --fade-start: var(--edge-fade-s); } }
+@keyframes edge-fade-end { from { --fade-end: var(--edge-fade-e); } to { --fade-end: 0px; } }
+@utility edge-fade-x {
+  --edge-fade-s: 28px; --edge-fade-e: 28px;
+  animation: edge-fade-start linear both, edge-fade-end linear both;
+  animation-timeline: scroll(self inline), scroll(self inline);
+  animation-range: 0 28px, calc(100% - 28px) 100%;
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+}
+@utility edge-fade-y {
+  --edge-fade-s: 24px; --edge-fade-e: 24px;
+  animation: edge-fade-start linear both, edge-fade-end linear both;
+  animation-timeline: scroll(self block), scroll(self block);
+  animation-range: 0 24px, calc(100% - 24px) 100%;
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+}
+@utility edge-fade-b {
+  --edge-fade-s: 0px; --edge-fade-e: 24px;
+  animation: edge-fade-end linear both;
+  animation-timeline: scroll(self block);
+  animation-range: calc(100% - 24px) 100%;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-end)), transparent);
+}
+
+/* Every scroller is a stacking context. Otherwise what's positioned inside it (a sticky heading, a z-indexed bar)
+   belongs to an outer one, and iOS WebKit draws it in layers above the scroller, over its scroll indicator, which
+   shows chopped. A scroller made outside these selectors gets `isolate` (web/qa/scrollers.mjs finds one that doesn't). */
+:where([class*="overflow-auto"], [class*="overflow-y-auto"], [class*="overflow-x-auto"], [class*="overflow-scroll"],
+  [class*="overflow-y-scroll"], [class*="overflow-x-scroll"], .note-prose table, .cm-block-table table, .dash-prose pre,
+  .dash-prose table, .math-display, .mermaid-diagram, .md-mermaid) { isolation: isolate; }
+
+/* An even dashed underline. The browser's `text-decoration-style: dashed` restarts its pattern at each word, so the
+   dash under a space comes out longer; this draws one continuous pattern under the whole run instead. */
+.dashed-under {
+  padding-bottom: 2px;
+  background: repeating-linear-gradient(to right, currentColor 0 3px, transparent 3px 6px) left bottom / 100% 1px no-repeat;
+}
+
+/* The search field has no heading: under another panel it takes a heading's room above it (2 units), so the panels
+   keep one rhythm. First in the sidebar, it sits as far under the header's icons as it's in from the sidebar's edge
+   (2 units): the header's row is the tab bar's height, which left it 3 units under them. */
+[data-sidebar-body] > [data-panel]:not(:first-child) [data-sidebar-search] { margin-top: calc(var(--spacing) * 2); }
+[data-sidebar-body]:has(> [data-panel]:first-child [data-sidebar-search]) { margin-top: calc(var(--spacing) * -1); }
+/* Each panel in its own box (`sidebarScroll: panels`, Sidebar.tsx): the room above its heading is outside the box that
+   scrolls, so the heading sits at the box's top from the start and stays there, sticky, while the panel scrolls under it
+   (inside the box, its margin would scroll away first and the heading jump up by it). */
+[data-scroll=panels] > [data-panel]:has([data-panel-handle]:not([data-sidebar-search])) { padding-top: calc(var(--spacing) * 2); }
+/* A sidebar's scrollers keep their scrollbar's room whether one shows or not, so nothing reflows as it comes and goes (a
+   drag making a panel taller took a column off Pinned's tiles); the room comes out of the sidebar's padding first. */
+[data-scroll] { --bar-room: min(var(--scrollbar-room, 0px), calc(var(--spacing) * 2 - 0.5px)); }
+[data-panel-scroll][class*="overflow-y-auto"], [data-scroll=sidebar] { scrollbar-gutter: stable; margin-right: calc(-1 * var(--bar-room)); }
+/* Each panel in its own box: the body reaches into that padding too (its own padding keeps the panels in place), or it
+   cuts off the right of their scrollbars. */
+[data-sidebar-body][data-scroll=panels] { margin-right: calc(-1 * var(--bar-room)); padding-right: var(--bar-room); }
+/* The sidebar itself scrolls only when its panels, all at their least, don't fit (panelLayout.ts marks it
+   `data-overflow`); otherwise each panel scrolls in its own box and a stray pixel never brings a second scrollbar. */
+[data-scroll=panels]:not([data-overflow]) { overflow-y: hidden; }
+[data-scroll=panels] > [data-panel] [data-panel-handle]:not([data-sidebar-search]) {
+  margin-top: 0;
+  /* A hairline under it once its panel has scrolled (rows are passing under it), none at the top. */
+  animation: panel-scrolled linear both; animation-timeline: scroll(nearest); animation-range: 0 6px;
+}
+@keyframes panel-scrolled { from { box-shadow: 0 0.5px 0 transparent; } to { box-shadow: 0 0.5px 0 var(--border); } }
+
+/* A sidebar panel folded to its heading (components/Sidebar.tsx, `collapsed` in sidebars.json): everything it draws goes but the
+   heading and what holds it, whether the sidebar drew the heading or the panel did (Files, Terminals, Links). A panel
+   with no heading (Search) can't fold. */
+[data-panel][data-collapsed]:has([data-panel-handle]) :not([data-panel-handle], [data-panel-handle] *, :has([data-panel-handle])) {
+  display: none;
+}
+
+/* While something is dragged (core/drag.ts), the pointer is a closed hand everywhere it goes. */
+html[data-dragging], html[data-dragging] * { cursor: grabbing !important; }
+/* ...and toasts let it through: what's under one (a pane's edge, a tab bar) is still a place to drop (core/drag.ts finds
+   targets with elementFromPoint). */
+html[data-dragging] [data-sonner-toaster], html[data-dragging] [data-sonner-toaster] * { pointer-events: none !important; }
+/* A list making way for what's dragged over it (core/slide.ts); after the drop it's already where it goes, so no slide. */
+html[data-dragging] [data-slide] { transition: transform var(--motion) var(--ease-out), opacity var(--motion-fast) var(--ease-out); }
+/* A tab bar's tabs spring as they make way (its row's scrollbar is hidden: elsewhere, going a little past their place
+   would show a list's scrollbar for a moment). */
+html[data-dragging] [data-tab-bar] [data-slide] { transition-duration: var(--motion-spring), var(--motion-fast); transition-timing-function: var(--spring), var(--ease-out); }
+/* The Tabs panel's rows ease into or out of a tab group's indent as what's dragged joins or leaves it. */
+html[data-dragging] [data-open-tabs] [data-open-tab] { transition: background-color var(--motion-fast) var(--ease-out), margin-left var(--motion-fast) var(--ease-out); }
+/* Tab groups (Tabs.tsx, the Tabs panel). The tab bar's row of tabs puts their top on a whole pixel (centred in the bar
+   they'd sit on a fraction, and their group's line, under them, would blur over three). */
+/* (the bar's row: the phone's tab list names its cards' cells data-tab-row too) */
+[data-tab-bar] > [data-tab-row] { padding-top: calc(var(--spacing) * 1.5); padding-top: round(nearest, calc(var(--spacing) * 1.5), 1px); }
+[data-tab-bar] > [data-tab-row] > [data-slide=incoming] { top: calc(var(--spacing) * 1.5); top: round(nearest, calc(var(--spacing) * 1.5), 1px); }
+/* A group's line (core/tabline.ts): one element, from its chip past its last tab as they're drawn. In the bar, 2px on a
+   whole pixel under the tabs; in the Tabs panel, down their left from under the chip, ending rounded. */
+[data-group-line] { position: absolute; pointer-events: none; transition: background-color var(--motion) var(--ease-out); }
+[data-group-line][data-axis=x] {
+  height: 2px; border-radius: 1px;
+  top: calc(var(--spacing) * 8.5 + 1px);
+  top: calc(round(nearest, calc(var(--spacing) * 1.5), 1px) + round(up, calc(var(--spacing) * 7 + 1px), 1px));
+}
+[data-group-line][data-axis=y] { left: 9px; width: 2px; border-radius: 0 0 9999px 9999px; }
+/* Its chip answers the pointer and the keyboard as a browser's does: a halo of its colour on hover, the ring on focus. */
+html:not([data-dragging]) [data-group-chip]:hover > [data-group-name] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--tint) 35%, transparent); }
+[data-group-chip]:focus-visible { outline: none; }
+[data-group-chip]:focus-visible > [data-group-name] { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* Folded, its chip shows its count (a square without a name grows into a pill around it) and its line goes. All at
+   once as a click folds it, moving while its tabs do (`data-group-moving`, core/tabfold.ts); an agent's fold just shows. */
+[data-group-name][data-bare] { height: calc(var(--spacing) * 3.5); min-width: calc(var(--spacing) * 3.5); border-radius: 4px; }
+[data-group-count] { display: grid; grid-template-columns: 0fr; opacity: 0; }
+[data-group-count] > span { min-width: 0; overflow: hidden; }
+:is([data-group-chip], [data-group-row])[aria-expanded=false] :is([data-group-name][data-bare]) { height: calc(var(--spacing) * 5); padding-inline: calc(var(--spacing) * 1.5); border-radius: var(--radius-control); }
+:is([data-group-chip], [data-group-row])[aria-expanded=false] [data-group-count] { grid-template-columns: 1fr; opacity: 1; }
+[data-group-line][data-folded] { opacity: 0; }
+/* A folded group something dragged would go into: its chip lifts in a ring of its colour, its count already counting it
+   (the new number pops in), and its row in the Tabs panel takes a wash of its colour. */
+[data-group-name][data-target] { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--tint); scale: 1.06; transition-timing-function: var(--spring); }
+[data-group-name][data-target] [data-group-count] span span { animation: count-pop var(--motion-spring) var(--spring) both; }
+@keyframes count-pop { from { translate: 0 -40%; opacity: 0; } }
+[data-group-row][data-target] { background: color-mix(in srgb, var(--line) 16%, transparent); }
+[data-group-row][data-target] [data-group-name] { box-shadow: none; }
+/* A tab group in hand: its card on another, a stack of its tabs. */
+[data-drag-card][data-stacked] { box-shadow: 0 0 0 0.5px var(--border), 3px 3px 0 -0.5px var(--card), 3px 3px 0 0 var(--border), 0 10px 15px -3px rgb(0 0 0 / 0.1); }
+[data-group-moving] :is([data-group-name][data-bare], [data-group-count]) {
+  transition: height var(--motion) var(--ease-out), padding var(--motion) var(--ease-out), border-radius var(--motion) var(--ease-out),
+    grid-template-columns var(--motion) var(--ease-out), opacity var(--motion) var(--ease-out), background-color var(--motion) var(--ease-out);
+}
+[data-group-line][data-moving] { transition: background-color var(--motion) var(--ease-out), opacity var(--motion) var(--ease-out); }
+/* The left sidebar switching to a panel alone (its mode) or back: the new body fades in, as Rex's activity mode does. */
+[data-mode-fade] { animation: mode-fade var(--motion) var(--ease-out) both; }
+@keyframes mode-fade { from { opacity: 0; } }
+/* A pane dragged by its handle recedes where it was while its card is in hand (Tabs' DragGhost); let go, it's back at
+   once (its card lands on it, or it grows from the card into its new place: core/panemotion.ts). */
+section[data-lifted] { opacity: 0.45; scale: 0.985; transition: opacity var(--motion) var(--ease-out), scale var(--motion-spring) var(--spring); }
+/* What's dragged changes shape with the spring: a label or a tab becomes a small page over a pane's edge. */
+[data-drag-card] { interpolate-size: allow-keywords; transition: width var(--motion-spring) var(--spring), height var(--motion-spring) var(--spring), border-radius var(--motion) var(--ease-out), scale var(--motion) var(--ease-out); }
+/* A pane's drop zone (Workspace's DropZone) springs from the middle to a half and between halves. Out of flow and
+   contained, so moving its edges lays out nothing else. */
+.drop-zone {
+  contain: strict; transition: top var(--motion-spring) var(--spring), right var(--motion-spring) var(--spring), bottom var(--motion-spring) var(--spring), left var(--motion-spring) var(--spring), opacity var(--motion-fast) var(--ease-out);
+  @starting-style { opacity: 0; }
+}
+/* Where what comes from elsewhere would land (its INCOMING), the same soft gap in every list. */
+@layer components {
+  [data-slide="incoming"] { pointer-events: none; border-radius: var(--radius-control); background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+}
+
+/* An open sidebar's content is laid out at its open width whatever the sidebar's width while it opens: core/room.ts. */
+
+/* The icon rail (SidebarPanels): a thin line between its groups of icons (the header's items, then each panel's), none
+   around a group that draws nothing there (a panel with nothing to show, a header item drawing nothing: Workspaces before
+   there's one, its wrapper left empty). */
+aside[data-collapsed] [data-rail-section]:has(> :not([data-header-item]:empty)) ~ [data-rail-section]:has(> :not([data-header-item]:empty))::before {
+  content: ""; display: block; flex-shrink: 0; height: 0.5px; margin: 6px 3px; background: var(--border);
+}
+
+/* Plugins: "needs People" pulses the People row once, so you can find it. */
+@keyframes reveal-flash {
+  0% { background-color: transparent; }
+  15% { background-color: color-mix(in srgb, var(--primary) 22%, transparent); }
+  100% { background-color: transparent; }
+}
+.reveal-flash { animation: reveal-flash 1.1s ease-out; }
+
+/* Something on its way (kit's Loading, Bar): its room is taken at once, but it's drawn only after a moment, so a fast
+   load just appears. A skeleton bar stands for a line of text, with a light passing over it. */
+@keyframes loading-in { from { opacity: 0; } }
+.loading-in { animation: loading-in 150ms ease-out 200ms both; }
+/* An agent at work: a few slow breaths as it starts, then still. Endless, it made macOS redraw the window's blur 60
+   times a second for as long as any agent ran (a third of WindowServer's CPU). */
+@keyframes breathe { 50% { opacity: 0.3; } }
+.breathe { animation: breathe 2.2s ease-in-out 3; }
+/* A status dot (Badged) pops in; one that asks for the user rings once as it comes. */
+@keyframes dot-in { from { transform: scale(0); } }
+@keyframes dot-ping { to { transform: scale(2.6); opacity: 0; } }
+.dot-in { animation: dot-in var(--motion-fast) var(--ease-out); }
+.dot-in.breathe { animation: dot-in var(--motion-fast) var(--ease-out), breathe 2.2s ease-in-out 3; }
+.dot-ping::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: inherit; animation: dot-ping 1s ease-out; }
+@media (prefers-reduced-motion: reduce) { .dot-in, .dot-ping::after { animation: none; } }
+/* Set up Vaultite's hint of what to do in System Settings: a pointer comes to the app's switch, clicks, and it turns on. */
+@keyframes setup-hint-pointer {
+  0%, 10% { transform: translate(-90px, 6px); opacity: 0; }
+  25% { opacity: 1; }
+  45%, 50% { transform: translate(0, 0) scale(1); }
+  54% { transform: translate(0, 0) scale(0.82); }
+  58%, 85% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(0, 0); opacity: 0; }
+}
+@keyframes setup-hint-switch { 0%, 54% { background: color-mix(in srgb, var(--foreground) 16%, transparent); } 60%, 100% { background: var(--green); } }
+@keyframes setup-hint-knob { 0%, 54% { transform: translateX(0); } 60%, 100% { transform: translateX(12px); } }
+.setup-hint-pointer { animation: setup-hint-pointer 3s ease-in-out infinite; }
+.setup-hint-switch { animation: setup-hint-switch 3s ease-in-out infinite; }
+.setup-hint-knob { animation: setup-hint-knob 3s cubic-bezier(.3, .7, .3, 1) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .setup-hint-pointer { animation: none; }
+  .setup-hint-switch { animation: none; background: var(--green); }
+  .setup-hint-knob { animation: none; transform: translateX(12px); }
+}
+/* A row taken off its list (core/leaving.ts) folds away before it goes: its height to nothing, fading. */
+@keyframes leave { to { height: 0; min-height: 0; padding-block: 0; margin-block: 0; border-width: 0; opacity: 0; } }
+[data-leaving] { interpolate-size: allow-keywords; overflow: hidden; pointer-events: none; animation: leave 180ms cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes skeleton { from { background-position: 100% 0; } to { background-position: 0 0; } }
+/* (a component layer: a utility on it wins, rounded-full) */
+@layer components {
+  .skeleton {
+    border-radius: 4px;
+    background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+    background-image: linear-gradient(90deg, transparent 40%, color-mix(in srgb, var(--foreground) 6%, transparent) 50%, transparent 60%);
+    background-size: 300% 100%;
+    background-repeat: no-repeat;
+    animation: skeleton 1.6s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; background-image: none; }
+  }
+}
+
+/* Rows selected together (core/select.ts): the accent, over a row's own hover and open-file shades. */
+[data-selected] { background-color: color-mix(in srgb, var(--primary) 16%, transparent) !important; }
+/* The window out of focus (desktop: electron/preload.cjs; a browser: core/windowfocus.ts): what's selected goes grey, as
+   a Mac greys its selections, so the accent says where the keyboard is. */
+html[data-window-inactive] [data-selected] { background-color: color-mix(in srgb, var(--foreground) 9%, transparent) !important; }
+html[data-window-inactive] .vau-editor .cm-selectionBackground, html[data-window-inactive] .vau-editor .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground,
+html[data-window-inactive] .vau-editor .cm-content ::selection {
+  background: color-mix(in srgb, var(--foreground) 13%, transparent); }
+/* A closed thing's picture as it fades (core/animation.ts' fadeAway): only its fade moves, not the animations it came in with. */
+[data-fading], [data-fading] * { animation: none !important; transition: none !important; }
+
+/* Hover tooltips (components/Tooltip.tsx): dark in both themes. */
+.tooltip, .tooltip-arrow { background: var(--foreground); color: var(--background); }
+.dark .tooltip, .dark .tooltip-arrow { background: color-mix(in srgb, var(--background) 88%, var(--foreground)); color: var(--foreground); }
+/* Only opacity fades: the position is an inline transform (centring), which a transform animation would override. */
+@keyframes tooltip-in { from { opacity: 0; } }
+/* A phone's tab card picked up (TabSwitcher's Lifted): it rises a little off the grid. */
+@keyframes tab-lift { from { transform: scale(1); } to { transform: scale(1.06); } }
+.tooltip { box-shadow: 0 4px 14px rgb(0 0 0 / 0.18); animation: tooltip-in 80ms ease-out; }
+
+/* Toasts (components/Toast.tsx, sonner): the app's card, border and text, so every scheme recolours them. Sonner's own
+   CSS is unlayered, so these win by specificity, not by layer. */
+.vau-toaster[data-sonner-toaster][data-sonner-theme] {
+  --normal-bg: var(--card); --normal-text: var(--foreground); --normal-border: var(--border);
+  --border-radius: 8px; --width: 340px; font-family: var(--font-sans);
+  /* under what the user opened (a menu: 60, a drag: 70, a tooltip: 100), not sonner's top of everything */
+  z-index: 55;
+}
+[data-sonner-toaster] .vau-toast[data-styled=true] {
+  gap: 10px; padding: 9px 8px 9px 12px; min-height: 40px; font-size: 13px; line-height: 18px;
+  border-width: 0.5px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.06);
+}
+.dark [data-sonner-toaster] .vau-toast[data-styled=true] { box-shadow: 0 6px 20px rgb(0 0 0 / 0.4); }
+/* Sonner's own 400 ms ease, on the motion tokens (only durations and easing: a swipe's `transition: none` stays). */
+[data-sonner-toaster] .vau-toast[data-styled=true] {
+  transition-duration: var(--motion-spring), var(--motion-spring), var(--motion-spring), var(--motion-fast); transition-timing-function: var(--ease-out);
+}
+[data-sonner-toaster] .vau-toast[data-styled=true] > *, .vau-toaster[data-sonner-toaster] { transition-duration: var(--motion-spring); transition-timing-function: var(--ease-out); }
+/* At most 3 lines, so a long message (an agent's whole answer) can't fill the screen; buttons sit beside it, untouched. */
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-title] {
+  font-weight: 450; line-height: 18px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-content] { min-width: 0; }
+/* sonner grows a leaving toast's hit area to twice its height: what's under it gets the taps meant for it */
+[data-sonner-toaster] .vau-toast[data-removed=true] { pointer-events: none; }
+[data-sonner-toaster] .vau-toast[data-styled=true]:not(:has([data-button])) { padding-right: 12px; }
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-icon] { margin: 0; }
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-button] {
+  height: 24px; padding: 0 8px; border-radius: 5px; font-size: 13px; font-weight: 600;
+  background: transparent; color: var(--primary);
+}
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-button]:hover { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+[data-sonner-toaster] .vau-toast[data-styled=true] [data-button]:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 50%, transparent); }
+/* Phones: iOS text sizes, full width between the gutters. */
+:where([data-phone]) [data-sonner-toaster] .vau-toast[data-styled=true] { min-height: 48px; padding: 12px 10px 12px 16px; font-size: 15px; line-height: 20px; border-radius: 12px; }
+:where([data-phone]) [data-sonner-toaster] .vau-toast[data-styled=true] [data-title] { line-height: 20px; -webkit-line-clamp: 4; }
+:where([data-phone]) [data-sonner-toaster] .vau-toast[data-styled=true] [data-button] { height: 32px; padding: 0 10px; font-size: 15px; border-radius: 8px; }
+
+/* The editor (CodeMirror with live preview; web/src/editor). Body text at iOS body size, like the note reader was.
+   Heading lines keep their size and spacing whether their # shows or not, so moving the cursor doesn't move text. */
+.vau-editor .cm-editor { background: transparent; font-size: 17px; }
+.vau-editor .cm-editor.cm-focused { outline: none; }
+.vau-editor .cm-scroller { font-family: var(--font-text, var(--font-sans)); line-height: 1.53; overflow: visible; }
+.vau-editor .cm-content { padding: 0 0 96px; caret-color: var(--primary); }
+/* Wrapped text never grows wider than the editor: a wide block inside (an embedded table, a CSV) would otherwise widen
+   every line with it (a flex item's min-width is its content's), cutting off long lines and the block's own edge. The
+   block scrolls sideways inside instead. */
+.vau-editor .cm-content.cm-lineWrapping { min-width: 0; }
+/* Where an editor's panels (the find bar: plugins/core/find) stick while the file scrolls: under a pane's bar on a
+   computer (the find bar floats there, in the tab's overlay), under the header on a phone, at the top of a sheet. */
+[data-pane], [data-kept], [data-stacked], [data-tab-overlay] { --vau-panel-top: calc(var(--spacing) * 10); }
+/* A page of cards anchors its own scrolling (core/anchor.ts): the browser's is off inside it. */
+[data-anchored], [data-anchored] * { overflow-anchor: none; }
+:where([data-phone]) #main-scroll { --vau-panel-top: calc(env(safe-area-inset-top) + var(--spacing) * 11); }
+dialog { --vau-panel-top: 0px; }
+/* Bottom panels (Vim's command line) stick at the pane's foot: on a computer, above the status bar drawn over it. */
+[data-pane]:where(:not([data-phone] *)), [data-kept]:where(:not([data-phone] *)) { --vau-panel-bottom: calc(var(--spacing) * 7); }
+dialog { --vau-panel-bottom: 0px; }
+/* What the status bar leaves out while it doesn't fit (StatusBar.tsx, useFit). */
+[data-status-row] [data-fit-out] { display: none !important; }
+/* Its line where the ambient items meet the file's, only between two that show something. */
+[data-status-sep] { display: none; }
+:is([data-status-key]:not(:empty), [data-status-coming], [data-hold]):not([data-fit-out]) ~ [data-status-sep]:has(~ :is([data-status-key]:not(:empty), [data-status-coming], [data-hold]):not([data-fit-out])) { display: block; }
+/* Showing nothing, the bar is a faint corner of its height, its outline on hover: right-click brings items back. The
+   left corner is gone then, but while an item is dragged: a place to drop it. */
+[data-status-bar]:not(:has([data-status-items] > :is([data-status-key]:not(:empty), [data-status-coming], [data-hold], [data-slide]):not([data-fit-out]), [data-status-more]:not([data-fit-out]), [data-status-word])) {
+  background: transparent; border-color: transparent; box-shadow: none; min-width: calc(var(--spacing) * 10);
+  &:hover, &[data-drop] { border-color: var(--color-border); }
+  &:is([data-status-left], [data-status-pane]):not([data-dragging]) { display: none; }
+}
+/* A pane's word in the right corner, after its items: a line between, as between the corner's kinds. */
+[data-status-items]:has(> [data-status-key]:not(:empty):not([data-fit-out])) ~ [data-status-word] { border-left: 0.5px solid var(--color-border); border-radius: 0; margin-left: calc(var(--spacing) * 1); padding-left: calc(var(--spacing) * 2); }
+/* Its parts follow a divider dragged as it goes, not a spring behind it. */
+body[data-resizing] [data-status-bar] { transition: none; }
+.vau-editor .cm-editor .cm-panels-bottom { padding-bottom: var(--vau-panel-bottom, 0px); }
+/* What a find lights where it can't mark the text (a drawn table, a page: core/findText.ts), as its matches in text. */
+::highlight(vau-find), ::highlight(vau-preview) { background-color: color-mix(in srgb, var(--yellow) 32%, transparent); }
+::highlight(vau-find-current) { background-color: color-mix(in srgb, var(--orange) 50%, transparent); }
+/* Desktop: 16px text, line height 1.5; phones a point bigger (iOS body size). Headings are sized
+   relative to it (em), so they follow. */
+.vau-editor .cm-editor:where(:not([data-phone] *)) { font-size: 16px; }
+.vau-editor .cm-scroller:where(:not([data-phone] *)) { line-height: 1.5; }
+.note-prose:not(.compact, .inline):where(:not([data-phone] *)) { font-size: 16px; line-height: 24px; }
+/* The editor inside something else (NoteEditor, FileEditor: a canvas card): its box's text size, no room kept under it. */
+.note-editor .vau-editor .cm-editor { font-size: inherit; }
+.note-editor .vau-editor .cm-content { padding-bottom: 0; }
+.vau-editor .cm-line { padding: 0; overflow-wrap: anywhere; }
+.vau-editor .cm-cursor, .vau-editor .cm-dropCursor { border-left: 2px solid var(--primary); }
+/* Where files dragged in from outside will go (editor/filedrop.ts): a line between the lines. */
+.vau-editor .cm-file-drop-layer { pointer-events: none; z-index: 3; }
+.vau-editor .cm-file-drop { background: var(--primary); border-radius: 1px; }
+.vau-editor .cm-selectionBackground, .vau-editor .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: color-mix(in srgb, var(--primary) 22%, transparent); }
+.vau-editor .cm-content ::selection { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+.vau-editor .cm-placeholder { color: var(--muted-foreground); }
+.vau-editor .cm-h { font-weight: 700; }
+.vau-editor .cm-h1 { font-size: 1.625em; line-height: 1.31; padding-top: 8px; color: oklch(from var(--h1) var(--ink-l) c h); }
+.vau-editor .cm-h2 { font-size: 1.3125em; line-height: 1.333; padding-top: 6px; color: oklch(from var(--h2) var(--ink-l) c h); }
+.vau-editor .cm-h3 { font-size: 1.125em; line-height: 1.39; padding-top: 4px; font-weight: 600; color: oklch(from var(--h3) var(--ink-l) c h); }
+.vau-editor :is(.cm-h4, .cm-h5, .cm-h6) { font-size: 1em; line-height: 1.44; padding-top: 2px; font-weight: 600; }
+.vau-editor .cm-h4 { color: oklch(from var(--h4) var(--ink-l) c h); }
+.vau-editor .cm-h5 { color: oklch(from var(--h5) var(--ink-l) c h); }
+.vau-editor .cm-h6 { color: oklch(from var(--h6) var(--ink-l) c h); }
+.vau-editor .cm-content > :is(.cm-h:first-child, .cm-frontmatter:first-child + .cm-h) { padding-top: 0; }
+/* The # of a heading (source mode, or live preview on the cursor line): shown, fainter. */
+.vau-editor .cm-hmark { color: color-mix(in srgb, currentColor 45%, var(--card)); font-weight: 500; }
+.vau-editor .cm-strong { font-weight: 650; }
+.vau-editor .cm-em { font-style: italic; }
+.vau-editor .cm-strike { text-decoration: line-through; color: var(--muted-foreground); }
+.vau-editor .cm-code { font-family: var(--font-code); font-size: 0.85em; background: var(--muted); border-radius: 5px; padding: 0.1em 0.3em; }
+.vau-editor .cm-link { color: oklch(from var(--primary) var(--ink-l) c h); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); cursor: pointer; }
+.vau-editor :is(.cm-link-raw, .cm-wikilink-raw) { color: color-mix(in srgb, var(--primary) 85%, var(--foreground)); }
+.vau-editor .cm-wikilink-raw { color: oklch(from var(--notes) var(--ink-l) c h); }
+.vau-editor .cm-wikilink { color: oklch(from var(--notes) var(--ink-l) c h); font-weight: 500; cursor: pointer; }
+.vau-editor :is(.cm-wikilink, .cm-wikilink-raw).is-missing { color: var(--muted-foreground); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; }
+/* A link to a person, a book or a colleague: their colour, as in the sheets and dashboards (.note-prose .wikilink). */
+.vau-editor :is(.cm-wikilink, .cm-wikilink-raw, .cm-block .wikilink).person { color: oklch(from var(--people) var(--ink-l) c h); }
+.vau-editor :is(.cm-wikilink, .cm-wikilink-raw, .cm-block .wikilink).book { color: oklch(from var(--learning) var(--ink-l) c h); }
+.vau-editor :is(.cm-wikilink, .cm-wikilink-raw, .cm-block .wikilink).colleague { color: oklch(from var(--work) var(--ink-l) c h); }
+/* Code files (a .py, a .yaml...): monospace, line numbers in a quiet gutter, the active line's number brighter. */
+.vau-editor.is-code .cm-editor { font-size: 13px; }
+.vau-editor.is-code .cm-scroller { font-family: var(--font-code); line-height: 20px; }
+.vau-editor.is-code .cm-content { padding-bottom: 48px; tab-size: 4; }
+.vau-editor.is-code .cm-line { overflow-wrap: anywhere; }
+.vau-editor.is-code .cm-gutters { background: transparent; border: none; color: var(--muted-foreground); opacity: 0.6; }
+.vau-editor.is-code .cm-lineNumbers .cm-gutterElement { padding: 0 12px 0 0; min-width: 28px; }
+.vau-editor.is-code .cm-activeLineGutter { background: transparent; color: var(--foreground); }
+/* Line numbers on (appearance.json `lineNumbers`, Editor.tsx `has-numbers`): a quiet gutter in the code font, each number
+   on its line's first row, at the text's line height. Phones keep it narrow. */
+.vau-editor.has-numbers .cm-gutters { background: transparent; border: none; color: var(--muted-foreground); opacity: 0.6;
+  font-family: var(--font-code); font-size: 12px; font-variant-numeric: tabular-nums; }
+.vau-editor.has-numbers .cm-lineNumbers .cm-gutterElement { padding: 0 8px 0 0; min-width: 20px; line-height: calc(17px * 1.53); }
+.vau-editor.has-numbers .cm-activeLineGutter { background: transparent; color: var(--foreground); }
+.vau-editor.has-numbers .cm-lineNumbers .cm-gutterElement:where(:not([data-phone] *)) { padding-right: 12px; min-width: 28px; line-height: 24px; }
+/* A notebook's code cells (editor/Notebook.tsx: @lezer/highlight's classHighlighter), in the same colours as code files. */
+.nb-code { font-family: var(--font-code); }
+.nb-code :is(.tok-keyword, .tok-operatorKeyword) { color: oklch(from var(--purple) var(--ink-l) c h); }
+.nb-code :is(.tok-string, .tok-string2) { color: oklch(from var(--green) var(--ink-l) c h); }
+.nb-code :is(.tok-number, .tok-bool, .tok-atom) { color: oklch(from var(--orange) var(--ink-l) c h); }
+.nb-code .tok-comment { color: oklch(from var(--muted-foreground) var(--ink-l) c h); font-style: italic; }
+.nb-code :is(.tok-typeName, .tok-className, .tok-namespace) { color: oklch(from var(--yellow) var(--ink-l) c h); }
+.nb-code .tok-variableName.tok-definition { color: oklch(from var(--indigo) var(--ink-l) c h); }
+.nb-code .tok-propertyName { color: oklch(from var(--teal) var(--ink-l) c h); }
+.nb-code :is(.tok-punctuation, .tok-operator) { color: oklch(from var(--muted-foreground) var(--ink-l) c h); }
+.nb-code .tok-meta { color: oklch(from var(--pink) var(--ink-l) c h); }
+/* A bullet in its own column (livePreview BULLET), the dot centred in it. */
+.vau-editor .cm-bullet { display: inline-block; width: 0.95em; text-align: center; text-indent: 0; color: var(--muted-foreground); }
+.vau-editor .cm-listmark { color: var(--muted-foreground); }
+.vau-editor .cm-task { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; margin: 0 0.4em 0 0; vertical-align: -3px; cursor: pointer;
+  border-radius: 4.5px; border: 1.5px solid color-mix(in srgb, var(--muted-foreground) 70%, transparent); }
+.vau-editor .cm-task:checked { border-color: var(--notes); background: var(--notes) center / 11px no-repeat
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.vau-editor .cm-task:disabled { cursor: default; }
+/* (wider, not taller: a task's neighbours are a line away, and theirs mustn't cover it) */
+@media (pointer: coarse) { .vau-editor .cm-task-hit { display: inline-block; text-indent: 0; padding: 4px 6px 4px 13px; margin: -4px -6px -4px -13px; } }
+.vau-editor .cm-task-done { color: var(--muted-foreground); }
+.vau-editor .cm-task-strike { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted-foreground) 60%, transparent); }
+.vau-editor .cm-indent { display: inline-block; }
+.vau-editor .cm-quote { border-left: 3px solid color-mix(in srgb, var(--notes) 55%, transparent); padding-left: 14px; color: color-mix(in srgb, var(--foreground) 80%, transparent); }
+.vau-editor .cm-hr { display: inline-block; width: 100%; height: 0; border-top: 0.5px solid var(--border); vertical-align: middle; }
+.vau-editor .cm-codeblock { font-family: var(--font-code); font-size: 0.875em; line-height: 1.5;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent); padding: 0 14px; }
+.vau-editor .cm-codeblock-first { border-top-left-radius: 10px; border-top-right-radius: 10px; padding-top: 8px; }
+.vau-editor .cm-codeblock-last { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; padding-bottom: 8px; }
+.vau-editor .cm-codemark { color: var(--muted-foreground); }
+/* An image sits on its line's first row (the line's number beside its top, no empty rows around it); under its Markdown
+   while that shows. Its buttons and corner show on hover; phones have its menu (hold it). */
+/* `![[Note]]` in running text (livePreview's InlineEmbed): a block in its place; a file nothing draws, a link */
+.vau-editor .cm-inline-embed:not(.is-link) { display: block; margin: 4px 0; white-space: normal; }
+.vau-editor .cm-image-wrap { position: relative; display: inline-block; max-width: 100%; vertical-align: top; margin: 4px 0; line-height: 0; }
+.vau-editor .cm-image-wrap.is-source { display: block; width: fit-content; margin-top: 2px; }
+.vau-editor .cm-image-wrap.is-source ~ :is(.cm-widgetBuffer, br) { display: none; }
+.vau-editor .cm-image { display: block; max-width: 100%; max-height: 480px; border-radius: 10px; -webkit-touch-callout: none; user-select: none; }
+.vau-editor .is-sized > .cm-image { max-height: none; }
+.vau-editor .cm-image-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; padding: 2px; border-radius: 7px;
+  background: color-mix(in srgb, var(--background) 82%, transparent); opacity: 0; transition: opacity var(--motion-fast) var(--ease-out); }
+.vau-editor .cm-image-tools button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px;
+  border-radius: 5px; color: var(--muted-foreground); cursor: pointer; }
+.vau-editor .cm-image-tools button:hover { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+.vau-editor .cm-image-resize { position: absolute; right: 3px; bottom: 3px; width: 12px; height: 12px; cursor: nwse-resize; opacity: 0;
+  border-right: 2px solid var(--muted-foreground); border-bottom: 2px solid var(--muted-foreground); border-bottom-right-radius: 6px; }
+.vau-editor .cm-image-wrap:hover > :is(.cm-image-tools, .cm-image-resize), .vau-editor .cm-image-wrap.is-resizing > .cm-image-resize,
+.vau-editor .cm-image-tools:focus-within { opacity: 1; }
+@media (hover: none) { .vau-editor :is(.cm-image-tools, .cm-image-resize) { display: none; } }
+/* A drawn block is HTML or React, not the editor's text: the editor's break-spaces would draw every newline between its
+   tags as an empty line (a callout's or a table's trailing blank line). */
+.vau-editor .cm-block { position: relative; padding: 10px 0 6px; cursor: text; white-space: normal; }
+.vau-editor :is(.cm-block-block, .cm-block-embed) { cursor: default; }
+/* A table sits close to its lines, as a paragraph does: its ruled edge is its border. */
+.vau-editor .cm-block-table { padding: 4px 0; }
+/* A block a plugin drew while reading (another app's post-processors): in its lines' place, spaced as they were. */
+.vau-editor .cm-block-read { display: flow-root; padding: 0; cursor: default; }
+.vau-editor .cm-block-read .cm-read { font-size: inherit; line-height: inherit; }
+.vau-editor .cm-block-read .cm-read > :last-child { margin-bottom: 0; }
+.vau-editor .cm-block-read .wikilink:not(.missing) { text-decoration: none; }
+/* A drawn block's bar, top right on hover: its name, options, menu and </> (phones: a held finger opens its menu). */
+.cm-block-bar { position: absolute; top: 4px; right: 0; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 2px;
+  border: 0.5px solid var(--border); border-radius: 7px; background: var(--background); font-family: var(--font-sans);
+  opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-out); }
+.cm-block-slot { display: contents; }
+.cm-block-name { padding: 0 6px; font-size: 12px; line-height: 20px; color: var(--muted-foreground); user-select: none; }
+.cm-block-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 5px;
+  color: var(--muted-foreground); cursor: pointer; }
+/* (</> as a mask: the bar adds no <svg> to what the block draws) */
+.cm-block-source::before { content: ""; width: 16px; height: 16px; background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m16 18 6-6-6-6'/%3E%3Cpath d='m8 6-6 6 6 6'/%3E%3C/svg%3E") center / contain no-repeat; }
+.cm-block-btn:hover, .cm-block-btn[aria-pressed="true"] { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+@media (hover: hover) { .cm-block:hover > .cm-block-bar, .cm-block-bar:focus-within { opacity: 1; pointer-events: auto; } }
+.cm-content[contenteditable="false"] .cm-block-source { display: none; }
+.cm-content[contenteditable="false"] .cm-block-bar:not(:has(.cm-block-slot > *)) { display: none; }
+/* A dashboard edited as it's read (data-grid: livePreview's renderGrid): its text as long as a note's lines, its blocks
+   cards side by side as the page draws them, each with its bar on hover (always on a phone, in the flow, at a finger's size). */
+.file-view[data-grid] .cm-content > :is(.cm-line, .cm-block:not(.cm-block-embed)) { max-width: var(--line-width); }
+.vau-editor .cm-grid { padding: 8px 0; font-family: var(--font-sans); font-size: 1rem; line-height: 1.5; white-space: normal; cursor: default; }
+.cm-card:hover > .cm-block-bar, .cm-card > .cm-block-bar:focus-within { opacity: 1; pointer-events: auto; }
+@media (hover: none) {
+  .cm-card > .cm-block-bar { position: static; justify-content: flex-end; margin-bottom: 6px; border: 0; background: none; opacity: 1; pointer-events: auto; }
+  .cm-card > .cm-block-bar .cm-block-btn { width: 44px; height: 44px; }
+  .cm-card > .cm-block-bar .cm-card-grip { margin-right: auto; }
+}
+/* (Full width and Stacked mean nothing in one column) */
+.cm-card .is-wide-only { display: none; }
+@container (min-width: 42rem) { .cm-card .is-wide-only { display: inline-flex; } }
+.cm-card-source { margin-bottom: 10px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--foreground) 4%, transparent); cursor: text; }
+/* Under a block's Markdown while it's edited: what's wrong with its options, and Done. */
+.vau-editor .cm-block-foot { display: flex; align-items: baseline; gap: 12px; padding: 2px 0 8px; font-family: var(--font-sans);
+  font-size: 13px; line-height: 18px; color: var(--muted-foreground); white-space: normal; }
+.cm-block-notes { flex: 1; min-width: 0; }
+.cm-block-notes.is-wrong { color: var(--foreground); }
+.cm-block-done { font-weight: 600; color: oklch(from var(--primary) var(--ink-l) c h); cursor: pointer; }
+.cm-block-options { margin-top: 10px; padding: 6px 12px 8px; border-radius: 10px; background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  font-family: var(--font-sans); cursor: default; }
+/* A block that draws nothing still has a place to right-click. */
+.vau-editor .cm-block [data-block]:empty::before { content: "Nothing to show yet."; display: block; font-size: 15px; line-height: 20px;
+  color: var(--muted-foreground); }
+/* A table's cell being edited (editor/tables.ts): its Markdown in a field the cell's size, ringed. */
+.vau-editor .cm-block-table :is(th, td).is-editing { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 60%, transparent); }
+.vau-editor .cm-cell-input { display: block; width: 100%; min-width: 2em; margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+  background: transparent; color: inherit; font: inherit; line-height: inherit; text-align: inherit; caret-color: var(--primary); }
+/* Cells selected together, and a table's controls: grips on the row and column pointed at (by touch: of the cell being
+   edited), + right of it and under it, the line where a dragged row or column would go. Not while reading. */
+.vau-editor .cm-block-table :is(th, td).is-selected { background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.vau-editor .cm-block-table > .cm-block-body { position: relative; }
+.cm-table-tools { position: absolute; top: 0; left: 0; z-index: 1; font-family: var(--font-sans); }
+.cm-content[contenteditable="false"] .cm-table-tools, .cm-table-tools[hidden] { display: none; }
+.cm-table-tool { position: absolute; display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
+  color: var(--muted-foreground); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out); }
+.cm-table-tool[hidden] { display: none; }
+@media (hover: hover) { .cm-block-table:hover .cm-table-tool { opacity: 1; pointer-events: auto; } }
+@media (hover: none) { .cm-table-tools[data-active] .cm-table-tool { opacity: 1; pointer-events: auto; } }
+/* (a finger's target is bigger than what's drawn) */
+.cm-table-tool::before { content: ""; position: absolute; inset: -3px; }
+@media (pointer: coarse) { .cm-table-tool::before { inset: -12px; } }
+.cm-table-grip { transform: translate(-50%, -50%); border-radius: 5px; background: var(--background); border: 0.5px solid var(--border); cursor: grab; }
+.cm-table-grip.is-col { width: 24px; height: 14px; }
+.cm-table-grip.is-row { width: 14px; height: 24px; }
+/* (by touch, inside the table's edge: a phone's edge is the sidebar's swipe; a grip's target 44px each way) */
+@media (pointer: coarse) { .cm-table-grip.is-row { width: 10px; transform: translate(1px, -50%); } .cm-table-grip::before { inset: -15px -17px; } }
+/* Room for the column + at the right while editing: a table as wide as the text scrolls a little sooner. */
+.vau-editor .cm-content[contenteditable="true"] .cm-block-table table { max-width: calc(100% - 24px); }
+@media (pointer: coarse) { .vau-editor .cm-content[contenteditable="true"] .cm-block-table table { max-width: calc(100% - 30px); } }
+.cm-table-tool:hover, .cm-table-grip:active { color: var(--foreground); background: var(--muted); }
+.cm-table-add { border-radius: 5px; background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.cm-table-add.is-col { width: 18px; margin-left: 4px; }
+.cm-table-add.is-row { height: 18px; margin-top: 4px; }
+.cm-table-add svg { width: 12px; height: 12px; }
+@media (pointer: coarse) { .cm-table-add.is-col { width: 24px; } .cm-table-add.is-row { height: 24px; } .cm-table-add svg { width: 16px; height: 16px; } }
+/* A column's edge in the header, dragged to resize it: a line on hover. A table whose separator sets its widths is as
+   wide as the text, its columns in those shares (fixed: long words wrap), scrolling in its box once one would be too narrow. */
+.cm-table-edge { width: 9px; transform: translateX(-50%); cursor: col-resize; touch-action: none; }
+.cm-table-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 3px; border-radius: 1.5px; }
+.cm-table-edge:hover, .cm-table-edge.is-active { background: none; }
+.cm-table-edge:hover::after, .cm-table-edge.is-active::after { background: var(--primary); }
+/* (the box: the editor's own, or core/markdown.ts' everywhere else Markdown is drawn) */
+.vau-editor .cm-table-view.is-shared, .md-table-view { overflow-x: auto; overscroll-behavior-x: contain; isolation: isolate; }
+.vau-editor .cm-content[contenteditable="true"] .cm-table-view.is-shared { max-width: calc(100% - 24px); }
+@media (pointer: coarse) { .vau-editor .cm-content[contenteditable="true"] .cm-table-view.is-shared { max-width: calc(100% - 30px); } }
+.vau-editor .cm-content .cm-block-table table.has-widths, :is(.note-prose, .dash-prose, .vau-editor .cm-block) .md-table-view > table.has-widths {
+  display: table; width: 100%; max-width: none; overflow-x: visible; margin: 0; table-layout: fixed; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) table.has-widths :where(th, td) { min-width: 0; overflow-wrap: break-word; }
+.cm-table-drop { position: absolute; background: var(--primary); border-radius: 1px; pointer-events: none; }
+.cm-table-drop.is-row { height: 2px; margin-top: -1px; }
+.cm-table-drop.is-col { width: 2px; margin-left: -1px; }
+.cm-table-drop[hidden] { display: none; }
+.vau-editor .cm-table-keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none;
+  pointer-events: none; overflow: hidden; }
+.vau-editor .cm-block .wikilink { color: oklch(from var(--notes) var(--ink-l) c h); font-weight: 500; cursor: pointer; }
+.vau-editor .cm-block .wikilink.missing { color: var(--muted-foreground); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; }
+.vau-editor .cm-editor[contenteditable="false"] .cm-block, .vau-editor .cm-content[contenteditable="false"] .cm-block { cursor: default; }
+/* Reading has no caret, so CodeMirror's caret helpers around hidden Markdown (images, and so line-break points) go:
+   the full stop after a [[link]] stays on the link's line. */
+.vau-editor .cm-content[contenteditable="false"] .cm-widgetBuffer { display: none; }
+/* Marks: ==highlight==, #tags, %%comments%% (faint while editing; reading hides them), block ids (^id,
+   shown only on the cursor's line), the place a [[Note#Heading]] link went to (a flash), and embedded notes. */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) mark, .vau-editor .cm-highlight {
+  background: color-mix(in srgb, var(--hl, var(--yellow)) var(--hl-mix, 32%), transparent); color: inherit; border-radius: 3px; }
+/* Highlight colours (==🟢text==, core/highlights.ts): any element with the class takes the tint. Yellow's light tone
+   needs more of it to show than the others. */
+.hl-red { --hl: var(--red); --hl-mix: 26%; } .hl-orange { --hl: var(--orange); --hl-mix: 28%; } .hl-yellow { --hl: var(--yellow); }
+.hl-green { --hl: var(--green); --hl-mix: 28%; } .hl-blue { --hl: var(--blue); --hl-mix: 28%; } .hl-purple { --hl: var(--purple); --hl-mix: 28%; }
+/* The swatch on the highlight at the cursor (click: its colours), and the colour dots of its menus. */
+.vau-editor .cm-hl-swatch { display: inline-block; position: relative; width: 10px; height: 10px; margin: 0 3px 0 1px; border-radius: 50%;
+  vertical-align: 0; background: var(--hl, var(--yellow)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent); cursor: pointer; }
+.vau-editor .cm-hl-swatch::after { content: ""; position: absolute; inset: -8px -5px; }
+.cm-tooltip-autocomplete .cm-hl-option { display: inline-block; margin-right: 8px; vertical-align: -1px; }
+.hl-dot { display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--hl, var(--yellow));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent); }
+.hl-dot.is-now { outline: 1.5px solid var(--hl, var(--yellow)); outline-offset: 2px; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) a.tag, .vau-editor .cm-tag {
+  color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); border-radius: 6px;
+  padding: 0 4px; text-decoration: none; cursor: pointer; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) a.tag:hover, .vau-editor .cm-tag:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.vau-editor :is(.cm-comment, .cm-blockid) { color: var(--muted-foreground); }
+.vau-editor .cm-flash { animation: vau-flash 1.6s ease-out; }
+@keyframes vau-flash { from { background: color-mix(in srgb, var(--yellow) 38%, transparent); } to { background: transparent; } }
+.note-embed { min-width: 0; border-left: 3px solid color-mix(in srgb, var(--notes) 55%, transparent); padding: 0 0 2px 14px; margin: 2px 0; white-space: normal; }
+.note-embed.is-fill { border-left: 0; padding: 0; margin: 0; }
+.note-embed-head { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 2px 0 6px; font-size: 13px; font-weight: 500;
+  color: var(--muted-foreground); cursor: pointer; text-align: left; }
+.note-embed-head:hover { color: var(--foreground); }
+.note-embed-body > :where(:not(:first-child)) { margin-top: 10px; }
+.note-embed-missing { font-size: 15px; color: var(--muted-foreground); }
+/* Markdown between a dashboard's blocks (a heading over a group of cards, a line of text) */
+/* Its type is the editor's (sizes, heading colours), so reading and editing a dashboard show the same text. */
+.dash-prose { font-size: 17px; line-height: 25px; }
+.dash-prose:where(:not([data-phone] *)) { font-size: 16px; line-height: 24px; }
+.dash-prose > :where(:not(:first-child)) { margin-top: 10px; }
+.dash-prose > :is(h1, h2, h3, h4, h5, h6):not(:first-child) { margin-top: 22px; }
+.dash-prose h1 { font-size: 1.625em; line-height: 1.31; font-weight: 700; color: oklch(from var(--h1) var(--ink-l) c h); }
+.dash-prose h2 { font-size: 1.3125em; line-height: 1.333; font-weight: 700; color: oklch(from var(--h2) var(--ink-l) c h); }
+.dash-prose h3 { font-size: 1.125em; line-height: 1.39; font-weight: 600; color: oklch(from var(--h3) var(--ink-l) c h); }
+.dash-prose :is(h4, h5, h6) { font-size: 1em; line-height: 1.44; font-weight: 600; }
+.dash-prose h4 { color: oklch(from var(--h4) var(--ink-l) c h); }
+.dash-prose h5 { color: oklch(from var(--h5) var(--ink-l) c h); }
+.dash-prose h6 { color: oklch(from var(--h6) var(--ink-l) c h); }
+.dash-prose :is(ul, ol) { padding-left: 1.3em; }
+.dash-prose ul { list-style: disc; }
+.dash-prose ol { list-style: decimal; }
+.dash-prose a { color: oklch(from var(--primary) var(--ink-l) c h); }
+.dash-prose .wikilink { color: oklch(from var(--notes) var(--ink-l) c h); font-weight: 500; cursor: pointer; }
+.dash-prose .wikilink.missing { color: var(--muted-foreground); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; }
+.dash-prose code { font-family: var(--font-code); font-size: 0.9em; }
+.dash-prose :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--foreground) 7%, transparent); }
+.dash-prose pre { padding: 10px 14px; border-radius: 10px; background: var(--card); border: 0.5px solid var(--border); overflow-x: auto; font-size: 15px; line-height: 22px; }
+.dash-prose blockquote { padding-left: 14px; border-left: 3px solid color-mix(in srgb, var(--notes) 55%, transparent); color: color-mix(in srgb, var(--foreground) 80%, transparent); }
+.dash-prose hr { border: 0; border-top: 0.5px solid var(--border); margin: 16px 0; }
+.dash-prose del { color: var(--muted-foreground); }
+.dash-prose li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.3em; }
+/* A column aligned by its separator row (`:-:`, `--:`: marked's align attribute), over the left of the rules above. */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) :is(th, td)[align="center"] { text-align: center; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) :is(th, td)[align="right"] { text-align: right; }
+/* A cell breaks between words, not letters (the prose and CodeMirror's wrapping around it break anywhere): a table too
+   wide for a phone scrolls sideways instead of squeezing each column to a letter wide. */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) :is(th, td) { overflow-wrap: break-word; word-break: normal; }
+/* Short cells (core/markdown.ts) on one line, prose kept wide enough to read: past that the table scrolls. A table whose
+   separator sets its widths wraps as its columns say. */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) table:not(.has-widths) .md-cell-short { white-space: nowrap; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block) table:not(.has-widths) :is(th, td):not(.md-cell-short) { min-width: 10em; }
+/* Markdown's extras, in the editor (live preview, reading) and in Markdown drawn outside it (core/markdown.ts,
+   core/richmd.ts). Code fences: a header line (language, copy) in place of the ``` line, off the cursor. */
+.vau-editor .cm-fence-top { font-size: 12px; line-height: 20px; }
+.cm-fence-head, .md-code-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: var(--font-sans);
+  font-size: 12px; line-height: 20px; color: var(--muted-foreground); }
+.vau-editor .cm-fence-head { display: inline-flex; width: 100%; vertical-align: top; }
+.cm-fence-lang, .md-code-lang { text-transform: lowercase; user-select: none; }
+/* A conflict in place (editor/conflicts.ts): the user's lines tinted blue under "Yours", the other version below in
+   purple, each with Keep. Big enough for a finger. */
+.cm-clash { --clash: var(--blue); border-left: 3px solid var(--clash); background: color-mix(in srgb, var(--clash) 7%, transparent); padding: 6px 8px 6px 10px; }
+/* Its bar runs on through the lines between, so its left corners stay square (a marked box's bar can't). */
+.cm-clash-mine { margin-top: 8px; border-radius: 0 6px 0 0; padding-bottom: 2px; }
+.cm-clash-theirs { --clash: var(--purple); margin-bottom: 8px; border-radius: 0 0 6px 0; }
+.cm-line.cm-clash-line { box-shadow: inset 3px 0 0 var(--blue); background: color-mix(in srgb, var(--blue) 7%, transparent); padding-left: 13px; }
+.cm-clash-note, .cm-clash-bar, .cm-clash button { font-family: var(--font-sans); font-size: 13px; line-height: 18px; }
+.cm-clash-note { margin-bottom: 4px; color: var(--muted-foreground); }
+.cm-clash-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.cm-clash-label { font-weight: 600; color: var(--clash); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-clash-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0 4px; }
+.cm-clash-text.is-empty { font-family: var(--font-sans); font-size: 13px; color: var(--muted-foreground); }
+.cm-clash-both:empty { display: none; }
+.cm-clash-both { display: flex; justify-content: flex-end; padding-top: 4px; }
+.cm-clash button { height: 26px; padding: 0 10px; border-radius: 6px; font-weight: 500; color: var(--foreground); cursor: pointer;
+  background: var(--background); border: 0.5px solid var(--border); }
+.cm-clash button:hover { background: color-mix(in srgb, var(--foreground) 6%, var(--background)); }
+@media (pointer: coarse) {
+  .cm-clash-note, .cm-clash-bar { font-size: 15px; line-height: 20px; }
+  .cm-clash-bar { min-height: 44px; }
+  .cm-clash button { height: 44px; min-width: 64px; padding: 0 16px; font-size: 17px; border-radius: 10px; }
+  .cm-clash button:active { opacity: 0.5; }
+}
+.cm-fence-copy, .md-copy { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 20px; border-radius: 5px;
+  color: var(--muted-foreground); cursor: pointer; transition: opacity var(--motion-fast) var(--ease-out); }
+.cm-fence-copy:hover, .md-copy:hover { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+.cm-fence-copy.is-copied, .md-copy.is-copied { color: var(--green); }
+@media (hover: hover) {
+  .cm-fence-copy, .md-copy { opacity: 0; }
+  .cm-fence-top.is-hover .cm-fence-copy, .md-code:hover .md-copy, .cm-fence-copy:focus-visible, .md-copy:focus-visible, .is-copied { opacity: 1; }
+}
+.vau-editor .cm-fence-bottom { font-size: 0; line-height: 0; padding-bottom: 10px; }
+/* A fence without a language has no label to show: no header line, its copy button beside its first line. */
+.vau-editor .cm-fence-top.cm-fence-bare { position: relative; font-size: 0; line-height: 0; padding-top: 18px; }
+.vau-editor .cm-fence-bare .cm-fence-head { position: absolute; z-index: 1; top: 18px; right: 14px; width: auto; }
+.md-code { position: relative; border-radius: 10px; background: color-mix(in srgb, var(--foreground) 5%, transparent); padding: 6px 14px 10px; }
+.md-code-bare { padding-top: 10px; }
+.md-code-bare > .md-code-head { position: absolute; z-index: 1; top: 10px; right: 14px; }
+.md-code + * { margin-top: 14px; }
+.md-code > pre { background: none !important; border: 0 !important; padding: 0 !important; margin: 0 !important; border-radius: 0 !important; }
+.note-prose .md-code, .dash-prose .md-code { margin: 0 0 14px; }
+/* Math (KaTeX) and mermaid diagrams */
+.math-display { display: block; overflow-x: auto; overflow-y: hidden; text-align: center; padding: 4px 0; }
+.math-inline { font-size: 1em; }
+.math .katex-display { margin: 0; }
+.mermaid-diagram, .md-mermaid { padding: 4px 0; }
+.mermaid-diagram > svg { display: block; margin-inline: auto; max-width: 100%; height: auto; }
+.mermaid-diagram pre { font-family: var(--font-code); font-size: 13px; color: var(--muted-foreground); white-space: pre-wrap; }
+/* Pele draws diagrams in these, so they follow the scheme and light or dark as they change. */
+.mermaid-diagram {
+  --pele-bg: var(--background); --pele-fg: var(--foreground); --pele-muted: var(--muted-foreground);
+  --pele-line: var(--muted-foreground); --pele-accent: var(--primary); --pele-critical: var(--red); --pele-error: var(--red);
+  --pele-surface: color-mix(in oklab, var(--primary) 14%, var(--card));
+  --pele-surface-alt: color-mix(in oklab, var(--muted-foreground) 7%, var(--card));
+  --pele-border: color-mix(in oklab, var(--primary) 55%, var(--card));
+  --pele-font: var(--font-sans); --pele-font-mono: var(--font-code); --pele-radius: 6px;
+  --pele-series-1: var(--blue); --pele-series-2: var(--orange); --pele-series-3: var(--green); --pele-series-4: var(--red);
+  --pele-series-5: var(--teal); --pele-series-6: var(--yellow); --pele-series-7: var(--purple); --pele-series-8: var(--pink);
+}
+.vau-editor .cm-block-math, .vau-editor .cm-block-mermaid { padding: 8px 0; }
+/* A marked box: tinted and rounded, with a bar at its start in --mark (a callout, a change in History, a plan's event).
+   The bar is a line drawn inside the box, never its left border or an inset shadow, which bend round the corners.
+   --mark-x / --mark-y: the bar's inset from the box's edge (y from its top and bottom); --mark-tint: the box's tint.
+   A bar running on past one box (rows of the editor's lines) is a border with the left corners square instead.
+   A callout's markup is Obsidian's (core/callouts.ts), so it's named here rather than given the class. */
+@layer components {
+  :where(.marked, .callout) { --mark: var(--primary); --mark-x: 5px; --mark-y: 5px; --mark-tint: 10%; position: relative;
+    border-radius: var(--radius-control); padding-left: calc(var(--mark-x) + 11px); background: color-mix(in srgb, var(--mark) var(--mark-tint), transparent); }
+  :where(.marked, .callout)::before { content: ""; position: absolute; left: var(--mark-x); top: var(--mark-y); bottom: var(--mark-y); width: 3px;
+    border-radius: 1.5px; background: var(--mark); pointer-events: none; }
+}
+/* Callouts: > [!type] Title (core/callouts.ts); each type's colour from the scheme, a marked box (above). */
+/* An Obsidian snippet's --callout-color (r, g, b) wins over the type's; unset, --callout-tint is invalid and falls back. */
+.callout { --callout: var(--blue); --callout-tint: rgb(var(--callout-color)); --mark: var(--callout-tint, var(--callout)); --mark-x: 8px; --mark-y: 10px;
+  --mark-tint: 9%; margin: 0 0 14px; padding: 10px 14px 10px 22px; border-radius: var(--radius-card); }
+.callout[data-callout="abstract"], .callout[data-callout="tip"] { --callout: var(--teal); }
+.callout[data-callout="success"] { --callout: var(--green); }
+.callout[data-callout="question"], .callout[data-callout="warning"] { --callout: var(--orange); }
+.callout[data-callout="failure"], .callout[data-callout="danger"], .callout[data-callout="bug"] { --callout: var(--red); }
+.callout[data-callout="example"] { --callout: var(--purple); }
+.callout[data-callout="quote"] { --callout: var(--gray); }
+.callout-title { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--callout-tint, var(--callout)); list-style: none; }
+.callout-title::-webkit-details-marker { display: none; }
+summary.callout-title { cursor: pointer; user-select: none; }
+.callout-icon { display: inline-flex; flex: none; }
+.callout-title-text { min-width: 0; }
+.callout-fold { display: inline-flex; flex: none; transition: transform var(--motion-fast) var(--ease-out); }
+details.callout[open] > summary .callout-fold { transform: rotate(90deg); }
+.callout-content { margin-top: 6px; color: var(--foreground); }
+.callout .callout-content > :last-child, .vau-editor .cm-block .callout-content > :last-child { margin-bottom: 0; }
+.callout-content > :first-child { margin-top: 0; }
+.vau-editor .cm-block-callout { padding: 6px 0 2px; }
+.vau-editor .cm-block-callout .callout, .vau-editor .cm-block-details > details { margin: 0; }
+.vau-editor :is(.cm-block-callout, .cm-block-details) :where(p, ul, ol, pre, blockquote, table) { margin: 0 0 10px; }
+.vau-editor :is(.cm-block-callout, .cm-block-details) :where(ul) { list-style: disc; padding-left: 1.35em; }
+.vau-editor :is(.cm-block-callout, .cm-block-details) :where(ol) { list-style: decimal; padding-left: 1.35em; }
+.vau-editor :is(.cm-block-callout, .cm-block-details, .cm-block-table) code { font-family: var(--font-code); font-size: 0.85em; background: var(--muted); border-radius: 5px; padding: 0.1em 0.3em; }
+.vau-editor :is(.cm-block-callout, .cm-block-details) pre code { background: none; padding: 0; font-size: 0.875em; }
+.vau-editor :is(.cm-block-callout, .cm-block-details) a:not(.wikilink) { color: oklch(from var(--primary) var(--ink-l) c h); text-decoration: underline; text-underline-offset: 3px; }
+/* <details><summary> toggles */
+:is(.note-prose, .dash-prose, .vau-editor .cm-block-details) details:not(.callout) > summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+:is(.note-prose, .dash-prose, .vau-editor .cm-block-details) details:not(.callout) { margin: 0 0 14px; }
+/* (a dashboard's text keeps its own rhythm, 10px above each part: a note's margins below would leave these none above) */
+.dash-prose > .callout, .dash-prose > .md-code, .dash-prose > details:not(.callout) { margin: 0; }
+.dash-prose > .callout:not(:first-child), .dash-prose > .md-code:not(:first-child), .dash-prose > details:not(.callout):not(:first-child) { margin-top: 10px; }
+/* Footnotes */
+.footnote-ref, .cm-footnote-ref { font-size: 0.72em; line-height: 0; vertical-align: super; padding: 0 1px; color: oklch(from var(--primary) var(--ink-l) c h); cursor: pointer; font-weight: 500; }
+.footnote-ref.missing, .cm-footnote-ref.is-missing { color: var(--muted-foreground); cursor: default; }
+.footnotes { margin-top: 20px; padding-top: 10px; border-top: 0.5px solid var(--border); font-size: 0.88em; color: var(--muted-foreground); }
+.footnotes ol { list-style: decimal; padding-left: 1.35em; margin: 0; }
+.footnotes li + li { margin-top: 4px; }
+.footnote-back { display: inline-flex; vertical-align: -2px; color: var(--muted-foreground); cursor: pointer; }
+.footnote-back svg { width: 13px; height: 13px; }
+.footnote-back:hover { color: var(--foreground); }
+.vau-editor .cm-footnote-def { font-size: 0.88em; color: var(--muted-foreground); }
+.vau-editor .cm-footnote-label { color: var(--muted-foreground); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.vau-editor .cm-footnote-mark { color: var(--muted-foreground); }
+.is-flash { animation: vau-flash 1.2s ease-out; border-radius: 4px; }
+@keyframes vau-flash { from { background: color-mix(in srgb, var(--primary) 22%, transparent); } to { background: transparent; } }
+/* [[ suggestions and the slash menu (.cm-editor first: CodeMirror's own theme is one class more specific); .vau-tooltips:
+   the same drawn over the page (Editor's floatingTooltips: a canvas card) */
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete { background: var(--card); border: 0.5px solid var(--border); border-radius: 10px; padding: 4px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18); overflow: visible; }
+/* An option's preview (slashPreview.tsx): its own card beside the list, so CodeMirror's box around it goes. */
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-completionInfo:has(.slash-preview) { background: none; border: 0; padding: 0; box-shadow: none; max-width: none; white-space: normal; }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-slash-icon { display: inline-grid; place-items: center; flex-shrink: 0; align-self: center; margin-right: 8px;
+  font-size: 16px; color: var(--muted-foreground); }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete li[aria-selected] .cm-slash-icon { color: var(--foreground); }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul { font-family: var(--font-sans); max-height: 320px; min-width: 260px; max-width: min(360px, 90vw); }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > li { display: flex; align-items: baseline; padding: 5px 8px; border-radius: 6px;
+  font-size: 14px; line-height: 20px; color: var(--foreground); }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--foreground); }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section { display: block; padding: 8px 8px 3px; border: 0; font-size: 12px;
+  font-weight: 600; line-height: 16px; color: var(--muted-foreground); opacity: 1; }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section:first-child { padding-top: 3px; }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-completionLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-completionDetail { margin-left: auto; padding-left: 12px; font-style: normal; color: var(--muted-foreground);
+  font-size: 12px; white-space: nowrap; }
+:is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-completionMatchedText { text-decoration: none; font-weight: 650; }
+/* Phones: rows and text like the app's other phone menus (44px, 17px). */
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete { border-radius: 12px; }
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul { max-height: min(352px, 45dvh); }
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > li { align-items: center; min-height: 44px; padding: 0 12px; border-radius: 8px;
+    font-size: 17px; line-height: 22px; }
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section { padding: 10px 12px 4px; font-size: 13px; line-height: 18px; }
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-completionDetail { font-size: 14px; }
+:where([data-phone]) :is(.cm-editor, .vau-tooltips) .cm-tooltip-autocomplete .cm-slash-icon { font-size: 20px; margin-right: 12px; }
+
+/* With no right sidebar on screen (data-right-sidebar, App.tsx), its toggle (fixed in the window's top-right corner)
+   sits at the end of the tab bar (without it, the top-right pane's bar): the bar keeps clear of it. */
+:root:not([data-right-sidebar]):not([data-no-rails]) [data-right-corner] > [data-title-row] { padding-right: calc(var(--spacing) * 10); }
+/* Without a pane tab bar, a corner the toggle sits in keeps a title bar's height, so it covers no page. */
+:root:not([data-right-sidebar]):not([data-no-rails]) [data-right-corner] > [data-bare]:not([data-merged]) { height: calc(var(--spacing) * 10); }
+/* Nor tabs, with a top bar (merged: a file's, the Browser's): a pane at the window's top has no strip, its bar is the title
+   row, beside the sidebar's top row; it makes room for what sits in the corners itself (usePaneTopBar). */
+[data-top] > [data-bare][data-merged] { height: 0; overflow: hidden; }
+/* The desktop app (Electron: the preload sets data-electron on <html>; a browser never matches these). On a Mac
+   (data-lights, core/desktop.ts) its title bar is hidden and the traffic lights sit in the sidebar's top row: that row and the
+   empty space of the top tab bars drag the window, the sidebar toggle moves right of the lights, and with the sidebar
+   folded to its rail the top-left pane's tab bar makes room for both. Elsewhere the window keeps its own title bar.
+   The web demo playing a Mac window (data-lights=drawn) lays out the same, with lights it draws (core/desktop.ts). */
+/* Only the tabs row itself drags (not the bar's padding, where the sidebar toggle sits when folded: a drag region
+   drawn after the toggle would swallow its clicks). */
+html[data-electron] [data-titlebar], html[data-electron] [data-top] > [data-title-row] > div:first-child { -webkit-app-region: drag; }
+html[data-electron] [data-top] > [data-title-row] > div:first-child { align-self: stretch; }
+html[data-electron] [data-title-row] [role="presentation"], html[data-electron] :is([data-title-row], [role="tablist"]) button,
+html[data-electron] [data-sidebar-toggle] { -webkit-app-region: no-drag; }
+html[data-electron] [data-header-item] { -webkit-app-region: no-drag; }
+/* A top bar that's its pane's title row (merged, above) drags the window by its empty part. */
+html[data-electron] [data-top] > [data-merged] ~ * :is([data-view-bar], [data-web-bar]) { -webkit-app-region: drag; }
+html[data-electron] [data-top] > [data-merged] ~ * :is([data-view-bar] > :not([data-view-bar-fill]), [data-view-bar-fill] > *, [data-web-bar] > *) { -webkit-app-region: no-drag; }
+/* The drag strip is a region of the window, not an element on top: it swallows the clicks of whatever is drawn over it
+   unless that says no-drag. So everything drawn over the page does: menus (one opened in the header has its first item
+   in the strip), the workspace list and a rail's flyout (beside the tab bar), dialogs, previews, tooltips, toasts, what
+   covers the whole window (a menu's or the palette's backdrop, a slideshow, a full-window screen), what's drawn outside
+   #root; and so do the sidebars' edges (dragging their top resizes). */
+html[data-electron] :is(body > :not(#root), .fixed.inset-0, [role=menu], [role=dialog], [role=listbox], [role=tooltip],
+  [role=separator], [data-sonner-toaster], dialog, [data-flyout], [data-overlay]) { -webkit-app-region: no-drag; }
+/* Full screen (data-fullscreen, from electron/main.ts) has no lights: the sidebar's top row and the tab bars are
+   laid out as in a browser. */
+/* The header's items start right of the lights and the toggle (at 88px, 7 spacing units wide). The lights don't follow
+   density, so these start at 88px; what follows them is in spacing units, like the rest of the sidebar (RAIL in
+   Sidebar.tsx): in compact 112px, and with the rail (11 units) the first tab 12px after the toggle. */
+html[data-lights]:not([data-fullscreen]) [data-titlebar] { padding-left: calc(88px + var(--spacing) * 6); }
+html[data-lights]:not([data-fullscreen]) [data-sidebar-toggle=""] { left: 88px; }
+html[data-lights][data-left-rail]:not([data-fullscreen]) [data-corner] > [data-title-row] { padding-left: calc(88px - var(--spacing)); }
+html[data-lights]:is([data-left-rail], [data-popout]):not([data-fullscreen]) [data-corner] > [data-bare]:not([data-merged]) { height: calc(var(--spacing) * 10); }
+/* A pop-out window (no sidebars): its top-left tab bar makes room for the lights. */
+html[data-lights][data-popout]:not([data-fullscreen]) [data-corner] > [data-title-row] { padding-left: calc(88px - var(--spacing)); }
+/* Stand-ins for the traffic lights while the sidebar slides (core/peek.ts places and shows them): the Mac's colours as
+   macOS 26 draws them (Display P3), and out of focus its grey, which lightens what's under it (darkens, in light mode). */
+[data-lights-ghost], [data-lights-drawn] { position: absolute; display: flex; gap: calc(var(--light-pitch) - var(--light-size)); pointer-events: none; }
+[data-lights-drawn] { position: fixed; z-index: 2147483000; }
+:is([data-lights-ghost], [data-lights-drawn]):not([data-shown]), html[data-fullscreen] :is([data-lights-ghost], [data-lights-drawn]) { visibility: hidden; }
+:is([data-lights-ghost], [data-lights-drawn]) > i { width: var(--light-size); height: var(--light-size); border-radius: 50%; background: var(--light);
+  box-shadow: inset 0 0 0 0.5px var(--light-rim); }
+:is([data-lights-ghost], [data-lights-drawn]) > i:nth-child(1) { --light: color(display-p3 0.925 0.404 0.396); --light-rim: color(display-p3 0.867 0.184 0.169); }
+:is([data-lights-ghost], [data-lights-drawn]) > i:nth-child(2) { --light: color(display-p3 0.949 0.792 0.267); --light-rim: color(display-p3 0.898 0.69 0.004); }
+:is([data-lights-ghost], [data-lights-drawn]) > i:nth-child(3) { --light: color(display-p3 0.396 0.769 0.4); --light-rim: color(display-p3 0.169 0.663 0.18); }
+html[data-window-inactive] [data-lights-ghost] > i { --light: rgb(35 35 35); --light-rim: rgb(45 45 45); mix-blend-mode: plus-lighter; }
+@media (prefers-color-scheme: light) { html[data-window-inactive] [data-lights-ghost] > i { mix-blend-mode: difference; } }
+/* In step with the panes sliding (core/panemotion.ts, on the spring), so the first tab never passes
+   under the lights while the sidebar opens or folds. */
+html:is([data-electron], [data-lights]) [data-corner] > [data-title-row] { transition: padding-left var(--motion-spring) var(--spring); }
+/* Folded to its rail, the lights are wider than it: the rail's top row looks like the tab bar beside it (one title bar),
+   and its edge starts under that row instead of running between the lights. */
+html[data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed] { border-right-width: 0; }
+html[data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed]::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: calc(var(--spacing) * 10); background: var(--background);
+  border-bottom: 0.5px solid var(--border);
+}
+html[data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed]::after {
+  content: ""; position: absolute; top: calc(var(--spacing) * 10); bottom: 0; right: 0; width: 0.5px; background: var(--border);
+}
+/* That row's line would sit right on the rail's first icon, whichever it is (Workspaces' switcher, Search, Pinned...):
+   the icons start as far below it as the line between the rail's groups is from its icons. */
+html[data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed] [data-rail] { padding-top: 6px; }
+html[data-electron] .vault-manager-drag { -webkit-app-region: drag; }
+/* On Windows (data-platform=win32) the title bar is hidden too and its controls sit over the window's top-right corner,
+   --window-controls wide (electron/preload.cjs): the right sidebar's toggle moves left of them, and the top-right pane's
+   tab bar makes room for both (with a right rail: the controls are wider than it, as the Mac's lights are than the left). */
+html[data-electron][data-platform=win32]:not([data-fullscreen]) [data-sidebar-toggle=right] { right: calc(var(--window-controls, 138px) + 8px); }
+html[data-electron][data-platform=win32]:not([data-fullscreen]):not([data-right-sidebar]) [data-right-corner] > [data-title-row] { padding-right: calc(var(--spacing) * 10 + var(--window-controls, 138px)); }
+html[data-electron][data-platform=win32][data-no-rails]:not([data-fullscreen]):not([data-right-sidebar]) [data-right-corner] > [data-title-row] { padding-right: calc(var(--window-controls, 138px) + 8px); }
+html[data-electron][data-platform=win32][data-right-rail]:not([data-fullscreen]) [data-right-corner] > [data-title-row] { padding-right: calc(var(--window-controls, 138px) - var(--spacing)); }
+html[data-electron][data-platform=win32]:not([data-fullscreen]):is(:not([data-right-sidebar]), [data-right-rail]) [data-right-corner] > [data-bare]:not([data-merged]) { height: calc(var(--spacing) * 10); }
+html[data-electron][data-platform=win32] [data-right-corner] > [data-title-row] { transition: padding-right var(--motion-spring) var(--spring); }
+
+/* Phones: the window scrolls under the fixed header (PhoneHeader), so a heading scrolled to ([[Note#Heading]]) stops
+   below it rather than under it. Nothing but a scroller pans sideways: a sideways drag is the app's (a drawer opened by a
+   swipe anywhere, PhoneDrawer.tsx, the screen below a short page too; rows' swipes; core/sideways.ts says whose). touch-action
+   stops at the nearest scroller, so everything in a drawer says so too, or its panels' scroller would hand a sideways
+   swipe to the browser (pointercancel) before the drawer or a row sees it. */
+html[data-phone] { scroll-padding-top: calc(env(safe-area-inset-top) + 3.5rem); }
+html[data-phone], :where([data-phone]) [data-drawer-box] * { touch-action: pan-y pinch-zoom; }
+/* Phones: Back/Forward move like a browser's (core/motion.ts sets data-motion). The pictures of the screen before and
+   after (old/new root) are moved; the phone's bar is a group of its own and stays put. */
+::view-transition-old(root), ::view-transition-new(root) { mix-blend-mode: normal; transform-origin: 0 0; }
+html[data-motion] { --motion-ease: cubic-bezier(.32, .72, 0, 1); }
+@keyframes motion-slide-to { to { transform: translateX(var(--mto)); } }
+@keyframes motion-slide-from { from { transform: translateX(var(--mfrom)); filter: brightness(0.85); } }
+/* The tab list zooming (core/motion.ts): the page shows through around its card until the list fades in. */
+html[data-tab-zoom] dialog::backdrop { background: transparent; }
+/* Back: the page slides off to the right, over the one before coming in from the left (Forward: the other way). */
+html[data-motion="back"]::view-transition-old(root), html[data-motion="forward"]::view-transition-old(root) {
+  z-index: 1;
+  box-shadow: 0 0 24px rgb(0 0 0 / 0.18);
+  animation: motion-slide-to 320ms var(--motion-ease) both;
+}
+html[data-motion="back"]::view-transition-new(root), html[data-motion="forward"]::view-transition-new(root) {
+  animation: motion-slide-from 320ms var(--motion-ease) both;
+}
+/* The bar dragged up (core/pageLift.ts): the page, a card of its own over a dimmed ground, shrinks after the finger. */
+html[data-page-lift], html[data-page-lift] body { background: color-mix(in srgb, var(--foreground) 14%, var(--background)); }
+html[data-page-lift] #main-scroll > main { min-height: 100dvh; background: var(--background); }
+/* (cut to the card by its clip-path, the page can't cast a shadow: a box of the card's size behind it does) */
+[data-lift-shadow] { box-shadow: 0 10px 40px rgb(0 0 0 / 0.25), 0 0 0 0.5px rgb(0 0 0 / 0.06); }
+/* A split tab's panes either side of the page (PhoneFiles.tsx), off its edges: laid out once, shown while it's swiped,
+   as tall as the window from its top, each at the scroll it will have (core/phoneTabs.ts sets the vars). */
+[data-beside] {
+  position: absolute; top: var(--beside-top, 0px); width: 100%; height: var(--beside-h, 0px); padding-inline: calc(var(--spacing) * 4);
+  overflow: clip; contain: strict; visibility: hidden; pointer-events: none;
+}
+[data-beside="-1"] { left: calc(-100% - 20px); }
+[data-beside="1"] { left: calc(100% + 20px); }
+[data-beside] > div { transform: translateY(var(--beside-y, 0px)); }
+#main-scroll > main[data-swiping] [data-beside] { visibility: visible; }
+/* The phone's bar stays where it is: its buttons change in place. */
+::view-transition-group(phone-bar) { animation-duration: 200ms; }
+
+/* The layers a hidden sidebar slides in among, bottom to top: what floats over the page (comment cards, agents'
+   cursors, the find bar) stays the page's, so the shade dims it and the sidebar covers it; what rides on the sidebar
+   (its toggle, a cursor on one of its rows) goes over it, and what the user opens (a menu: 60, a preview, a tooltip)
+   over all. */
+:root { --z-page-float: 32; --z-peek-shade: 35; --z-peek-edge: 38; --z-peek: 40; --z-peek-rider: 50; }
+
+/* A sidebar's moves, every part on one spring: pinned and unpinned, folded to its rail, slid in over the page and out
+   (core/peek.ts useSideMotion). Coming from off the window it arrives pinned-shaped, only sliding; going off it slides
+   out pinned-shaped and takes the floating card's shape once out of sight, so neither jumps on the way. */
+aside[data-side] {
+  transition-property: width, translate, top, bottom, left, right, border-radius, box-shadow, outline-color;
+  transition-duration: var(--motion-spring); transition-timing-function: var(--spring);
+}
+/* (an outline to fade: the floating card's edge, core/peek.ts) */
+aside[data-side]:not([data-peek]) { outline: 0.5px solid transparent; outline-offset: -0.5px; }
+aside[data-side][data-motion=in] { transition-property: width, translate; }
+aside[data-side][data-motion=out] {
+  transition-duration: var(--motion-spring), var(--motion-spring), 0s, 0s, 0s, 0s, 0s, 0s, 0s;
+  transition-delay: 0s, 0s, var(--motion-spring), var(--motion-spring), var(--motion-spring), var(--motion-spring), var(--motion-spring), var(--motion-spring), var(--motion-spring);
+}
+/* Dragged shut, or out again, in one drag, it still slides (a drag stops every other transition: body[data-resizing]). */
+body[data-resizing] aside[data-side][data-motion=in] { transition: translate var(--motion-spring) var(--spring) !important; }
+body[data-resizing] aside[data-side][data-motion=out] {
+  transition: width var(--motion-spring) var(--spring), translate var(--motion-spring) var(--spring), top 0s var(--motion-spring), bottom 0s var(--motion-spring),
+    left 0s var(--motion-spring), right 0s var(--motion-spring), border-radius 0s var(--motion-spring), box-shadow 0s var(--motion-spring), outline-color 0s var(--motion-spring) !important;
+}
+/* Behind a hidden sidebar slid in (appearance `peekShade`): a soft dim that waits for the sidebar to be in, so brushing
+   the window's edge never flashes the page, and lifts at once. Stronger in dark, where a dark page hardly darkens. */
+[data-peek-edge] { pointer-events: none; }
+:root[data-in-frame] [data-peek-edge] { pointer-events: auto; }
+[data-peek-shade] { background: rgb(0 0 0 / 0.08); opacity: 0; transition: opacity 120ms ease-in; }
+.dark [data-peek-shade] { background: rgb(0 0 0 / 0.4); }
+[data-peek-shade][data-shown] { opacity: 1; transition: opacity 280ms ease-out 140ms; }
+
+/* A pane moving (core/panemotion.ts): its plate shown under it, the one the user moved over the others. Zoomed and
+   floating panes keep their own z-index (inline). */
+[data-plate][data-moving] { visibility: visible; z-index: 1; }
+section[data-moving] { z-index: 2; }
+[data-plate][data-moving="up"] { z-index: 3; }
+section[data-moving="up"] { z-index: 4; }
+/* A floating pane dragged by its bar: lifted, a bigger shadow (the ring kept). */
+[data-plate] { transition: box-shadow var(--motion-fast) var(--ease-out); }
+[data-plate][data-dragging] { box-shadow: 0 0 0 0.5px var(--border), 0 24px 64px -12px rgb(0 0 0 / 0.45), 0 4px 14px -4px rgb(0 0 0 / 0.25); }
+/* Split, the panes without the focus fade a little (appearance `dimPanes`): their text toward the page, their surface a
+   shade darker, cross-fading as the focus moves. Above what a pane draws, under a drop's zone (z-20); not under a zoomed
+   pane (inert), whose z-index is lower than its fade's. */
+[data-pane-body]::after {
+  content: ""; position: absolute; inset: 0; z-index: 19; pointer-events: none; opacity: 0;
+  background: color-mix(in srgb, var(--background) 90%, black); transition: opacity var(--motion-fast) var(--ease-out);
+}
+:root[data-dim-panes] section[data-pane-frame]:not([data-focused], [inert]) > [data-pane-body]::after { opacity: 0.3; }
+:root.dark[data-dim-panes] section[data-pane-frame]:not([data-focused], [inert]) > [data-pane-body]::after { opacity: 0.38; }
+
+/* Panes as cards (appearance `paneCards`, desktop): each tiled pane an inset, rounded card, the sidebars' colour in the
+   gaps around and between them (Workspace.tsx places panes and dividers by --pane-gap, the dividers in the gaps). The
+   card clips what it shows (terminals, editors, frames); split, the focused one has a slightly firmer edge. */
+@property --pane-gap { syntax: "<length>"; inherits: true; initial-value: 0px; }
+:root[data-pane-cards] {
+  --pane-gap: calc(var(--spacing) * 1.5);
+  --card-edge: 0 0 0 0.5px var(--border);
+  --card-lift: 0 1px 3px -1px rgb(0 0 0 / 0.08);
+}
+:root.dark[data-pane-cards] { --card-edge: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 12%, transparent); --card-lift: 0 1px 3px -1px rgb(0 0 0 / 0.4); }
+:root[data-pane-cards] [data-pane-area] { background: var(--color-sidebar); }
+/* The tab bar is chrome too, one surface with the gaps and the sidebar (its workspace tint too): the cards are the only
+   page-coloured surfaces. */
+:root[data-pane-cards] [data-tab-bar] { background: var(--color-sidebar); border-bottom-color: transparent; }
+:root[data-pane-cards] [data-pane-area] > :is(section[data-pane-frame]:not([data-floating]), [data-pane-gone]) {
+  border-width: 0; border-radius: var(--radius-card); overflow: hidden; background: var(--background); box-shadow: var(--card-edge), var(--card-lift);
+  transition: box-shadow var(--motion-fast) var(--ease-out);
+}
+:root[data-pane-cards] [data-pane-area][data-split] > section[data-pane-frame][data-focused]:not([data-floating]) {
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 24%, transparent), 0 2px 8px -2px rgb(0 0 0 / 0.14);
+}
+:root.dark[data-pane-cards] [data-pane-area][data-split] > section[data-pane-frame][data-focused]:not([data-floating]) {
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--foreground) 26%, transparent), 0 2px 8px -2px rgb(0 0 0 / 0.5);
+}
+:root[data-pane-cards] [data-pane-area] > [data-plate] { border-radius: var(--radius-card); }
+/* The status bar's parts, chips inside the cards they speak for: a gap in from the card's corner (statusColumns.ts puts
+   them at its edge), concentric with it, so the card's corner stays whole. */
+:root[data-pane-cards] [data-status-bar] {
+  height: calc(var(--spacing) * 6); margin: 0 var(--pane-gap) calc(var(--pane-gap) * 2); padding-right: calc(var(--spacing) * 2);
+  border: 0.5px solid var(--color-border); border-radius: var(--radius-chip); background: var(--card); box-shadow: var(--card-lift);
+}
+:root[data-pane-cards]:not([data-phone]) :is([data-pane], [data-kept]) { --vau-panel-bottom: calc(var(--spacing) * 6 + var(--pane-gap)); }
+/* The sidebar's foot (the vault, Plugins, Settings) in line with those chips: its buttons centred on theirs, as tall. */
+:root[data-pane-cards] aside[data-side=left]:not([data-collapsed], [data-peek]) [data-sidebar-foot] {
+  padding-top: calc(var(--spacing) * 4.5 - var(--pane-gap) * 2); padding-bottom: calc(var(--pane-gap) * 2 - var(--spacing) * 0.5);
+}
+/* A pop-out with its bars hidden (Hide window bars): what it shows fills it, edge to edge, unless it's split. */
+:root[data-bars-hidden] [data-pane-area]:not([data-split]) { --pane-gap: 0px; }
+:root[data-pane-cards][data-bars-hidden] [data-pane-area]:not([data-split]) > :is(section[data-pane-frame]:not([data-floating]), [data-plate]) { border-radius: 0; box-shadow: none; }
+/* The sidebars run into the gaps: no line between them. */
+:root[data-pane-cards] aside[data-side]:not([data-peek]) { border-color: transparent; }
+html[data-lights][data-pane-cards]:not([data-fullscreen]) aside[data-side=left][data-collapsed]::before,
+html[data-lights][data-pane-cards]:not([data-fullscreen]) aside[data-side=left][data-collapsed]::after { content: none; }
+html[data-lights][data-pane-cards]:not([data-top-tabs], [data-fullscreen]) aside[data-side=left][data-collapsed] [data-rail] { padding-top: 0; }
+/* With no tab bar the cards' title rows start a gap down: the sidebars' top rows, their toggles (and the lights in
+   the left one) are centred on the same line. */
+:root[data-pane-cards]:not([data-top-tabs]) aside[data-side]:not([data-peek]) [data-titlebar] { margin-top: var(--pane-gap); }
+:root[data-pane-cards]:not([data-top-tabs]) [data-sidebar-toggle] { translate: 0 var(--pane-gap); }
+/* Except where the Mac's lights sit in the pinned left sidebar: a gap down, they sat low in the window's corner. Its
+   top row, the lights and the toggle stay at the window's top. */
+html[data-lights][data-pane-cards]:not([data-top-tabs], [data-fullscreen]) aside[data-side=left]:not([data-peek], [data-collapsed]) [data-titlebar] { margin-top: 0; }
+html[data-lights][data-pane-cards]:not([data-top-tabs], [data-fullscreen]) [data-sidebar-toggle=""][aria-expanded=true] { translate: none; }
+/* With no right sidebar and no tab bar, its toggle sits in the top-right card's bar: as far in as the card is. */
+:root[data-pane-cards]:not([data-right-sidebar]):not([data-top-tabs]) [data-sidebar-toggle=right] { translate: calc(var(--pane-gap) * -0.5) var(--pane-gap); }
+/* Beside a Mac's rail (narrower than the lights) with no tab bar, the lights sit in the top-left card's title row
+   (core/peek.ts), as far from its corner as from the window's; the toggle and the row's items follow them as there. */
+html[data-lights][data-left-rail][data-pane-cards]:not([data-top-tabs], [data-fullscreen]) [data-sidebar-toggle=""] {
+  left: calc(var(--spacing) * 11 + var(--pane-gap) + 88px);
+}
+html[data-lights][data-left-rail][data-pane-cards]:not([data-top-tabs], [data-fullscreen]) [data-corner] > [data-title-row] {
+  padding-left: calc(88px + var(--spacing) * 10);
+}
+/* Translucent, the gaps' tint is under none of the cards (over it, a translucent page lets less through than without
+   cards): each tiled pane's cell (in its plate) tints the gaps before it, and after it at the area's far edges, around
+   its rounded corners. The cells clip square, on whole pixels, so they meet without a seam. Panes moving, the area. */
+[data-pane-cell] { display: none; }
+html[data-translucent][data-pane-cards] [data-pane-area] { background: none; }
+html[data-translucent][data-pane-cards] [data-pane-cell] {
+  --cell-r: 0px; --cell-b: 0px;
+  display: block; position: absolute; z-index: -1; visibility: visible; overflow: clip;
+  inset: calc(-1 * var(--pane-gap)) calc(-1 * var(--cell-r)) calc(-1 * var(--cell-b)) calc(-1 * var(--pane-gap));
+  &[data-pane-cell~=right] { --cell-r: var(--pane-gap); }
+  &[data-pane-cell~=bottom] { --cell-b: var(--pane-gap); }
+  &::before {
+    content: ""; position: absolute; inset: var(--pane-gap) var(--cell-r) var(--cell-b) var(--pane-gap); border-radius: var(--radius-card);
+    box-shadow: 0 0 0 calc(var(--pane-gap) * 2 + var(--radius-card)) var(--chrome-sidebar);
+  }
+}
+html[data-translucent][data-pane-cards] [data-pane-area]:has(> [data-moving]) { background: var(--chrome-sidebar); }
+html[data-translucent][data-pane-cards] :is([data-pane-area]:has(> [data-moving]), [data-bars-hidden] [data-pane-area]:not([data-split])) [data-pane-cell] { display: none; }
+html[data-translucent][data-pane-cards] [data-pane-area] > section[data-pane-frame]:not([data-floating]) { background: none; }
+html[data-translucent][data-pane-cards] section[data-pane-frame] > [data-pane-bar] { background: var(--chrome); }
+/* (a split's bare strip, no title in it, is the page's top edge) */
+html[data-translucent][data-pane-cards] section[data-pane-frame] > [data-pane-bar][data-bare] { background: var(--page-glass, var(--background)); }
+html[data-translucent][data-pane-cards] [data-top] > [data-tab-bar],
+html[data-translucent][data-lights][data-pane-cards]:not([data-fullscreen]) aside[data-side=left][data-collapsed] { background: var(--chrome-sidebar); }
+
+/* The bars above files fading (appearance `fileBarFade`, core/barfade.ts): slower than they come back. Typing in a
+   file, or always, back while the pointer is at one (or the keyboard in it); leaving it, a moment's grace first. */
+[data-view-bar] { transition: opacity var(--motion-fast) var(--ease-out); container-type: scroll-state; }
+/* Its line only once the page scrolls under it. */
+@container scroll-state(stuck: top) { [data-view-bar]::after { content: ""; position: absolute; inset: auto 0 0; border-bottom: 0.5px solid color-mix(in srgb, var(--border) 70%, transparent); } }
+:root[data-typing] [data-view-bar] { opacity: 0; transition: opacity 500ms ease-in 200ms; }
+:root[data-bar-fade=always] [data-view-bar]:not([data-shown], :has(:focus-visible)) { opacity: 0; transition: opacity 400ms ease-in 350ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-peek-shade], [data-peek-shade][data-shown], [data-view-bar], :root[data-typing] [data-view-bar], :root[data-bar-fade=always] [data-view-bar]:not([data-shown], :has(:focus-visible)) { transition: none; }
+}
+
+/* A slider (components/kit.tsx Slider): a thin track filled in the accent to its value (--pct), a white thumb. */
+.slider { -webkit-appearance: none; appearance: none; background: none; }
+.slider::-webkit-slider-runnable-track { height: 4px; border-radius: 9999px; background: linear-gradient(to right, var(--primary) 0 var(--pct, 0%), color-mix(in oklab, var(--foreground) 12%, transparent) var(--pct, 0%) 100%); }
+.slider::-moz-range-track { height: 4px; border-radius: 9999px; background: linear-gradient(to right, var(--primary) 0 var(--pct, 0%), color-mix(in oklab, var(--foreground) 12%, transparent) var(--pct, 0%) 100%); }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -7px; width: 18px; height: 18px; border-radius: 9999px; background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 0 0 0.5px rgb(0 0 0 / 0.08); }
+.slider::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 9999px; background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 0 0 0.5px rgb(0 0 0 / 0.08); }
+.slider:focus-visible { outline: none; }
+.slider:focus-visible::-webkit-slider-thumb { outline: 2px solid color-mix(in oklab, var(--primary) 45%, transparent); outline-offset: 2px; }
+
+/* Settings' Glass picture: a desktop behind its window, in the scheme's colours. */
+.glass-desktop { background: linear-gradient(135deg, var(--blue), var(--purple) 55%, var(--orange)); }
+/* Translucent window (appearance `translucent`; core/appearance.ts sets data-translucent only while the desktop app's
+   window has the system's blur under it): the chrome shows it in the scheme's own colours, what's read stays solid. */
+/* --glass-level, 0 to 2 (`translucency`, core/appearance.ts): how much shows through, 1 the scheme's own. */
+:root { --translucent-tint: calc(100% - var(--glass-level, 1) * 30%); } /* (more in light: its muted text over a dark desktop) */
+.dark { --translucent-tint: calc(100% - var(--glass-level, 1) * 40%); }
+html[data-translucent] {
+  --chrome: color-mix(in srgb, var(--background) var(--translucent-tint), transparent);
+  --chrome-sidebar: color-mix(in srgb, var(--sidebar) var(--translucent-tint), transparent);
+}
+html[data-translucent], html[data-translucent] body { background: transparent; }
+html[data-translucent] [data-pane-body] { background: var(--background); }
+html[data-translucent] aside[data-side] { background: var(--chrome-sidebar); }
+html[data-translucent] [data-top] > [data-title-row] { background: var(--chrome); }
+/* The rail's top row is the tab bar's, one title bar (above): its colour, over nothing else. */
+html[data-translucent][data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed] {
+  background: linear-gradient(var(--chrome), var(--chrome)) top / 100% calc(var(--spacing) * 10) no-repeat, var(--chrome-sidebar);
+}
+html[data-translucent][data-lights]:not([data-fullscreen]) aside[data-side=left][data-collapsed]::before { background: none; }
+/* Over the page rather than the desktop (a hidden sidebar slid in, the status bar, a heading its panel scrolls under):
+   glass, blurring what's under it. Menus nearly solid, to read. */
+html[data-translucent] :is(aside[data-peek], [data-status-bar]) {
+  background: color-mix(in srgb, var(--sidebar) 82%, transparent); -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+}
+html[data-translucent] aside[data-side] [data-panel-handle].sticky { background: none; container-type: scroll-state; }
+/* (only while stuck: a backdrop blur over the sidebar's own tint would tint it twice) */
+@container scroll-state(stuck: top) {
+  html[data-translucent] aside[data-side] [data-panel-handle].sticky::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+}
+html[data-translucent]:not([data-over-pages]) .glass-strong { background: linear-gradient(var(--popover), var(--popover)) color-mix(in srgb, var(--background) 70%, transparent); }
+/* Translucent pages too (appearance `translucentPages`): what's read shows the desktop as well, more lightly than the
+   chrome, so it still sits above it. Web pages and media keep their own solid ground. */
+:root { --translucent-page-tint: calc(100% - var(--page-glass-level, 1) * 12%); }
+.dark { --translucent-page-tint: calc(100% - var(--page-glass-level, 1) * 18%); }
+html[data-translucent][data-translucent-pages] { --page-glass: color-mix(in srgb, var(--background) var(--translucent-page-tint), transparent); }
+html[data-translucent][data-translucent-pages] {
+  & [data-pane-body] { background: var(--page-glass); }
+  /* What paints the page's own ground over it lets it through: terminals (their theme too), canvases, the graph. */
+  & [data-pane-body] :is([data-terminal-view], [data-terminal-view] [data-term-viewport], [data-canvas-board], [data-graph-view]) { background: transparent; }
+  /* A file's bar: clear at the top, the page blurred under it once it scrolls (sticky: stuck). */
+  & [data-pane-body] [data-view-bar] { background: none; container-type: scroll-state; }
+}
+@container scroll-state(stuck: top) {
+  html[data-translucent][data-translucent-pages] [data-pane-body] [data-view-bar]::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; background: color-mix(in srgb, var(--background) 50%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(160%); backdrop-filter: blur(16px) saturate(160%);
+  }
+}
+
+/* The web demo's desktop under a translucent window (web/demo/boot.ts sets data-demo-desk): a wallpaper of its own in
+   the scheme's colours, soft as the system's blur would leave it (it only shows through the chrome); or, on vaultite.com's
+   bundle pages (page), none: the page around it draws one and blurs it under the window. */
+html[data-demo-desk] {
+  --demo-desk:
+    radial-gradient(60% 55% at 12% 18%, color-mix(in srgb, var(--blue) 85%, transparent), transparent 70%),
+    radial-gradient(55% 60% at 88% 12%, color-mix(in srgb, var(--pink) 70%, transparent), transparent 70%),
+    radial-gradient(65% 60% at 80% 88%, color-mix(in srgb, var(--orange) 80%, transparent), transparent 70%),
+    radial-gradient(60% 65% at 15% 92%, color-mix(in srgb, var(--teal) 80%, transparent), transparent 70%),
+    linear-gradient(135deg, var(--indigo), var(--purple));
+}
+html[data-translucent][data-demo-desk=own] { background: var(--demo-desk); }
+html.dark[data-translucent][data-demo-desk=own] { background: linear-gradient(rgb(0 0 0 / 0.45), rgb(0 0 0 / 0.45)), var(--demo-desk); }
+
+/* A hover card (components/HoverCard.tsx: a setting's preview, a tab's; the palette's): fades and grows in from what it's for; warm,
+   it's there at once. */
+@keyframes preview-in { from { opacity: 0; scale: 0.96; } }
+[data-hover-card][data-cold] .preview-card, [data-palette-preview][data-cold] .preview-card { animation: preview-in var(--motion) var(--ease-out); }
+
+/* Dictation (core/dictation.ts, core/pill.ts): a pill of bars that move with the voice, by where the words go; a
+   field's pending words beside them, as a field can't draw them. Over the palette (the Ask box), under menus. */
+.dictation-pill {
+  position: fixed; left: 0; top: 0; z-index: 55; display: flex; align-items: center; gap: 7px; height: 22px;
+  max-width: min(420px, 60vw); padding: 0 9px; border-radius: 11px; background: var(--foreground); color: var(--background);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.18); font-size: 13px; line-height: 22px; cursor: default;
+}
+.dictation-bars { display: flex; flex: none; align-items: center; gap: 2px; height: 12px; }
+.dictation-bars i { display: block; width: 2px; height: 12px; border-radius: 1px; background: currentColor; transform: scaleY(0.2);
+  transition: transform 80ms linear; }
+.dictation-pill:not([data-ready]) .dictation-bars { opacity: 0.5; }
+.dictation-pending { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.75; }
+/* Dictation's box over the screen (screen.tsx): the bars, then the words as they're said, the newest always showing. */
+.dictation-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; border-radius: 12px; background: var(--foreground); color: var(--background);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.22); font-size: 13.5px; line-height: 19px; }
+.dictation-box[data-said] { width: 340px; padding: 6px 10px 8px; }
+.dictation-box .dictation-pill { box-shadow: none; padding: 0; background: none; color: inherit; }
+/* (over the screen a pill sits in its box under the menu bar: fixed, as in the app, it went to the screen's top left) */
+.screen-box .dictation-pill { position: static; }
+.dictation-box:not([data-said]) { padding: 0 9px; }
+.dictation-free { font-size: 11.5px; opacity: 0.65; }
+.dictation-words { display: flex; flex-direction: column-reverse; max-height: calc(19px * 7); overflow: hidden; overflow-wrap: anywhere; }
+.dictation-words[data-long] { mask-image: linear-gradient(to bottom, transparent, black 14px); }
+.dictation-words p { margin: 0; }
+.dictation-pending-words { opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) { .dictation-bars i { transition: none; } }
+
+/* The welcome card's backdrop (components/Welcome.tsx): a light dim, none on the look page, where the app behind is the
+   point. */
+.welcome-scrim { background: rgb(0 0 0 / 0.16); transition: background-color 300ms ease; animation: welcome-scrim-in 200ms ease; }
+.dark .welcome-scrim { background: rgb(0 0 0 / 0.32); }
+.welcome-scrim[data-welcome-page="look"] { background: transparent; }
+@keyframes welcome-scrim-in { from { background: transparent; } }
+
+/* Do it on a drawn note's open task: on hover (a phone: always, a small tap away). */
+.md-do-it { margin-left: 8px; padding: 0 6px; border-radius: 6px; color: var(--primary); font-size: 12px; line-height: 20px; cursor: pointer; opacity: 0; }
+li:hover:not(:has(li:hover)) > .md-do-it, .md-do-it:focus-visible { opacity: 1; }
+.md-do-it:hover { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+@media (pointer: coarse) { .md-do-it { opacity: 1; line-height: 28px; } }

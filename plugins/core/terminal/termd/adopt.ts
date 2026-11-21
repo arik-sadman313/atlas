@@ -1,0 +1,174 @@
+import net from "node:net"
+import { lineReader } from "../lines.ts"
+import type { Said } from "../osc7501.ts"
+import { PROTOCOL } from "./protocol.ts"
+import { type Driver, Session } from "./host.ts"
+
+type Msg = Record<string, unknown>
+type Wire = { sock: net.Socket; send(m: Msg): void; ask(m: Msg, ms?: number): Promise<Msg>; call(m: Msg, fn: (a: Msg) => void): void; on(fn: (m: Msg) => void): void }
+function connect(socket: string): Promise<Wire> {
+  return new Promise((ok, fail) => {
+    const sock = net.connect(socket)
+    let seq = 0
+    const waiting = new Map<number, (m: Msg) => void>(), heard = new Set<(m: Msg) => void>()
+    sock.setEncoding("utf8")
+    sock.on("data", lineReader((line) => {
+      let m: Msg
+      try { m = JSON.parse(line) } catch { return }
+      const re = typeof m.re === "number" ? m.re : -1, w = waiting.get(re)
+      if (w) { waiting.delete(re); w(m) } else for (const fn of heard) fn(m)
+    }))
+    const close = () => { for (const w of waiting.values()) w({ error: "it went away" }); waiting.clear() }
+    sock.on("close", close)
+    sock.once("error", fail)
+    sock.once("connect", () => {
+      sock.removeListener("error", fail)
+      sock.on("error", close)
+      ok({
+        sock,
+        send: (m) => { if (!sock.destroyed) sock.write(JSON.stringify(m) + "\n") },
+        ask: (m, ms = 5000) => new Promise((resolve, reject) => {
+          const re = ++seq
+          const timer = setTimeout(() => { waiting.delete(re); reject(new Error(`it didn't answer ${m.op}`)) }, ms)
+          waiting.set(re, (a) => { clearTimeout(timer); if (typeof a.error === "string") reject(new Error(a.error)); else resolve(a) })
+          sock.write(JSON.stringify({ ...m, re }) + "\n")
+        }),
+        call: (m, fn) => { const re = ++seq; waiting.set(re, fn); sock.write(JSON.stringify({ ...m, re }) + "\n") },
+        on: (fn) => { heard.add(fn) },
+      })
+    })
+  })
+}
+
+type Kit = {
+  around: ConstructorParameters<typeof Session>[0]
+  sessions: Map<string, Session>
+  dropStatus: WeakMap<Session, () => void>
+}
+
+type Listed = { id: string; pid?: number; process?: string; created?: number; title?: string; cols?: number; rows?: number; spare?: boolean; said?: Said }
+
+const AT_ONCE = 4
+const retryIn = (tries: number) => Math.min(60_000 * (tries + 1), 600_000)
+
+export function adopter(k: Kit) {
+  const going = new Map<string, Promise<string[]>>()
+  const adopt = (socket: string, scrollback: number, tries = 0): Promise<string[]> => {
+    if (!socket) return Promise.reject(new Error("which server? give its socket"))
+    let p = going.get(socket)
+    if (!p) {
+      p = adoptFrom(k, socket, scrollback, tries, () => {
+        setTimeout(() => void adopt(socket, scrollback, tries + 1).catch(() => {}), retryIn(tries)).unref()
+      })
+      going.set(socket, p)
+      p.catch(() => {}).finally(() => { if (going.get(socket) === p) going.delete(socket) })
+    }
+    return p
+  }
+  return adopt
+}
+
+async function adoptFrom(k: Kit, socket: string, scrollback: number, tries: number, failed: () => void): Promise<string[]> {
+  let ctl: Wire
+  try { ctl = await connect(socket) } catch { return [] }
+  const mine = new Map<string, Session>()
+  const procs = new Map<string, string>()
+  let via: number, listed: Listed[]
+  try {
+    const hello = await ctl.ask({ op: "hello" })
+    if (Number(hello.v) > PROTOCOL || (Number(hello.v) === PROTOCOL && !hello.handedOver)) throw new Error(`the server at ${socket} speaks protocol ${hello.v}, not an older one, and holds on to its terminals`)
+    via = Number(hello.pid) || 0
+    // Protocol 1 tells OSC 7501 as `status` once asked; 2 on, as events.
+    ctl.on((m) => {
+      const s = typeof m.id === "string" ? mine.get(m.id) : undefined
+      if (!s) return
+      if (m.t === "status") s.status({ seen: !!m.seen, status: (m.status ?? null) as Said["status"] })
+      else if (m.t === "event" && m.type === "status") s.status(m.said as Said)
+      else if (m.t === "event" && m.type === "title" && typeof m.title === "string") s.title = m.title
+    })
+    ctl.send({ op: Number(hello.v) >= 2 ? "subscribe" : "status" })
+    listed = ((await ctl.ask({ op: "list" })).sessions ?? []) as Listed[]
+  } catch (e) { ctl.sock.destroy(); throw e }
+  const poll = setInterval(() => {
+    ctl.ask({ op: "list" }).then((r) => { for (const x of (r.sessions ?? []) as Listed[]) { procs.set(x.id, x.process ?? ""); const s = mine.get(x.id); if (s && x.title && !s.title) s.title = x.title } }, () => {})
+  }, 2000)
+  const done = (said = "") => {
+    if (mine.size) return
+    clearInterval(poll)
+    ctl.sock.destroy()
+    if (said) k.around.log(said, socket)
+    k.around.changed?.()
+  }
+  ctl.sock.on("close", () => clearInterval(poll))
+  let missed = 0
+  const one = async (x: Listed) => {
+    if (x.spare || x.id.startsWith("vauspare-")) { await ctl.ask({ op: "kill", id: x.id }).catch(() => {}); return }
+    if (k.sessions.has(x.id)) return
+    try {
+      const s = await adoptOne(k, socket, ctl, x, via, scrollback, procs, 15_000 * (tries + 1))
+      mine.set(x.id, s); s.meta = { ...s.meta }
+      const end = s.ended.bind(s)
+      s.ended = (exit) => { end(exit); if (mine.delete(x.id)) done("adopted: none left at") }
+    } catch (e) { missed++; k.around.log("adopt", x.id, "failed:", e) }
+  }
+  await inTurns(listed, AT_ONCE, one)
+  k.around.log(`adopted ${mine.size} from ${socket} (pid ${via})${missed ? `, ${missed} not yet` : ""}`)
+  done()
+  if (missed) failed()
+  return [...mine.keys()]
+}
+
+async function inTurns<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
+  const queue = [...items]
+  await Promise.all(Array.from({ length: n }, async () => { for (let x = queue.shift(); x !== undefined; x = queue.shift()) await fn(x) }))
+}
+
+async function adoptOne(k: Kit, socket: string, ctl: Wire, x: Listed, via: number, scrollback: number, procs: Map<string, string>, snapshotMs: number) {
+  const w = await connect(socket)
+  let s: Session | null = null, pictured = false, abandoned = false
+  const early: Msg[] = []
+  const take = (m: Msg) => {
+    if (m.t === "data" && typeof m.d === "string") { if (pictured) s!.output(m.d) }
+    else if (m.t === "size") { s!.term.resize(Number(m.cols) || s!.term.cols, Number(m.rows) || s!.term.rows) }
+    else if (m.t === "exit") { s!.ended({ code: Number(m.code) || 0, signal: Number(m.signal) || 0 }); w.sock.destroy() }
+  }
+  w.on((m) => { if (!s) early.push(m); else take(m) })
+  w.sock.on("close", () => { if (!abandoned) s?.ended({ code: 0, signal: 0, lost: true }) })
+  let a: Msg
+  try { a = await w.ask({ op: "attach", id: x.id }) } catch (e) { w.sock.destroy(); throw e }
+  procs.set(x.id, x.process ?? "")
+  const driver: Driver = {
+    pid: x.pid ?? 0,
+    via,
+    write: (d) => w.send({ op: "input", b64: (Buffer.isBuffer(d) ? d : Buffer.from(d)).toString("base64") }),
+    resize: (cols, rows) => w.send({ op: "resize", cols, rows }),
+    kill: (signal) => ctl.send({ op: "kill", id: x.id, ...(signal ? { signal } : {}) }),
+    pause: () => w.sock.pause(),
+    resume: () => w.sock.resume(),
+    process: () => procs.get(x.id) ?? "",
+  }
+  s = new Session(k.around, { id: x.id, driver, shell: x.process ?? "", cwd: "", command: "", cols: Number(a.cols) || 80, rows: Number(a.rows) || 24, scrollback, spare: false, created: x.created })
+  s.title = x.title ?? ""
+  if (x.said) s.said = x.said
+  k.dropStatus.set(s, () => ctl.send({ op: "status-drop", id: x.id }))
+  k.sessions.set(x.id, s)
+  for (const m of early.splice(0)) take(m)
+  const sess = s
+  await new Promise<void>((ok, fail) => {
+    const timer = setTimeout(() => fail(new Error("it didn't answer snapshot")), snapshotMs)
+    w.call({ op: "snapshot" }, (pic) => {
+      clearTimeout(timer)
+      if (typeof pic.error === "string") return fail(new Error(pic.error))
+      sess.term.write(String(pic.data ?? ""))
+      pictured = true
+      ok()
+    })
+  }).catch((e) => {
+    abandoned = true
+    if (k.sessions.get(x.id) === sess) k.sessions.delete(x.id)
+    w.sock.destroy()
+    sess.term.dispose()
+    throw e
+  })
+  return s
+}

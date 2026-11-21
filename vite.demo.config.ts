@@ -1,0 +1,194 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { defineConfig, type Alias, type Plugin } from 'vite'
+import base, { bootGroups, pluginIcons, pluginModules } from './vite.config.ts'
+import { MACHINE } from './web/demo/machine.ts'
+import { ignoreOf, walk } from './core/rules.ts'
+
+// npm run build:demo (web/demo/CLAUDE.md); VAULTITE_OFFLINE=1 builds the iPhone app's offline app instead (web/offline/:
+// offline.html beside phone.html in web/dist, on the phone's copy of a vault, without Vaultite's own plugins). Real paths: Vite sees each module at its real one, so a folder reached
+// through a link (a Mac's /var) still matches.
+const real = (p: string) => fs.realpathSync.native(p)
+const ROOT = real(import.meta.dirname)
+/** `file`'s path under `dir` with / (it's a module URL's), or null when it isn't under it. */
+const under = (dir: string, file: string) => {
+  const rel = path.relative(dir, file)
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : null
+}
+const node = (file: string) => path.join(ROOT, 'web/demo/node', file)
+const STUBBED = ['node:child_process', 'node:http', 'node:https', 'node:http2', 'node:net', 'node:dns', 'node:readline', 'node:module',
+  'node:perf_hooks', 'node:inspector/promises', 'node:zlib', 'node:sqlite', 'ws', 'node-pty', '@tailwindcss/node', '@tailwindcss/oxide', 'rolldown']
+const ALIASES: Alias[] = [
+  ...Object.entries({ fs: 'fs.ts', path: 'path.ts', crypto: 'crypto.ts', os: 'os.ts', url: 'url.ts', util: 'util.ts', async_hooks: 'async_hooks.ts',
+    'timers/promises': 'timers.ts', events: 'events.ts', 'stream/promises': 'stream.ts', stream: 'stream.ts' }).map(([m, file]) => ({ find: `node:${m}`, replacement: node(file) })),
+  ...STUBBED.map((m) => ({ find: new RegExp(`^${m}$`), replacement: node('stub.ts') })),
+  // (a vault plugin's backend imports the core as @vaultite/core/<name>.ts)
+  { find: /^@vaultite\/core\/(\w+)(?:\.ts)?$/, replacement: path.join(ROOT, 'core/$1.ts') },
+]
+
+// Vaultite's own plugins (Vaultite/plugins, checked out at VAULTITE_PLUGINS, else beside the app) are built in here as
+// if they were the app's, off until turned on: a visitor can't install anything, and bundles name them to install.
+const OFFLINE = process.env.VAULTITE_OFFLINE === '1'
+const PLUGINS_AT = path.resolve(process.env.VAULTITE_PLUGINS ?? path.join(import.meta.dirname, '..', 'vaultite-plugins'))
+if (!OFFLINE && !fs.existsSync(PLUGINS_AT)) throw new Error(`the demo builds in Vaultite's own plugins: check out Vaultite/plugins at ${PLUGINS_AT}, or set VAULTITE_PLUGINS`)
+const OFFICIAL = OFFLINE ? '' : real(PLUGINS_AT)
+type Official = { id: string; dir: string; manifest: Record<string, unknown>; machine: boolean }
+const official: Official[] = OFFLINE ? [] : fs.readdirSync(OFFICIAL).sort().flatMap((id) => {
+  let dir: string, m: Record<string, unknown>
+  try { dir = real(path.join(OFFICIAL, id)); m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) } catch { return [] }
+  if (m.id !== id || m.repo !== 'Vaultite/plugins' || fs.existsSync(path.join(ROOT, 'plugins/core', id))) return []
+  // (what runs programs, reads the machine's files or needs the desktop app needs one: off here, as the app's are: web/demo/machine.ts)
+  const d = (m.disclosures ?? {}) as { shell?: boolean }
+  return [{ id, dir, manifest: { ...m, offByDefault: true }, machine: m.runsOnServer === true || m.desktopApp === true || d.shell === true }]
+})
+/** Each official plugin's files the server reads (manifest, docs, pages, styles), at /app/plugins/core/<id>/ as the app's. */
+function officialFiles() {
+  const out: Record<string, string> = {}
+  for (const o of official) {
+    const left = ignoreOf(o.dir)
+    for (const f of walk(o.dir)) {
+      const rel = path.relative(o.dir, f).split(path.sep).join('/')
+      if (left(rel) || !/\.(md|json|css)$/.test(rel)) continue
+      out[`/app/plugins/core/${o.id}/${rel}`] = rel === 'manifest.json' ? JSON.stringify(o.manifest, null, 2) : fs.readFileSync(f, 'utf8')
+    }
+  }
+  return out
+}
+/** An official plugin's file as the app's would be: plugins/core/<id>/<rest> (its module URL in the worker). */
+const asApp = (file: string) => {
+  for (const o of official) { const rel = under(o.dir, file); if (rel) return `plugins/core/${o.id}/${rel}` }
+  return null
+}
+const MODULES = [path.join(ROOT, 'plugins/core'), ...(OFFICIAL ? [OFFICIAL] : [])]
+
+/** The official plugins for the page (web/src/core/plugins.ts merges them in), keyed as plugins/core's globs are. */
+function officialPlugins(): Plugin {
+  const ID = 'virtual:official-plugins'
+  return {
+    name: 'vaultite-demo-official-plugins',
+    enforce: 'pre',
+    resolveId: (id) => (id === ID ? '\0' + ID : null),
+    load(id) {
+      if (id !== '\0' + ID) return
+      const key = (o: Official, rel: string) => JSON.stringify(`../../../plugins/core/${o.id}/${rel}`)
+      const withIndex = official.filter((o) => fs.existsSync(path.join(o.dir, 'index.tsx')))
+      const pages = official.flatMap((o) => (fs.existsSync(path.join(o.dir, 'pages')) ? fs.readdirSync(path.join(o.dir, 'pages')) : [])
+        .filter((n) => n.endsWith('.md')).map((n) => `${key(o, `pages/${n}`)}: ${JSON.stringify(fs.readFileSync(path.join(o.dir, 'pages', n), 'utf8'))}`))
+      return withIndex.map((o, i) => `import d${i} from ${JSON.stringify(path.join(o.dir, 'index.tsx'))}`).join('\n') +
+        `\nexport const manifests = {${official.map((o) => `${key(o, 'manifest.json')}: ${JSON.stringify(o.manifest)}`).join(', ')}}` +
+        `\nexport const modules = {${withIndex.map((o, i) => `${key(o, 'index.tsx')}: d${i}`).join(', ')}}` +
+        `\nexport const pages = {${pages.join(', ')}}\n`
+    },
+    // (their Tailwind classes are the app's here)
+    transform: (code, id) => (id.endsWith('web/src/index.css') && OFFICIAL ? `${code}\n@source ${JSON.stringify(OFFICIAL)};\n` : undefined),
+  }
+}
+
+/** A module's file at its real path, or null for a virtual one. */
+const realFile = (id: string) => {
+  const file = id.replace(/\?.*$/, '')
+  if (!path.isAbsolute(file)) return null
+  try { return real(file) } catch { return file }
+}
+
+/** A server module in the worker still asking import.meta where it is gets the worker's URL, and the demo crashes as it
+ *  starts: the build fails instead, naming them (only the page's own code and packages may ask). */
+function noModuleUrls(): Plugin {
+  const left = new Set<string>()
+  return {
+    name: 'vaultite-demo-no-module-urls',
+    transform: {
+      order: 'post',
+      handler(code, id) {
+        // (code: a file imported as text, ?raw, may well mention it)
+        const file = /\.[cm]?[jt]sx?$/.test(id) ? realFile(id) : null
+        if (!file || file.split(path.sep).join('/').includes('/node_modules/') || under(path.join(ROOT, 'web'), file)) return
+        if (/\bimport\.meta\.(url|dirname|filename|resolve)\b/.test(code)) left.add(under(ROOT, file) ?? file)
+      },
+    },
+    buildEnd() {
+      if (left.size) this.error(`the demo's server modules must see themselves at /app (demoServer), but these still ask import.meta: ${[...left].sort().join(', ')}`)
+    },
+  }
+}
+
+/** The server's modules in the worker, each at /app as in the repo; virtual:demo-plugin-files names the backends left
+ *  out (they need a machine). One chunk: WebKit runs a worker's script again when a chunk imports it. */
+function demoServer(): Plugin {
+  const dirs = [
+    ...fs.readdirSync(path.join(ROOT, 'plugins/core')).filter((d) => !MACHINE.includes(d)).map((d) => ({ id: d, dir: path.join(ROOT, 'plugins/core', d) })),
+    ...official.filter((o) => !o.machine),
+  ].filter((d) => fs.existsSync(path.join(d.dir, 'plugin.ts')))
+  return {
+    name: 'vaultite-demo-server',
+    resolveId: (id) => (id.startsWith('virtual:demo-') ? '\0' + id : null),
+    load(id) {
+      const files = dirs.map((d) => `/app/plugins/core/${d.id}/plugin.ts`)
+      if (id === '\0virtual:demo-plugin-files') return `export default ${JSON.stringify(files)}\nexport const loaded = {}`
+      if (id === '\0virtual:demo-official-files') return `export default ${JSON.stringify(officialFiles())}`
+      if (id !== '\0virtual:demo-plugins') return
+      return dirs.map((d, i) => `import * as p${i} from ${JSON.stringify(path.join(d.dir, 'plugin.ts'))}`).join('\n') +
+        `\nimport { loaded } from "virtual:demo-plugin-files"\nObject.assign(loaded, {${files.map((f, i) => `${JSON.stringify(f)}: p${i}`).join(', ')}})`
+    },
+    transform(code, id) {
+      const file = realFile(id)
+      const rel = file && (asApp(file) ?? under(ROOT, file))
+      if (!rel || !/^(core|plugins)\/.*\.ts$/.test(rel)) return
+      const app = `/app/${rel}`
+      let out = `const __vauModuleUrl = ${JSON.stringify(`file://${app}`)};\n` + code.replaceAll('import.meta.url', '__vauModuleUrl')
+        .replaceAll('import.meta.dirname', JSON.stringify(path.posix.dirname(app))).replaceAll('import.meta.filename', JSON.stringify(app))
+      if (rel === 'core/plugins.ts') out = 'import { loaded as __demoPlugins } from "virtual:demo-plugin-files";\n' + out.replace('import(pathToFileURL(file).href)', 'Promise.resolve(__demoPlugins[file])')
+      return out
+    },
+  }
+}
+
+/** The app starts once the demo has (web/demo/boot.ts: main.tsx's first import, which waits for its server). */
+const demoEntry = (): Plugin => ({
+  name: 'vaultite-demo-entry',
+  transform: (code, id) => (realFile(id) === path.join(ROOT, 'web/src/main.tsx') ? `import ${JSON.stringify(path.join(ROOT, OFFLINE ? 'web/offline/boot.ts' : 'web/demo/boot.ts'))}\n${code}` : undefined),
+  // ?theme=light (or dark) pins the look for the site's embed, and the page can switch it (vaultite-demo:theme). Before
+  // any of the app's code: its chunks read the system's look as they load.
+  // (and without index.html's early read of the state: here the server answers once boot.ts has started it)
+  transformIndexHtml: (html) => html.replace('<head>', `<head>\n    <script>${PIN_THEME}</script>`).replace(/<script id="vau-early">[\s\S]*?<\/script>/, ''),
+})
+
+const PIN_THEME = `(() => {
+  let pin = new URLSearchParams(location.search).get("theme")
+  if (pin !== "light" && pin !== "dark") return
+  const real = matchMedia.bind(window), heard = new Set()
+  class Pinned extends EventTarget {
+    constructor(media) { super(); this.media = media; this.onchange = null }
+    get matches() { return this.media.includes("dark") === (pin === "dark") }
+    addEventListener(type, fn, o) { heard.add(this); super.addEventListener(type, fn, o) }
+    addListener(fn) { this.addEventListener("change", fn) }
+    removeListener(fn) { this.removeEventListener("change", fn) }
+  }
+  window.matchMedia = (q) => (q.includes("prefers-color-scheme") ? new Pinned(q) : real(q))
+  addEventListener("message", (e) => {
+    const to = e.data?.theme
+    if (e.origin !== location.origin || e.data?.type !== "vaultite-demo:theme" || (to !== "light" && to !== "dark") || to === pin) return
+    pin = to
+    for (const m of heard) { const ev = new MediaQueryListEvent("change", { media: m.media, matches: m.matches }); m.dispatchEvent(ev); m.onchange?.(ev) }
+  })
+})()`
+
+// (the base's resolvers know only the app's own plugins; the demo isn't deployed to phones, so its files keep Vite's names)
+const own = new Set(['vaultite-plugin-modules', 'vaultite-plugin-icons', 'vaultite-stable-chunks'])
+export default defineConfig({
+  ...base,
+  plugins: [officialPlugins(), pluginModules(MODULES), pluginIcons(Object.fromEntries(official.map((o) => [o.id, o.dir]))),
+    ...(base.plugins ?? []).filter((p) => !(p && 'name' in p && own.has(p.name))), demoEntry()],
+  define: { ...base.define, __DEMO_OFFICIAL__: JSON.stringify(official.map((o) => ({ id: o.id, machine: o.machine }))) },
+  resolve: { alias: [...ALIASES, ...Object.entries(base.resolve?.alias ?? {}).map(([find, replacement]) => ({ find, replacement }))] },
+  worker: { format: 'es', plugins: () => [pluginModules(MODULES), demoServer(), noModuleUrls()] },
+  build: {
+    ...base.build, outDir: OFFLINE ? 'dist' : 'dist-demo', emptyOutDir: !OFFLINE, chunkSizeWarningLimit: 4000, minify: process.env.DEMO_MINIFY !== '0',
+    ...(OFFLINE ? { assetsDir: 'offline' } : {}),
+    rollupOptions: {
+      input: OFFLINE ? { offline: path.join(ROOT, 'web/offline.html') } : { main: path.join(ROOT, 'web/index.html'), sw: path.join(ROOT, 'web/demo/sw.ts') },
+      output: { entryFileNames: (c) => (c.name === 'sw' ? 'sw.js' : `${OFFLINE ? 'offline' : 'assets'}/[name]-[hash].js`), codeSplitting: { groups: bootGroups } },
+      onwarn: base.build?.rollupOptions?.onwarn,
+    },
+  },
+})

@@ -1,0 +1,231 @@
+// Toasts (core/notify.ts, components/Toast.tsx): Undo for trash and moves, vau notify, what a screen reader is told,
+// stacking, hover, colours and placement. WRITES "Qa toast/" and appearance.json (put back): throwaway server only.
+//   node web/qa/toast.mjs <base url> [out dir]
+import { execFileSync } from "node:child_process"
+import { mkdirSync } from "node:fs"
+import { devices } from "playwright-core"
+import { SHOTS, apiAt, qa, until, wait } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+import { fileURLToPath } from "node:url"
+const { args: [B, OUT = `${SHOTS}toast/`], browser, check, watch, done } = await qa(import.meta.url)
+mkdirSync(OUT, { recursive: true })
+const api = apiAt(B)
+const exists = async (p) => (await api("GET", "files")).files.some((f) => f.path === p)
+// Without the app's variables from wherever this runs (a terminal's VAULTITE_TERMINAL ties a notice to that terminal,
+// which gives its toast an Open button and so a longer life), so it tests the same thing anywhere.
+const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^VAULTITE_/.test(k)))
+const vau = (...args) => execFileSync("node", [fileURLToPath(new URL("../../bin/vau", import.meta.url)), ...args], { env: { ...clean, VAULTITE_URL: B.replace(/\/$/, "") }, encoding: "utf8" })
+
+// A fresh folder: Qa toast/{Doomed.md, Mover.md, Target/}
+await fetch(`${B}api/file?path=${encodeURIComponent("Qa toast")}`, { method: "DELETE" })
+for (const p of ["Qa toast", "Qa toast/Target", "Qa toast/Elsewhere"]) await api("POST", "folder", { path: p })
+await api("POST", "file", { path: "Qa toast/Doomed.md", text: "Delete me.\n" })
+await api("POST", "file", { path: "Qa toast/Mover.md", text: "Move me.\n" })
+const savedLook = await api("GET", "config/appearance")
+const look = (patch) => api("PUT", "config/appearance", { ...savedLook, ...patch })
+await look({ theme: "light", scheme: "default" })
+
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+await ctx.addInitScript(() => { if (!sessionStorage.getItem("qa")) { localStorage.clear(); sessionStorage.setItem("qa", "1") } })
+// (how many lines each live region had as it came onto the page: one added with its text is often not read)
+await ctx.addInitScript(() => {
+  window.__regions = []
+  new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.dataset?.announce) window.__regions.push(n.childNodes.length) })
+    .observe(document, { childList: true, subtree: true })
+})
+await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(B).origin })
+const page = watch(await ctx.newPage(), { console: true }), ui = app(page)
+const shot = (p, name) => p.screenshot({ path: `${OUT}${name}.png` })
+const toasts = (p = page) => p.locator("[data-sonner-toast]")
+const toastWith = (text, p = page) => p.locator("[data-sonner-toast]", { hasText: text }).first()
+const row = (p) => page.locator(`aside [role=tree] div[data-tree-path="${p}"]`).first()
+const menu = async (path, item) => { await ui.menu.context(row(path)); await ui.menu.pick(item) }
+/** Wait for every toast to go by itself (removing them by hand would break sonner's own state). */
+const dismissAll = async (p = page) => { await p.mouse.move(5, 5); await p.waitForFunction(() => !document.querySelector("[data-sonner-toast]"), null, { timeout: 30_000 }); await ui.idle() }
+const pastPlainToastLife = () => wait(5500)
+const hashMoves = async (act) => {
+  const was = await page.evaluate(() => location.hash)
+  await act(); await until(() => page.evaluate((h) => location.hash !== h, was)); await ui.idle()
+}
+
+await page.goto(B); await row("Qa toast").waitFor(); await ui.idle()
+if (!(await row("Qa toast/Doomed.md").isVisible())) { await row("Qa toast").locator("button").first().click(); await ui.idle() }
+
+// 1. Trash a file from the tree: no confirm, a toast with Undo; Undo brings it back.
+let dialogs = 0
+page.on("dialog", (d) => { dialogs++; d.dismiss() })
+await menu("Qa toast/Doomed.md", "Delete")
+await ui.toast.wait("Moved Doomed to trash").catch(() => {})
+check("trashing asks nothing", dialogs === 0, dialogs)
+check("the file is in the trash", !(await exists("Qa toast/Doomed.md")))
+const del = toastWith("Moved Doomed to trash")
+check("a toast says it was trashed, with Undo", await del.isVisible() && (await del.locator("[data-button]").innerText()) === "Undo", await toasts().allInnerTexts())
+await shot(page, "desktop-deleted")
+const tb = await del.boundingBox()
+check("desktop: bottom right, above the status bar (28px) with a gap", tb.x + tb.width > 1440 - 40 && tb.y + tb.height <= 900 - 36, tb)
+const styles = await del.evaluate((el) => { const cs = getComputedStyle(el), root = getComputedStyle(document.documentElement)
+  const probe = document.createElement("div"); probe.style.background = "var(--card)"; document.body.append(probe)
+  const card = getComputedStyle(probe).backgroundColor; probe.remove()
+  return { bg: cs.backgroundColor, card, size: cs.fontSize, radius: cs.borderRadius, font: cs.fontFamily, ui: root.getPropertyValue("--font-sans") } })
+check("its colours are the app's card, 13px text, a small radius", styles.bg === styles.card && styles.size === "13px" && parseFloat(styles.radius) <= 10, styles)
+check("no icon on a plain toast", !(await del.locator("[data-icon] svg").count()))
+await ui.sees("Qa toast/Doomed.md", () => del.locator("[data-button]").click())
+check("Undo put the file back", await exists("Qa toast/Doomed.md"))
+check("and it shows in the tree again", await row("Qa toast/Doomed.md").isVisible())
+await dismissAll()
+
+// 2. Move a file with Move file to…: a toast says where, Undo moves it back.
+await menu("Qa toast/Mover.md", "Move file to…")
+await page.keyboard.type("Qa toast/Target"); await ui.idle(); await page.keyboard.press("Enter")
+await ui.toast.wait("Moved to Qa toast/Target").catch(() => {}); await ui.idle()
+check("the file moved", await exists("Qa toast/Target/Mover.md") && !(await exists("Qa toast/Mover.md")))
+const moved = toastWith("Moved to Qa toast/Target")
+check("a toast says where it went, with Undo", await moved.isVisible(), await toasts().allInnerTexts())
+await shot(page, "desktop-moved")
+await moved.locator("[data-button]").click(); await ui.idle()
+check("Undo moved it back", await exists("Qa toast/Mover.md") && !(await exists("Qa toast/Target/Mover.md")))
+await dismissAll()
+
+// 3. Rename (the tree's Rename), then Undo.
+await menu("Qa toast/Mover.md", "Rename")
+await page.keyboard.press("ControlOrMeta+A"); await page.keyboard.type("Renamed"); await page.keyboard.press("Enter")
+await ui.toast.wait("Renamed to Renamed").catch(() => {}); await ui.idle()
+const ren = toastWith("Renamed to Renamed")
+check("a rename says so, with Undo", await exists("Qa toast/Renamed.md") && await ren.isVisible(), await toasts().allInnerTexts())
+await ren.locator("[data-button]").click(); await ui.idle()
+check("Undo renamed it back", await exists("Qa toast/Mover.md") && !(await exists("Qa toast/Renamed.md")))
+await dismissAll()
+
+// 4. Undo after the file moved again (an agent, another device): an error toast, nothing moves.
+await menu("Qa toast/Mover.md", "Move file to…")
+await page.keyboard.type("Qa toast/Target"); await ui.idle(); await page.keyboard.press("Enter")
+await ui.toast.wait("Moved to Qa toast/Target").catch(() => {}); await ui.idle()
+await ui.sees("Qa toast/Elsewhere/Mover.md", () => api("POST", "file/move", { from: "Qa toast/Target/Mover.md", to: "Qa toast/Elsewhere/Mover.md" }))
+await toastWith("Moved to Qa toast/Target").locator("[data-button]").click()
+const err = toastWith("Couldn't undo")
+await err.waitFor({ timeout: 15_000 }).catch(() => {})
+check("Undo after it moved again fails with an error toast", await err.isVisible(), await toasts().allInnerTexts())
+check("the error has a red icon", await err.locator("[data-icon] svg").count() === 1)
+check("nothing moved", await exists("Qa toast/Elsewhere/Mover.md") && !(await exists("Qa toast/Mover.md")))
+await shot(page, "desktop-undo-failed")
+await api("POST", "file/move", { from: "Qa toast/Elsewhere/Mover.md", to: "Qa toast/Mover.md" })
+await dismissAll()
+
+// 5. vau notify: a toast in this window, its button opening a file; --error; Copy path.
+await page.locator("main, #main-scroll").first().click({ position: { x: 300, y: 300 } }).catch(() => {}); await ui.idle()
+let out = vau("notify", "Wrote the weekly review", "--action-open", "Qa toast/Mover.md")
+const agent = toastWith("Wrote the weekly review")
+await agent.waitFor({ timeout: 15_000 }).catch(() => {})
+check("vau notify shows a toast here", out.includes("Shown") && await agent.isVisible(), [out, await toasts().allInnerTexts()])
+await shot(page, "desktop-vau-notify")
+await hashMoves(() => agent.locator("[data-button]").click())
+check("its button opens the file", decodeURIComponent(await page.evaluate(() => location.hash)).includes("Qa toast/Mover.md"), await page.evaluate(() => location.hash))
+vau("notify", "The import failed: the file was empty", "--error")
+const e2 = toastWith("The import failed")
+await e2.waitFor({ timeout: 15_000 }).catch(() => {})
+const red = await e2.locator("[data-icon] svg").evaluate((el) => { const probe = document.createElement("div"); probe.style.color = "var(--red)"; document.body.append(probe)
+  const want = getComputedStyle(probe).color; probe.remove(); return [getComputedStyle(el).color, want] })
+check("vau notify --error: a red icon (--red)", red[0] === red[1], red)
+await shot(page, "desktop-error")
+await dismissAll()
+// (a click on Copy path copies from the vault folder)
+await menu("Qa toast/Mover.md", "Copy path")
+await ui.toast.wait("Copied the path").catch(() => {})
+check("Copy path says so", await toastWith("Copied the path").isVisible(), await toasts().allInnerTexts())
+check("and the path is on the clipboard", (await page.evaluate(() => navigator.clipboard.readText())) === "Qa toast/Mover.md")
+await dismissAll()
+await menu("Qa toast/Mover.md", "Pin"); await ui.toast.wait("Pinned Mover").catch(() => {})
+check("Pin says so", await toastWith("Pinned Mover").isVisible(), await toasts().allInnerTexts())
+await toastWith("Pinned Mover").locator("[data-button]").click(); await ui.idle()
+const pinsNow = async () => (await api("GET", "workspaces")).workspaces?.find((w) => w?.pinned)?.pinned ?? (await api("GET", "config/pages")).pinned
+check("its Undo unpins it", !(await pinsNow()).includes("Qa toast/Mover.md"), await pinsNow())
+await dismissAll()
+
+// 6. Screen readers (core/announce.ts): each toast said from a live region that was there, empty, before it; an
+// error at once; sonner's own region silent (nothing said twice); the keyboard left where it was, Alt+T to the button.
+const regions = await page.$$eval("[data-announce]", (els) => els.map((e) => e.getAttribute("aria-live")))
+check("screen reader: two live regions, polite and assertive", JSON.stringify(regions) === '["polite","assertive"]', regions)
+const added = await page.evaluate(() => window.__regions)
+check("screen reader: each on the page, empty, before anything was said", JSON.stringify(added) === "[0,0]", added)
+check("screen reader: sonner's own region is off", await page.$eval("section[aria-label^=Notifications]", (e) => e.getAttribute("aria-live")) === "off")
+await page.$$eval("[data-announce]", (els) => els.forEach((e) => e.replaceChildren()))
+const said = (live) => page.$eval(`[data-announce=${live}]`, (e) => [...e.children].map((p) => p.textContent))
+const focused = () => page.evaluate(() => { const a = document.activeElement; return a?.closest("[data-sonner-toaster]") ? `toast ${a.textContent}` : a?.outerHTML.slice(0, 120) })
+await page.locator("main, #main-scroll").first().click({ position: { x: 300, y: 300 } }).catch(() => {}); await ui.idle()
+const was = await focused()
+vau("notify", "Wrote the monthly review", "--action-open", "Qa toast/Mover.md")
+await ui.toast.wait("Wrote the monthly review").catch(() => {}); await ui.idle()
+check("screen reader: a toast is said politely, with the key to its button", /^Wrote the monthly review\. Open: \S+$/.test((await said("polite")).join("|")), await said("polite"))
+check("screen reader: the keyboard stays where it was", await focused() === was, [was, await focused()])
+await page.keyboard.press("Alt+T"); await ui.idle()
+check("screen reader: Alt+T takes the keyboard to the toast's button", await focused() === "toast Open", await focused())
+await page.keyboard.press("Escape")
+await dismissAll()
+check("and gives it back once the toast goes", await focused() === was, [was, await focused()])
+vau("notify", "The sync failed: the disk is full", "--error")
+await ui.toast.wait("The sync failed").catch(() => {}); await ui.idle()
+check("screen reader: an error is said at once (assertive), and only so", JSON.stringify(await said("assertive")) === '["The sync failed: the disk is full"]'
+  && !(await said("polite")).some((t) => t.includes("disk is full")), { polite: await said("polite"), assertive: await said("assertive") })
+await dismissAll()
+
+// 7. At most three at once; hovering pauses them.
+for (let i = 1; i <= 5; i++) vau("notify", `Toast number ${i}`)
+await toastWith("Toast number 5").waitFor({ timeout: 15_000 }).catch(() => {})
+const shown = await page.locator("[data-sonner-toast][data-visible=true]").count()
+check("at most three show", shown === 3, shown)
+await shot(page, "desktop-stack")
+await dismissAll()
+vau("notify", "Hover keeps me")
+await toastWith("Hover keeps me").waitFor({ timeout: 15_000 }).catch(() => {})
+await toastWith("Hover keeps me").hover(); await ui.idle()
+await pastPlainToastLife()
+check("hovering pauses it (still there after 5.5 s)", await toastWith("Hover keeps me").isVisible())
+await page.mouse.move(400, 300); await ui.idle()
+await toastWith("Hover keeps me").waitFor({ state: "hidden", timeout: 5000 }).catch(() => {})
+check("and it goes when the pointer leaves", !(await toastWith("Hover keeps me").isVisible().catch(() => false)))
+
+// 8. Dark mode and schemes: the toast is drawn in the scheme's card and text.
+for (const [theme, scheme] of [["dark", "default"], ["light", "gruvbox"], ["dark", "nord"], ["light", "catppuccin"]]) {
+  await look({ theme, scheme }); await page.reload(); await row("Qa toast").waitFor(); await ui.idle()
+  vau("notify", `A toast in ${scheme} ${theme}`, "--action-open", "Qa toast/Mover.md")
+  const t = toastWith(`A toast in ${scheme} ${theme}`)
+  await t.waitFor({ timeout: 15_000 }).catch(() => {})
+  const c = await t.evaluate((el) => { const cs = getComputedStyle(el)
+    const probe = document.createElement("div"); probe.style.background = "var(--card)"; probe.style.color = "var(--foreground)"; document.body.append(probe)
+    const p = getComputedStyle(probe); const r = [p.backgroundColor, p.color]; probe.remove()
+    return { bg: cs.backgroundColor, fg: cs.color, card: r[0], text: r[1], scheme: document.documentElement.dataset.scheme, dark: document.documentElement.classList.contains("dark") } })
+  check(`${scheme} ${theme}: the scheme's card and text`, c.bg === c.card && c.fg === c.text && (c.scheme ?? "default") === scheme && c.dark === (theme === "dark"), c)
+  await shot(page, `desktop-${scheme}-${theme}`)
+  await dismissAll()
+}
+await look({ theme: "light", scheme: "default" })
+
+// 9. Phones (390px): bottom centre, above the bar.
+const phone = await browser.newContext({ ...devices["iPhone 13"], viewport: { width: 390, height: 844 } })
+await phone.addInitScript(() => { if (!sessionStorage.getItem("qa")) { localStorage.clear(); sessionStorage.setItem("qa", "1") } })
+const ph = watch(await phone.newPage(), { label: "phone" }), pui = app(ph)
+await ph.goto(B); await ph.locator("h1").first().waitFor(); await pui.idle()
+await ph.locator("h1").first().tap().catch(() => {}); await pui.idle() // (says this window is the one in use)
+vau("notify", "Imported 12 meals from Hevy", "--action-open", "Qa toast/Mover.md")
+const pt = toastWith("Imported 12 meals", ph)
+await pt.waitFor({ timeout: 15_000 }).catch(() => {}); await pui.idle()
+const bar = await ph.locator("[data-phone-bar]").boundingBox()
+const pb = await pt.boundingBox().catch(() => null)
+check("phone: the toast shows", !!pb, await toasts(ph).allInnerTexts())
+if (pb) {
+  check("phone: above the bar", pb.y + pb.height <= bar.y - 4, { toast: pb, bar })
+  check("phone: across the width, 16px gutters", Math.abs(pb.x - 16) <= 1 && Math.abs(390 - (pb.x + pb.width) - 16) <= 1, pb)
+  check("phone: iOS text size", (await pt.evaluate((el) => getComputedStyle(el).fontSize)) === "15px")
+}
+await shot(ph, "phone")
+await look({ theme: "dark", scheme: "default" }); await ph.reload(); await ph.locator("h1").first().waitFor(); await pui.idle()
+await ph.locator("h1").first().tap().catch(() => {}); await pui.idle() // (says this window is the one in use)
+vau("notify", "Moved to Notes", "--action-open", "Qa toast/Mover.md")
+await toastWith("Moved to Notes", ph).waitFor({ timeout: 15_000 }).catch(() => {})
+check("phone, dark: the toast shows here", await toastWith("Moved to Notes", ph).isVisible(), await toasts(ph).allInnerTexts())
+await shot(ph, "phone-dark")
+await look(savedLook)
+
+await browser.close()
+await fetch(`${B}api/file?path=${encodeURIComponent("Qa toast")}`, { method: "DELETE" })
+await done()

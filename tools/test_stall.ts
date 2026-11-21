@@ -1,0 +1,125 @@
+// A file iCloud is slow to give never holds the server: FIFOs stand in for them (a read waits until written), and the
+// server still answers and reads the rest of the vault. `node tools/test_stall.ts` (npm test)
+import { execFileSync, spawnSync } from "node:child_process"
+import { once } from "node:events"
+import fs from "node:fs"
+import path from "node:path"
+import { check, exit, freePort, results, sleep, summary, tempDir, testServer } from "./test/lib.ts"
+const began = Date.now()
+if (process.platform === "win32") { console.log("skip stall: FIFOs stand in for a slow file, and Windows has none"); process.exit(0) }
+
+const tmp = tempDir("vaultite-stall-test-")
+const VAULT = path.join(tmp, "vault")
+const put = (rel: string, text: string) => { fs.mkdirSync(path.dirname(path.join(VAULT, rel)), { recursive: true }); fs.writeFileSync(path.join(VAULT, rel), text) }
+const fifo = (rel: string) => { fs.mkdirSync(path.dirname(path.join(VAULT, rel)), { recursive: true }); execFileSync("mkfifo", [path.join(VAULT, rel)]) }
+put(".vaultite/plugins.json", "{}\n") // (a vault the app has opened before: no setup)
+put("Notes/Alpha.md", "---\ntype: note\n---\n\nAlpha.\n")
+put("Notes/Beta.md", "---\ntype: note\n---\n\nBeta.\n")
+fifo("Notes/Slow.md")
+// More than libuv's 4 threads, each held by one of them (the server asks for more).
+for (let i = 1; i <= 6; i++) fifo(`Held/Note ${i}.md`)
+// What the startup needn't read: attachments (a text one, which File history keeps) and the trash.
+fifo("Attachments/data.txt")
+fifo("Attachments/photo.png")
+fifo(".trash/Old.md")
+
+const port = await freePort()
+const server = testServer({
+  env: { ...process.env, VAULTITE_VAULT: VAULT, VAULTITE_LOCAL: path.join(tmp, "local"), PORT: String(port), HOST: "127.0.0.1", VAULTITE_DESKTOP: "" },
+  stdio: ["ignore", "pipe", "pipe"],
+})
+let log = ""
+server.stdout!.on("data", (d) => { log += d })
+server.stderr!.on("data", (d) => { log += d })
+const base = `http://127.0.0.1:${port}/api/`
+// A request gives up after 8 s: a held server is a failure, not a hung test.
+async function get(p: string, wait = 8000) {
+  try {
+    const r = await fetch(base + p, { signal: AbortSignal.timeout(wait) })
+    return { status: r.status, body: await r.json().catch(() => null) as any }
+  } catch (e) {
+    return { status: 0, body: String(e) }
+  }
+}
+const t0 = Date.now()
+
+try {
+  // A busy runner takes half a minute to load the plugins: timed from when the server starts reading the file (a FIFO
+  // opens for writing only once it has a reader) and its plugins are loaded, not from its spawn. Held open: no EOF.
+  let held = -1
+  while (held < 0 && Date.now() - t0 < 180_000 && server.exitCode === null) {
+    try { held = fs.openSync(path.join(VAULT, "Notes/Slow.md"), fs.constants.O_WRONLY | fs.constants.O_NONBLOCK) } catch { await sleep(100) }
+  }
+  check("the server starts reading the vault", held >= 0, [Date.now() - t0, log.slice(-500)])
+  if (held < 0) throw new Error("the server never read Notes/Slow.md")
+  for (let phase = ""; ["", "imports", "plugins"].includes(phase) && Date.now() - t0 < 180_000;) phase = (await get("health", 30_000)).body?.phase ?? ""
+  const early = await get("health", 3000)
+  check("health: answers while the vault is being read, saying where the start is", early.status === 200 && Object.keys(early.body ?? {}).join() === "ok,ready,phase,pid,startedAt,readyAt,commit" &&
+    early.body.ok === true && early.body.pid === server.pid && early.body.startedAt <= Date.now() && (early.body.ready ? early.body.phase === "ready" : ["plugins", "vault", "opening"].includes(early.body.phase) && early.body.readyAt === null), early)
+  let loading: any = null
+  // (named once it has been read for a second, core/vault.ts SLOW)
+  for (const since = Date.now(); Date.now() - since < 15_000;) {
+    const r = await get("loading", 1000)
+    if (r.status === 200) { loading = r.body; if (loading.ready || loading.downloading.includes("Notes/Slow.md")) break } // (the Held notes may be named first)
+    await sleep(100)
+  }
+  check("loading: answers before the vault is read, naming the file iCloud is still downloading",
+    loading && (loading.downloading.includes("Notes/Slow.md") || loading.ready), loading)
+  const state = await get("state")
+  const files = (state.body?.files?.files ?? []).map((f: any) => f.path)
+  // (no one writes the FIFO until later: a server held by it never answers, and the request gives up)
+  check("state: answers while a file is still being read", state.status === 200, [state.status, Date.now() - t0])
+  check("state: the rest of the vault is read", files.includes("Notes/Alpha.md") && files.includes("Notes/Beta.md"), files)
+  check("state: the file being read isn't in it yet, and is named", !files.includes("Notes/Slow.md") && state.body?.vault?.downloading?.includes("Notes/Slow.md"), state.body?.vault)
+  check("loading: the file is still named once the vault is read", (await get("loading")).body?.downloading?.includes("Notes/Slow.md"))
+  const one = await get("file?path=Notes/Alpha.md")
+  check("a file that's there opens meanwhile", one.status === 200 && one.body.text.includes("Alpha."), one)
+  // (waiting again costs READ_WAIT, 2 s, core/vault.ts: timed against a request that waits on nothing, so a slow
+  // machine's own pace isn't taken for it)
+  const timed = async (p: string) => { const t = Date.now(); const r = await get(p); return { r, ms: Date.now() - t } }
+  const plain = await timed("loading"), again = await timed("state")
+  check("a sync after doesn't wait for it again", again.r.status === 200 && again.ms - plain.ms < 1000, [again.ms, plain.ms])
+
+  // iCloud gives it: the read ends, and the vault reads it without being asked.
+  // (the file is there for good, then the read waiting on the FIFO ends)
+  put("Notes/.Slow.tmp", "---\ntype: note\n---\n\nArrived.\n")
+  fs.renameSync(path.join(VAULT, "Notes/.Slow.tmp"), path.join(VAULT, "Notes/Slow.md"))
+  fs.closeSync(held)
+  let arrived = false
+  for (let i = 0; i < 50 && !arrived; i++) {
+    await sleep(100)
+    const s = await get("state")
+    arrived = (s.body?.files?.files ?? []).some((f: any) => f.path === "Notes/Slow.md") && !s.body.vault.downloading.includes("Notes/Slow.md")
+  }
+  check("once it arrives it's read", arrived)
+  const slow = await get("file?path=Notes/Slow.md")
+  check("and opens", slow.status === 200 && slow.body.text.includes("Arrived."), slow)
+  const h = (await get("health")).body
+  check("health: ready, when, and the commit it runs", h?.ready === true && h.phase === "ready" && h.readyAt >= h.startedAt && (h.commit === null || /^[0-9a-f]{40}$/.test(h.commit)), h)
+} catch (e) {
+  check("the test runs to its end", false, String(e))
+} finally {
+  // (reaped before the next server: a killed one not yet waited for still holds the vault's claim, so that one wouldn't start)
+  if (server.exitCode === null && server.signalCode === null) { server.kill("SIGKILL"); await once(server, "exit") }
+}
+
+// A test's server never outlives its test (six on FIFO vaults like this one once ran for days): killed as the test
+// exits, and ending itself when the test died unseen (SIGKILL), whatever holds its main thread.
+const runner = (end: string) => `import { writeSync } from "node:fs"
+import { testServer } from ${JSON.stringify(new URL("./test/lib.ts", import.meta.url).href)}
+const s = testServer({ env: { ...process.env, VAULTITE_VAULT: ${JSON.stringify(VAULT)}, VAULTITE_LOCAL: ${JSON.stringify(path.join(tmp, "local2"))}, PORT: process.argv[1], HOST: "127.0.0.1", VAULTITE_DESKTOP: "" }, stdio: "ignore" })
+let up = false
+for (let i = 0; i < 200 && !up; i++) { try { up = (await fetch("http://127.0.0.1:" + process.argv[1] + "/api/loading")).ok } catch {} if (!up) await new Promise((r) => setTimeout(r, 100)) }
+writeSync(1, s.pid + " " + up + "\\n")
+${end}`
+const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+for (const [how, end] of [["exits", "process.exit(0)"], ["is killed", "process.kill(process.pid, 'SIGKILL')"]]) {
+  const p = await freePort()
+  const [pid, up] = spawnSync(process.execPath, ["--input-type=module", "-e", runner(end), String(p)], { encoding: "utf8", timeout: 30_000 }).stdout.trim().split(" ")
+  let gone = false
+  for (let i = 0; i < 50 && Number(pid) > 0 && !(gone = !alive(Number(pid))); i++) await sleep(100)
+  check(`a test's server ends when its test ${how}`, Number(pid) > 0 && up === "true" && gone, [pid, up])
+  if (!gone && Number(pid) > 0) try { process.kill(Number(pid), "SIGKILL") } catch { /* gone */ }
+}
+if (results.some((r) => r.status === "FAIL")) console.log(log.slice(-3000))
+await exit(summary("stall", began))

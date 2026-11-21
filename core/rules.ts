@@ -1,0 +1,401 @@
+import fs from "node:fs"
+import { isBuiltin } from "node:module"
+import path from "node:path"
+import { z } from "zod"
+import { readJson } from "./jsonfile.ts"
+import { declProblems, declsOf, drawsOf, settingDeclProblems } from "./blocks.ts"
+import { MOVED } from "./migrations.ts"
+import { CATEGORIES, GROUPS, groupOf, SWITCH_SECTIONS } from "./categories.ts"
+import { API_VERSION, APP_VERSION, compareVersions, MIN_API_VERSION, parseVersion, tagVersion } from "./version.ts"
+import { DISCLOSURES, EXPORT_NAME, exportsOf, HOST, ICON_FILE, ICON_MAX, ICON_NAME, PLUGIN_MODULE, REPO as REPO_NAME, svgIcon, VERSION } from "./pluginmeta.ts"
+import { isObj as isMap, messageOf } from "./values.ts"
+
+const IMPORT = /(?:^|\n)\s*(?:import|export)\s[^'"]*?from\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|(?:^|\n)\s*import\s+["']([^"']+)["']/g
+const BACKEND = new Set(["plugin.ts", "import.ts", "cli.ts"])
+export const nodeSide = (file: string) => BACKEND.has(path.basename(file)) || /(^|\.)test\.ts$/.test(path.basename(file))
+const PLUGIN_API = ["plugins", "vault", "client", "timeline", "agents", "layout"]
+const CORE_FOR_PLUGINS = new Set(PLUGIN_API.map((m) => `${m}.ts`))
+export const VAULT_CORE = new RegExp(`^@vaultite/core/(${PLUGIN_API.join("|")})(?:\\.ts)?$`)
+
+export function exportFile(dir: string, name: string, manifest?: Record<string, unknown>): string | null {
+  let m = manifest
+  if (!m) try { m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")) } catch { return null }
+  if (!exportsOf(m!).includes(name)) return null
+  const base = path.join(dir, ...name.split("/"))
+  return [`${base}.ts`, `${base}.tsx`, path.join(base, "index.ts"), path.join(base, "index.tsx")]
+    .find((f) => fs.statSync(f, { throwIfNoEntry: false })?.isFile() && hashed(dir, f)) ?? null
+}
+/** What a vault plugin's frontend gets from the app itself, never bundled: one React, one store. */
+export const SHARED = new Set(["@vaultite", "react", "react/jsx-runtime", "react-dom"])
+/** The app's CodeMirror, loaded with the plugin, never bundled: an `editor` extension works only with the editor's own copy. */
+export const SHARED_EDITOR = new Set(["@codemirror/state", "@codemirror/view", "@codemirror/language", "@codemirror/commands",
+  "@codemirror/search", "@codemirror/autocomplete", "@lezer/common", "@lezer/highlight"])
+
+/** Promised to vault plugins, at the versions `dependencies` ship: taking one out breaks plugins written against it. */
+export const PLUGIN_PACKAGES = ["react", "react-dom", "lucide-react", "@codemirror/state", "@codemirror/view", "@codemirror/language",
+  "@codemirror/commands", "@codemirror/search", "@codemirror/autocomplete", "@codemirror/lint", "@codemirror/lang-markdown",
+  "@lezer/common", "@lezer/highlight", "@lezer/lr", "@replit/codemirror-vim", "@excalidraw/excalidraw", "katex", "mermaid",
+  "turndown", "yaml", "lz-string", "@novnc/novnc", "ws", "sax"]
+export const packageOf = (spec: string) => spec.split("/").slice(0, spec.startsWith("@") ? 2 : 1).join("/")
+export const listedPackage = (spec: string) => PLUGIN_PACKAGES.includes(packageOf(spec))
+export const UNLISTED = `not one of the npm packages the app gives plugins (${PLUGIN_PACKAGES.join(", ")}): copy the library into the plugin's folder and import it by its path`
+
+export function walk(d: string): string[] {
+  let names: fs.Dirent[]
+  try {
+    names = fs.readdirSync(d, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return names.filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
+    .flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)])).sort()
+}
+
+export const inside = (dir: string, p: string) => p === dir || p.startsWith(dir + path.sep)
+export const hashed = (dir: string, p: string) => inside(dir, p) && !path.relative(dir, p).split(path.sep).some((s) => s.startsWith(".") || s === "node_modules")
+  && !settingsFile(path.relative(dir, p)) && !userFilesOf(dir).has(path.relative(dir, p).split(path.sep).join("/"))
+export const settingsFile = (rel: string) => /^[\w-]+\.json$/.test(rel) && rel !== "manifest.json"
+
+const CODE = /\.(m?[jt]sx?|cjs|css|wasm|sh|py|rb|pl)$/i
+export const UserFiles = z.object({ userFiles: z.array(z.unknown()).catch([])
+  .transform((a) => a.flatMap((f) => { const r = z.string().safeParse(f); return r.success && userFileOk(r.data) ? [r.data] : [] })) }).catch({ userFiles: [] })
+export function userFilesOf(dir: string): Set<string> {
+  const r = readJson(path.join(dir, "manifest.json"), UserFiles)
+  return new Set(r.ok ? r.value.userFiles : [])
+}
+const userFileOk = (f: string) => /^[\w.-]+(\/[\w.-]+)*$/.test(f) && !f.split("/").some((s) => /^\.+$/.test(s) || s.startsWith(".")) && !CODE.test(f) && f !== "manifest.json"
+
+const FOR_AGENTS_MAX = 240
+
+export function manifestProblems(m: Record<string, unknown>, name: string, ids: Set<string>, where = "manifest.json") {
+  const out: string[] = []
+  if (m.id !== name) out.push(`${where}: id must be '${name}' (its folder's name)`)
+  for (const k of ["name", "description"]) if (!m[k] || typeof m[k] !== "string") out.push(`${where}: missing ${k}`)
+  if (m.pageSort !== undefined && typeof m.pageSort !== "number") out.push(`${where}: pageSort must be a number`)
+  if (m.tint !== undefined && (typeof m.tint !== "string" || !/^[a-z][a-z-]*$/.test(m.tint))) {
+    out.push(`${where}: tint must name a colour ("orange", "teal": the app's --orange, --teal...)`)
+  }
+  if (m.category !== undefined && (typeof m.category !== "string" || !/^[a-z][a-z-]*$/.test(m.category))) {
+    out.push(`${where}: category must be a slug, like "life" (core/categories.ts)`)
+  }
+  if (m.desktopApp !== undefined && m.desktopApp !== true) out.push(`${where}: desktopApp is true (it works only in the desktop app) or left out`)
+  if (m.ai !== undefined && m.ai !== true) out.push(`${where}: ai is true (it's for AI: off while Use AI is) or left out`)
+  if (m.icon !== undefined && (typeof m.icon !== "string" || !(ICON_NAME.test(m.icon) || ICON_FILE.test(m.icon)))) {
+    out.push(`${where}: icon is a name ("heart-pulse": Lucide's) or an SVG file in its folder ("icon.svg")`)
+  }
+  if (m.forAgents !== undefined) {
+    const t = m.forAgents, keys = isMap(m.settings) ? Object.keys(m.settings) : []
+    if (typeof t !== "string" || !t.trim() || t.includes("\n") || t.length > FOR_AGENTS_MAX) out.push(`${where}: forAgents must be one line of at most ${FOR_AGENTS_MAX} characters (the rest goes in its AGENTS.md)`)
+    else for (const [, k] of t.matchAll(/\{(\w+)\}/g)) if (!keys.includes(k)) out.push(`${where}: forAgents names {${k}}, which isn't one of its settings`)
+  }
+  for (const k of ["requires", "enhances"]) {
+    const v = m[k] ?? []
+    if (!Array.isArray(v)) out.push(`${where}: ${k} must be a list of plugin ids`)
+    else for (const other of v) if (!ids.has(other) && !Object.hasOwn(MOVED, other)) out.push(`${where}: ${k} '${other}', which isn't a plugin${k === "requires" ? " here (install it first)" : ""}`)
+  }
+  if (m.draws !== undefined && (!Array.isArray(m.draws) || m.draws.some((b) => typeof b !== "string" || !/^[\w-]+$/.test(b)))) {
+    out.push(`${where}: draws lists blocks another plugin declares with \`by\` that it draws too (["agent-usage"])`)
+  }
+  return [...out, ...metaProblems(m, where), ...compatProblems(m, where)]
+}
+
+export function metaProblems(m: Record<string, unknown>, where = "manifest.json") {
+  const out: string[] = []
+  if (m.version !== undefined && (typeof m.version !== "string" || !VERSION.test(m.version))) out.push(`${where}: version must be a version like "1.0.0"`)
+  if (m.author !== undefined && (typeof m.author !== "string" || !m.author.trim())) out.push(`${where}: author is a name`)
+  if (m.repo !== undefined && (typeof m.repo !== "string" || !REPO_NAME.test(m.repo))) out.push(`${where}: repo is its GitHub repository, "owner/name"`)
+  if (m.fundingUrl !== undefined) {
+    let ok = false
+    try { ok = typeof m.fundingUrl === "string" && new URL(m.fundingUrl).protocol === "https:" } catch { /* not a URL */ }
+    if (!ok) out.push(`${where}: fundingUrl is an https:// address`)
+  }
+  if (m.replaces !== undefined && (!isMap(m.replaces) || !Object.values(m.replaces).every((ids) => Array.isArray(ids) && ids.every((x) => typeof x === "string" && /^([\w.-]+|\*)$/.test(x))))) {
+    out.push(`${where}: replaces lists other apps' plugins it stands in for, by app and id ({"obsidian": ["dataview"]}; "*": it runs any)`)
+  }
+  if (m.marks !== undefined && (!isMap(m.marks) || !Object.entries(m.marks).every(([k, t]) => /^[\w.-]+$/.test(k) && typeof t === "string" && /^[a-z][\w-]*$/.test(t)))) {
+    out.push(`${where}: marks maps a frontmatter key to the type it gives a file without \`type:\` ({"kanban-plugin": "kanban"})`)
+  }
+  if (m.userFiles !== undefined && (!Array.isArray(m.userFiles) || !m.userFiles.every((f) => typeof f === "string" && userFileOk(f)))) {
+    out.push(`${where}: userFiles lists the files it writes as the user's own, by path in its folder (["init.vim"]), never code or manifest.json`)
+  }
+  out.push(...writesProblems(m, where))
+  if (m.exports !== undefined && (!Array.isArray(m.exports) || m.exports.some((x) => typeof x !== "string" || !EXPORT_NAME.test(x)))) {
+    out.push(`${where}: exports lists the modules plugins that require it may import, by path in its folder without extension (["types", "lib/format"]), never plugin, index, import or cli`)
+  }
+  if (m.disclosures !== undefined) {
+    const d = m.disclosures
+    if (!isMap(d)) out.push(`${where}: disclosures is an object: {"network": ["api.example.com"], "shell": true, "outsideVault": true, "clipboard": true}`)
+    else for (const [k, v] of Object.entries(d)) {
+      if (!Object.hasOwn(DISCLOSURES, k)) out.push(`${where}: disclosures.${k} isn't one (${Object.keys(DISCLOSURES).join(", ")})`)
+      else if (k === "network" ? !Array.isArray(v) || !v.every((h) => typeof h === "string" && HOST.test(h)) : typeof v !== "boolean") {
+        out.push(k === "network" ? `${where}: disclosures.network is a list of the hosts it talks to ("api.example.com", "*.example.com", or "*" for those its settings name)` : `${where}: disclosures.${k} is true or false`)
+      }
+    }
+  }
+  return out
+}
+
+export function writesProblems(m: Record<string, unknown>, where = "manifest.json"): string[] {
+  if (m.writes === undefined) return []
+  const ok = Array.isArray(m.writes) && m.writes.every((w) => isMap(w) && typeof w.why === "string" && w.why.trim() &&
+    (typeof w.folder === "string") !== (typeof w.file === "string") && tidy(String(w.folder ?? w.file)) !== "" &&
+    !tidy(String(w.folder ?? w.file)).startsWith(".vaultite") && !String(w.folder ?? w.file).split("/").includes(".."))
+  return ok ? [] : [`${where}: writes lists where it writes outside .vaultite/ on its own: [{"folder": "Recaps", "why": "a daily recap of your day"}] (or "file": "AGENTS.md")`]
+}
+
+const tidy = (s: string) => s.trim().replace(/^\/+|\/+$/g, "")
+
+export function installProblems(m: Record<string, unknown>, tag: string | null, where = "manifest.json") {
+  const out: string[] = []
+  if (m.version === undefined) out.push(`${where}: an installable plugin says its version ("version": "1.0.0")`)
+  if (m.repo === undefined) out.push(`${where}: an installable plugin says its repository ("repo": "owner/name")`)
+  if (tag && typeof m.version === "string" && tagVersion(tag) !== m.version) out.push(`${where}: version is ${m.version}, but its tag is ${tag}`)
+  return out
+}
+
+export function compatProblems(m: Record<string, unknown>, where = "manifest.json", app = APP_VERSION, api = API_VERSION, minApi = MIN_API_VERSION) {
+  const out: string[] = []
+  if (m.minAppVersion !== undefined) {
+    if (!parseVersion(m.minAppVersion)) out.push(`${where}: minAppVersion must be a version like "0.1.0"`)
+    else if (compareVersions(m.minAppVersion as string, app)! > 0) {
+      out.push(`${where}: needs Vaultite ${m.minAppVersion} or later (this is ${app}): update the app to use it`)
+    }
+  }
+  if (m.apiVersion !== undefined) {
+    const v = m.apiVersion
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1) out.push(`${where}: apiVersion must be a whole number, like ${api}`)
+    else if (v > api) out.push(`${where}: written for plugin API ${v}, newer than this app's (${api}): update the app to use it`)
+    else if (v < minApi) out.push(`${where}: written for plugin API ${v}, which this app no longer loads (${minApi} to ${api}): update the plugin`)
+  }
+  return out
+}
+
+/** `.vaultiteignore`: a line per path, `*` any name, a last `/` a folder; one without a slash matches at any depth,
+ *  like .gitignore. */
+export function ignoreOf(dir: string): (rel: string) => boolean {
+  let lines: string[] = []
+  try { lines = fs.readFileSync(path.join(dir, ".vaultiteignore"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) } catch { /* none */ }
+  const res = lines.map((l) => {
+    const folder = l.endsWith("/"), p = l.replace(/^\/|\/$/g, "")
+    const body = p.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*")
+    return new RegExp(`${p.includes("/") || l.startsWith("/") ? "^" : "(^|/)"}${body}${folder ? "/" : "(/|$)"}`)
+  })
+  return (rel) => res.some((r) => r.test(rel.split(path.sep).join("/")))
+}
+
+type ImportRules = {
+  dir: string
+  root: string
+  vault: boolean
+  requires: Map<string, string>
+  /** Any other file is its backend's. */
+  front?: Set<string>
+}
+
+const frontFiles = (dir: string) => reached(dir, path.join(dir, "index.tsx"))
+
+export function backendOnly(dir: string, file: string) {
+  return [...reached(dir, file)].some((f) => [...fs.readFileSync(f, "utf8").matchAll(IMPORT)].some((hit) => {
+    const spec = hit[1] ?? hit[2] ?? hit[3]
+    return VAULT_CORE.test(spec) || isBuiltin(spec)
+  }))
+}
+
+function reached(dir: string, from: string): Set<string> {
+  const seen = new Set<string>(), todo = [from]
+  for (let f = todo.pop(); f; f = todo.pop()) {
+    if (seen.has(f) || !fs.existsSync(f)) continue
+    seen.add(f)
+    for (const hit of fs.readFileSync(f, "utf8").matchAll(IMPORT)) {
+      const spec = hit[1] ?? hit[2] ?? hit[3]
+      if (!spec.startsWith(".")) continue
+      const t = path.resolve(path.dirname(f), spec)
+      const hitFile = [t, `${t}.ts`, `${t}.tsx`, path.join(t, "index.ts"), path.join(t, "index.tsx")].find((c) => fs.statSync(c, { throwIfNoEntry: false })?.isFile())
+      if (hitFile && inside(dir, hitFile)) todo.push(hitFile)
+    }
+  }
+  return seen
+}
+
+function appExport(root: string, dir: string, name: string) {
+  if (path.dirname(dir) !== path.join(root, "plugins", "core")) return false
+  try { return exportsOf(JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"))).includes(name) } catch { return false }
+}
+
+function importProblems(file: string, src: string, where: string, rules: ImportRules): string[] {
+  const out: string[] = []
+  const backend = nodeSide(file) || (!!rules.front && !rules.front.has(file))
+  const say = (spec: string, why: string) => out.push(`${where}: imports ${spec}: ${why}`)
+  for (const hit of src.matchAll(IMPORT)) {
+    const spec = hit[1] ?? hit[2] ?? hit[3]
+    if (spec.startsWith(".") || path.isAbsolute(spec) || spec.startsWith("file:")) {
+      const target = spec.startsWith("file:") ? spec : path.resolve(path.dirname(file), spec)
+      if (inside(rules.dir, target)) continue
+      if (rules.vault) { say(spec, "a vault plugin imports only from its own folder, \"@vaultite\" and packages"); continue }
+      if (!backend) continue
+      if (inside(path.join(rules.root, "core", "desktop"), target)) continue
+      const inCore = path.dirname(target) === path.join(rules.root, "core")
+      const core = path.basename(target)
+      if (!inCore || !(CORE_FOR_PLUGINS.has(core) || (core === "cli.ts" && path.basename(file) === "cli.ts"))) {
+        say(spec, `a plugin's backend talks to the core only through ${[...CORE_FOR_PLUGINS].map((f) => `core/${f}`).join(", ")}`)
+      }
+      continue
+    }
+    if (spec.startsWith("@/")) { say(spec, "use \"@vaultite\" (the plugin API) instead"); continue }
+    if (spec.startsWith("@plugins/")) {
+      const m = PLUGIN_MODULE.exec(spec), dir = m ? rules.requires.get(m[1]) : undefined
+      if (!m) say(spec, "another plugin's module is @plugins/<id>/<module>")
+      else if (dir === undefined) say(spec, `a plugin imports only from plugins it \`requires\` (not ${m[1]})`)
+      else if (!exportFile(dir, m[2]) && (backend || !appExport(rules.root, dir, m[2]))) say(spec, `${m[1]} doesn't export '${m[2]}' (its manifest's \`exports\`)`)
+      continue
+    }
+    if (backend) {
+      if (!rules.vault || isBuiltin(spec) || VAULT_CORE.test(spec)) continue
+      if (spec.startsWith("@vaultite")) say(spec, "a vault plugin's backend imports the core as @vaultite/core/plugins.ts, vault.ts, client.ts, timeline.ts, agents.ts or layout.ts")
+      else if (!listedPackage(spec)) say(spec, UNLISTED)
+      continue
+    }
+    if (!rules.vault || SHARED.has(spec) || SHARED_EDITOR.has(spec)) continue
+    if (spec.startsWith("@vaultite")) say(spec, "the plugin API is \"@vaultite\" (the core's files are for plugin.ts)")
+    else if (isBuiltin(spec)) say(spec, "Node's modules are for plugin.ts; index.tsx runs in the browser")
+    else if (!listedPackage(spec)) say(spec, UNLISTED)
+  }
+  return out
+}
+
+const READS = /readFileSync|readFile\(|readText|\.abs\(|path\.join|\.config\(|fetch\(/
+const SETTINGS = [
+  /\.vaultite\/plugins\.json|["']\.vaultite["']\s*,\s*["']plugins\.json["']/,
+  /\.vaultite\/plugins\/([\w-]+)\/|["']\.vaultite["']\s*,\s*["']plugins["']\s*,\s*["']([\w-]+)["']|\.config\(\s*[`"']plugins\/([\w-]+)\//,
+]
+
+export function settingsProblems(src: string, where: string, id: string): string[] {
+  const out: string[] = []
+  src.split("\n").forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line) || !READS.test(line)) return
+    if (SETTINGS[0].test(line)) out.push(`${where}:${i + 1}: reads .vaultite/plugins.json itself: use vault.config("plugins")`)
+    if (/\.config\(\s*["']plugins["']\s*\)\.disabled/.test(line)) out.push(`${where}:${i + 1}: reads which plugins are off from \`disabled\` alone: use plugin.isOff() or vault.switchedOff() (offByDefault ones too)`)
+    const m = SETTINGS[1].exec(line)
+    const other = m && (m[1] ?? m[2] ?? m[3])
+    if (other && other !== id) out.push(`${where}:${i + 1}: reads the ${other} plugin's settings itself: use plugin.peer("${other}")?.settings()`)
+  })
+  return out
+}
+
+/** `ids`: every plugin there is, with its tier. `dirOf`: a vault plugin's folder (else beside it). */
+export function pluginProblems(dir: string, root: string, ids: Map<string, string>, vault: boolean, label: string, manifest?: Record<string, unknown>,
+  dirOf?: (id: string) => string) {
+  const name = path.basename(dir)
+  let m: Record<string, unknown>
+  try {
+    m = manifest ?? JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"))
+  } catch (e) {
+    return [`${label}: no readable manifest.json (${messageOf(e)})`]
+  }
+  const out = manifestProblems(m, name, new Set(ids.keys()), `${label}/manifest.json`)
+  if (!vault && !CATEGORIES.some((c) => c.id === m.category)) {
+    out.push(`${label}/manifest.json: category must be one of ${CATEGORIES.map((c) => c.id).join(", ")} (core/categories.ts)`)
+  }
+  if (!vault && m.icon === undefined) out.push(`${label}/manifest.json: icon names the plugin's icon ("heart-pulse": Lucide's, or one a plugin adds)`)
+  if (typeof m.icon === "string" && ICON_FILE.test(m.icon)) {
+    const file = path.join(dir, m.icon)
+    let svg: string | null = null
+    try { svg = fs.statSync(file).size <= ICON_MAX ? fs.readFileSync(file, "utf8") : null } catch { /* none */ }
+    if (!inside(dir, file) || svg === null || !svgIcon(svg)) out.push(`${label}/manifest.json: icon ${m.icon} must be an SVG file in its folder, at most ${ICON_MAX / 1000} kB, without scripts`)
+  }
+  if (m.offByDefault !== undefined && (vault || m.offByDefault !== true)) {
+    out.push(`${label}/manifest.json: offByDefault is for the app's plugins, and only true`)
+  }
+  if (vault && m.alwaysOn !== undefined) out.push(`${label}/manifest.json: alwaysOn is for the app's plugins`)
+  if (m.group !== undefined && (m.alwaysOn === true || !groupOf(m.group))) {
+    out.push(`${label}/manifest.json: group is for plugins with a switch, one of ${GROUPS.map((g) => g.id).join(", ")} (core/categories.ts)`)
+  }
+  if (m.settingsAdvanced !== undefined && (m.alwaysOn !== true || m.settingsAdvanced !== true)) out.push(`${label}/manifest.json: settingsAdvanced is for the app's alwaysOn plugins, and only true`)
+  const sw = m.switchIn as { section?: unknown; label?: unknown } | undefined
+  if (sw !== undefined && (vault || m.alwaysOn === true || m.group !== undefined || !SWITCH_SECTIONS.some((x) => x === sw?.section) || typeof sw?.label !== "string" || !sw.label)) {
+    out.push(`${label}/manifest.json: switchIn is {"section": ${SWITCH_SECTIONS.map((x) => `"${x}"`).join(" or ")}, "label": "..."}, for the app's plugins with a switch and no group`)
+  }
+  const requires = new Map((Array.isArray(m.requires) ? m.requires as string[] : []).filter((r) => ids.has(r) && (vault || ids.get(r) === "core"))
+    .map((r): [string, string] => [r, ids.get(r) === "core" ? path.join(root, "plugins", "core", r) : dirOf?.(r) ?? path.join(path.dirname(dir), r)]))
+  for (const x of exportsOf(m)) if (!exportFile(dir, x, m)) out.push(`${label}/manifest.json: exports '${x}', which isn't a module in its folder (${x}.ts, ${x}.tsx or ${x}/index.ts)`)
+  const ignored = ignoreOf(dir)
+  const front = vault ? frontFiles(dir) : undefined
+  for (const file of walk(dir)) {
+    if (!/\.tsx?$/.test(file) || file.endsWith(".d.ts") || ignored(path.relative(dir, file))) continue
+    const rel = `${label}/${path.relative(dir, file).split(path.sep).join("/")}`
+    const src = fs.readFileSync(file, "utf8")
+    out.push(...importProblems(file, src, rel, { dir, root, vault, requires, front }), ...settingsProblems(src, rel, name))
+  }
+  return out
+}
+
+function defKeys(src: string, key: "blocks" | "icons" | "sidebar"): string[] {
+  return defEntries(src, key).map((e) => e.key)
+}
+
+function defEntries(src: string, key: "blocks" | "icons" | "sidebar"): { key: string; value: string }[] {
+  const at = src.search(new RegExp(`\\b${key}:\\s*\\{`))
+  if (at < 0) return []
+  const out: { key: string; value: string; from: number }[] = []
+  const close = (to: number) => { const e = out.at(-1); if (e && !e.value) e.value = src.slice(e.from, to) }
+  let i = src.indexOf("{", at) + 1, depth = 1, expectKey = true
+  while (i < src.length && depth > 0) {
+    const c = src[i]
+    if (c === "/" && src[i + 1] === "/") { i = src.indexOf("\n", i); if (i < 0) break; continue }
+    if (c === "/" && src[i + 1] === "*") { i = src.indexOf("*/", i) + 2; continue }
+    if (depth === 1 && expectKey) {
+      const m = /^\s*(?:"([\w-]+)"|'([\w-]+)'|([A-Za-z_$][\w$]*))\s*:/.exec(src.slice(i))
+      if (m) { out.push({ key: m[1] ?? m[2] ?? m[3], value: "", from: i + m[0].length }); i += m[0].length; expectKey = false; continue }
+    }
+    if (c === '"' || c === "'" || c === "`") { const q = c; i++; while (i < src.length && src[i] !== q) i += src[i] === "\\" ? 2 : 1; i++; continue }
+    if ("{([".includes(c)) depth++
+    else if ("})]".includes(c)) depth--
+    else if (c === "," && depth === 1) { close(i); expectKey = true }
+    else if (!/\s/.test(c)) expectKey = false
+    i++
+  }
+  close(i - 1)
+  return out.map(({ key, value }) => ({ key, value }))
+}
+
+/** Lucide's own names, not the old ones it keeps for imports. */
+export function iconNames(root: string): Set<string> {
+  let lucide = ""
+  try { lucide = fs.readFileSync(path.join(root, "node_modules", "lucide-react", "dist", "esm", "icons", "index.mjs"), "utf8") } catch { /* none */ }
+  const out = new Set([...lucide.matchAll(/from '\.\/([\w-]+)\.mjs'/g)].map((m) => m[1]))
+  for (const d of walk(path.join(root, "plugins", "core")).filter((f) => path.basename(f) === "index.tsx")) for (const k of defKeys(fs.readFileSync(d, "utf8"), "icons")) out.add(k)
+  let own = ""
+  try { own = /export const ICONS[^=]*=\s*\{([^}]*)\}/.exec(fs.readFileSync(path.join(root, "web", "src", "core", "pages.ts"), "utf8"))?.[1] ?? "" } catch { /* none */ }
+  for (const m of own.matchAll(/"?([\w-]+)"?:\s*\w+/g)) out.add(m[1])
+  return out
+}
+
+export const USAGE_BLOCKS = ["agent-sessions", "agent-usage", "agent-projects", "agent-models", "agent-project"]
+
+function textBlockNames(dir: string): string[] {
+  const out = new Set<string>()
+  for (const f of walk(dir)) {
+    if (!f.endsWith(".ts") || f.endsWith(".d.ts")) continue
+    const src = fs.readFileSync(f, "utf8")
+    for (const m of src.matchAll(/\.block\(\s*["'`]([\w-]+)["'`]/g)) out.add(m[1])
+    if (/\bcodingAgent\(plugin\b/.test(src)) for (const b of USAGE_BLOCKS) out.add(b)
+  }
+  return [...out]
+}
+
+export function blockProblems(dir: string, m: Record<string, unknown>, label: string): string[] {
+  const where = `${label}/manifest.json`
+  const out = [...declProblems(m.blocks, where), ...settingDeclProblems(m.settings, where)]
+  let src = ""
+  try { src = fs.readFileSync(path.join(dir, "index.tsx"), "utf8") } catch { /* no frontend */ }
+  const drawn = defKeys(src, "blocks"), texts = new Set(textBlockNames(dir)), decls = declsOf(m), draws = drawsOf(m)
+  for (const b of drawn) {
+    if (!Object.hasOwn(decls, b) && !draws.includes(b)) out.push(`${where}: block '${b}' (drawn by index.tsx) isn't declared in "blocks": what it shows and its options`)
+    if (!texts.has(b)) out.push(`${label}: block '${b}' has no text side: plugin.block("${b}", ...) in plugin.ts, what /api/render shows`)
+  }
+  for (const b of Object.keys(decls)) if (!drawn.includes(b) && !decls[b].by) out.push(`${where}: declares block '${b}', which index.tsx doesn't draw`)
+  for (const b of draws) if (!drawn.includes(b)) out.push(`${where}: draws block '${b}', which index.tsx doesn't draw`)
+  for (const p of defEntries(src, "sidebar")) if (!/\bview\s*:/.test(p.value))
+    out.push(`${label}/index.tsx: sidebar panel '${p.key}' has no view: give it one (a tab showing it), so it drags onto a pane and opens in a tab`)
+  return out
+}

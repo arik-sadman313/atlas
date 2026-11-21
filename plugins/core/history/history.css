@@ -1,0 +1,10 @@
+.vau-history-text > div:first-child > .note-prose > :first-child { margin-top: 0; }
+.vau-history-text [data-change] { margin: 4px 0; padding-top: 8px; padding-right: 12px; padding-bottom: 8px; }
+.vau-history-text [data-change] > .note-prose > :first-child { margin-top: 0; }
+.vau-history-text [data-change] > .note-prose > :last-child { margin-bottom: 0; }
+/* A change is a marked box (web/src/index.css): its bar in the version's colour, a removal's in a quieter red. */
+.vau-history-text [data-change="add"] { --mark: var(--c); --mark-tint: 12%; }
+.vau-history-text [data-change="del"] { --mark: color-mix(in srgb, var(--red) 60%, transparent); --mark-tint: 12%; color: var(--muted-foreground);
+  text-decoration: line-through color-mix(in srgb, var(--red) 70%, transparent); }
+.vau-history-text ins { border-radius: 3px; padding: 0 1px; text-decoration: none; background: color-mix(in srgb, var(--c) 24%, transparent); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.vau-history-text del { color: var(--muted-foreground); text-decoration-color: color-mix(in srgb, var(--red) 75%, transparent); text-decoration-thickness: 1.5px; }

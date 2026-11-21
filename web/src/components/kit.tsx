@@ -1,0 +1,543 @@
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react"
+import { ChevronRight, RotateCcw, Search, X, type LucideIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { TryAgain } from "@/components/TryAgain"
+import { ink } from "@/lib/ink"
+import { plain } from "@/core/data"
+import { haptic } from "@/core/haptics"
+import { isDesktop } from "@/core/platform"
+import { copyText } from "@/core/richmd"
+import { useDraft } from "@/core/statefor"
+import { trackSoon } from "@/core/unsaved"
+import { Described, usePreview, type Preview } from "@/components/SettingPreview"
+import { closestOf } from "@/core/dom"
+import type { IconType } from "@/core/icons"
+
+/** The element with id `id` (a bar left for a portal: #sheet-bar), found as it renders so the portal is there in the
+ *  same frame (a view transition's picture takes it at once); one more render if it isn't in the page yet. */
+export function usePortalHost(id: string | null) {
+  const [, redraw] = useState(0)
+  const host = id ? document.getElementById(id) : null
+  useEffect(() => { if (id && !host) redraw((n) => n + 1) }, [id, host])
+  return host
+}
+
+export const TitledAbove = createContext(false)
+
+/** A page's large title, on desktop right under its tab's bar (ViewBar), like a file's. `section`: at a Settings
+ *  section's size. `tabs`: the page's tabs under it (a Segmented), `children` (what it does) in line with them. */
+export function PageHeader({ title, subtitle, section, tabs, children, className }: { title: string; subtitle?: ReactNode; section?: boolean; tabs?: ReactNode; children?: ReactNode; className?: string }) {
+  const above = useContext(TitledAbove)
+  if (above && !subtitle && !tabs && !children) return null
+  return (
+    <header className={cn("mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3", !above && "pt-1 md:pt-0", above && "-mt-3", className)}>
+      <div className={cn(tabs && "min-w-0 max-md:w-full")}>
+        {!above && <h1 className={cn("text-[24px] leading-[30px] font-bold", !section && "title-font md:text-[34px] md:leading-[41px]")}>{title}</h1>}
+        {subtitle && <p className="mt-0.5 text-[15px] leading-[20px] text-muted-foreground">{subtitle}</p>}
+        {tabs && <div className="mt-3">{tabs}</div>}
+      </div>
+      {children}
+    </header>
+  )
+}
+
+/** An icon in a row that does something of its own when clicked (a tab's mark: mute it), without the row's click, drag
+ *  or menu. A span, as the row is often a button or a link already. */
+export function IconAction({ action, className, children }: { action?: { label: string; run: (e: ReactMouseEvent<HTMLElement>) => void }; className?: string; children: ReactNode }) {
+  if (!action) return <>{children}</>
+  const stop = (e: { stopPropagation: () => void }) => { e.stopPropagation() }
+  return (
+    <span role="button" tabIndex={-1} aria-label={action.label} data-tip={action.label} data-no-drag data-icon-action onPointerDown={stop}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); action.run(e) }} onAuxClick={stop}
+      className={cn("-m-0.5 inline-grid shrink-0 cursor-pointer place-items-center rounded-[4px] p-0.5 hover:bg-foreground/[0.08]", className)}>
+      {children}
+    </span>
+  )
+}
+
+/** A status dot's kind. Only work moves; the colours want the user: `true` (yellow), ask (yellow, ringing once: blocked
+ *  on them), unread (blue, an answer to read), error (red); waits, hollow: its own background work runs and wakes it. */
+export type Dot = boolean | "working" | "waits" | "ask" | "unread" | "error"
+const DOTS: Record<"true" | Exclude<Dot, boolean>, string> = {
+  true: "bg-[var(--yellow)]", working: "bg-foreground breathe motion-reduce:animate-none", waits: "border-[1.5px] border-foreground bg-background breathe motion-reduce:animate-none", ask: "bg-[var(--yellow)] dot-ping", unread: "bg-[var(--blue)]", error: "bg-[var(--red)]",
+}
+
+/** An icon with a status dot on its corner while `on` (an agent at work, waiting for you), the same wherever the icon
+ *  is. `tag`: a tiny label on its bottom corner (the machine a terminal runs on: "M1"). */
+export function Badged({ on, tag, children }: { on?: Dot; tag?: string; children: ReactNode }) {
+  if (!on && !tag) return <>{children}</>
+  const kind = on === true ? "true" : on || undefined
+  return (
+    <span className="relative inline-grid shrink-0 place-items-center" data-badged>
+      {children}
+      {kind && <span key={kind} aria-hidden data-dot={kind} className={cn("dot-in absolute -top-[3px] -right-[3px] size-[7px] rounded-full ring-[1.5px] ring-background", DOTS[kind])} />}
+      {tag && <span aria-hidden data-tag className="absolute -right-[6px] -bottom-[2px] rounded-[2px] bg-background px-[1.5px] text-[7px] leading-[8px] font-semibold tracking-tight text-muted-foreground">{tag}</span>}
+    </span>
+  )
+}
+
+export const Logo = ({ className }: { className?: string; strokeWidth?: number }) => <img src="icon.svg" alt="" className={className} />
+
+export function Stone({ className }: { className?: string; strokeWidth?: number }) {
+  // (React's ids carry : or «», which a url(#…) may not take)
+  const id = `stone${useId().replace(/[^\w-]/g, "")}`
+  return (
+    <svg viewBox="115.6 100.5 320 320" aria-hidden className={className}>
+      <mask id={id}>
+        <polygon points="121.7,190.2 133.4,167.2 177.3,124.7 185.7,121.5 241.7,126.1 382.9,144.0 422.1,192.3 429.5,235.9 393.0,324.1 357.5,355.7 205.7,399.5 149.2,373.0 145.9,369.4 135.2,342.1" fill="#fff" />
+        <g fill="none" stroke="#000" strokeWidth="19">
+          <polygon points="142.9,181.1 231.7,157.7 340.1,253.1 329.1,324.6 321.7,328.0 182.5,346.1 167.3,330.5" strokeLinejoin="round" />
+          <polyline points="231.7,157.7 253.8,88.0" /><polyline points="340.1,253.1 454.2,168.5" /><polyline points="329.1,324.6 433.0,323.8" />
+          <polyline points="182.5,346.1 222.8,434.5" /><polyline points="142.9,181.1 120.0,147.6" />
+        </g>
+      </mask>
+      <rect x="100" y="90" width="350" height="350" fill="currentColor" mask={`url(#${id})`} />
+    </svg>
+  )
+}
+
+export const DenseRows = createContext(false)
+
+export function IconTile({ icon: Icon, tint, className, iconClassName }: { icon: IconType; tint: string; className?: string; iconClassName?: string }) {
+  if (Icon === Logo) return <Logo className={cn("size-5 shrink-0", className)} />
+  return (
+    <span aria-hidden data-icon-tile style={{ "--tint": tint }}
+      className={cn("on-tint grid size-5 shrink-0 place-items-center rounded-[5px] bg-[var(--tint)] bg-linear-to-b from-white/20 to-transparent shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.12)]", className)}>
+      <Icon className={cn("size-[13px]", iconClassName)} strokeWidth={2.25} />
+    </span>
+  )
+}
+
+/** No `kicker`: the icon sits beside the title (a settings section, where "Settings" above it says nothing new). */
+export function SheetHead({ icon: Icon, tint, kicker, title, sub, children }: {
+  icon: LucideIcon | typeof Logo; tint: string; kicker?: ReactNode; title: ReactNode; sub?: ReactNode; children?: ReactNode
+}) {
+  if (useContext(DenseRows) && kicker === undefined) return (
+    <div className="mb-5 flex items-center gap-2.5">
+      <IconTile icon={Icon} tint={tint} className="size-7 rounded-[7px]" iconClassName="size-[17px]" />
+      <div className="min-w-0">
+        <h2 id="sheet-title" className="text-[17px] leading-[22px] font-semibold break-words">{title}</h2>
+        {sub && <p className="text-[12px] leading-[16px] text-muted-foreground">{sub}</p>}
+      </div>
+      {children}
+    </div>
+  )
+  return (
+    <div className="mb-5">
+      {kicker !== undefined && (
+        <div className="mb-1 flex items-center gap-1.5 text-[15px] font-semibold" style={{ color: ink(tint) }}>
+          <Icon className="size-[18px] shrink-0" strokeWidth={2.25} />{kicker}
+        </div>
+      )}
+      <h2 id="sheet-title" className={cn("text-[24px] leading-[30px] font-bold text-balance break-words", kicker === undefined && "flex items-center gap-2")}>
+        {kicker === undefined && <span className="shrink-0" style={{ color: tint }}><Icon className="size-[22px]" strokeWidth={2.25} /></span>}
+        {kicker === undefined ? <span className="min-w-0">{title}</span> : title}
+      </h2>
+      {sub && <p className="mt-0.5 text-[15px] leading-[20px] text-muted-foreground">{sub}</p>}
+      {children}
+    </div>
+  )
+}
+
+/** A card, headed like the Health app: small symbol and title in the category colour. */
+export function Panel({
+  title, icon: Icon, tint, action, className, children,
+}: {
+  title?: ReactNode; icon?: LucideIcon; tint?: string; action?: ReactNode; className?: string; children: ReactNode
+}) {
+  return (
+    <section className={cn("glass rounded-[12px] p-4", className)}>
+      {title && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-1.5 gap-y-2" style={{ color: ink(tint ?? "var(--primary)") }}>
+          {Icon && <Icon className="size-[18px]" strokeWidth={2.25} />}
+          <h2 className="flex-1 text-[15px] font-semibold">{title}</h2>
+          {action && <div className="ml-auto text-foreground">{action}</div>}
+        </div>
+      )}
+      {children}
+    </section>
+  )
+}
+
+export function Stat({ label, value, unit, hint }: { label: string; value: ReactNode; unit?: string; hint?: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[13px] text-muted-foreground max-md:text-[15px]">{label}</div>
+      <div className="num mt-0.5 text-[28px] leading-[34px] font-semibold">
+        {value}{unit && <span className="ml-0.5 text-[15px] font-semibold text-muted-foreground">{unit}</span>}
+      </div>
+      {hint && <div className="text-[13px] text-muted-foreground max-md:text-[15px]">{hint}</div>}
+    </div>
+  )
+}
+
+/** Empty state. Data arrives by talking to Claude, so say what to ask for. */
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-[15px] leading-[20px] text-muted-foreground">{children}</p>
+}
+
+/** What's done on the Mac itself, said calmly where it's asked for through Vaultite Connect (useOverConnect): a note,
+ *  not an error. */
+export function OnThisMac({ children, className }: { children: ReactNode; className?: string }) {
+  return <p className={cn("text-[13px] leading-[18px] text-muted-foreground max-md:text-[15px] max-md:leading-[20px]", className)} data-on-this-mac>{children}</p>
+}
+
+export function ErrorDetails({ text, className }: { text: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const link = "rounded-[6px] px-2 py-1 text-[13px] text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground max-md:min-h-11 max-md:text-[15px]"
+  return (
+    <div className={className} data-error-details>
+      <div className="-ml-2 flex gap-1">
+        <button type="button" className={link} aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? "Hide details" : "Show details"}</button>
+        <button type="button" className={link} onClick={() => void copyText(text).then((ok) => setCopied(ok))}>{copied ? "Copied" : "Copy details"}</button>
+      </div>
+      {open && <pre className="mt-1 max-h-[40vh] overflow-auto rounded-[6px] border border-border px-3 py-2 font-mono text-[12px] leading-normal break-words whitespace-pre-wrap select-text">{text}</pre>}
+    </div>
+  )
+}
+
+/** A block's data on its way: "Loading…", shimmering, or what went wrong getting it (`error`: "Couldn't ask Tailscale."),
+ *  with Try again given `retry`. The core draws the same while a block's code loads; a list draws `LoadingRows` instead. */
+export function Loading({ error, retry, className }: { error?: ReactNode; retry?: () => void; className?: string }) {
+  if (error) return <div role="alert" data-loading-failed><p className={cn("text-[15px] leading-[20px] text-muted-foreground select-text", className)}>{error}</p>{retry && <TryAgain onClick={retry} />}</div>
+  return <p className={cn("loading-in text-[15px] leading-[20px] text-muted-foreground", className)} aria-busy><span className="shimmer">Loading…</span></p>
+}
+
+/** Suspense's fallback for code on its way (`className`: the room it keeps): React shows what came up to 300 ms after it does. */
+export function Arriving({ className }: { className?: string }) {
+  useEffect(() => trackSoon("code on its way", () => true), [])
+  return className ? <div className={className} /> : null
+}
+
+/** A line of text still to come, inside the element that will hold it, so it takes that line's height (`w`: its width). */
+export function Bar({ w = "60%", className }: { w?: string; className?: string }) {
+  return <span className={cn("skeleton inline-block h-[0.7em] max-w-full align-[-0.05em]", className)} style={{ width: w }} />
+}
+
+const widths = ["62%", "48%", "71%", "55%", "66%", "43%"]
+/** A list on its way: `count` skeleton rows built from the real `Row` (`meta`: with a meta line, or how many have one),
+ *  taking the list's room at once; `useKeptCount` gives as many rows as last time. */
+export function LoadingRows({ count, meta = true, lead, right, className }: {
+  count: number; meta?: boolean | number; lead?: ReactNode; right?: boolean; className?: string
+}) {
+  return (
+    <div className={cn("loading-in hairline", className)} aria-busy>
+      {Array.from({ length: count }, (_, i) => (
+        <Row key={i} lead={lead} title={<Bar w={widths[i % widths.length]} />} meta={(meta === true || i < Number(meta)) && <Bar w={i % 2 ? "30%" : "38%"} />}
+          right={right && <Bar w="2.5em" />} />
+      ))}
+    </div>
+  )
+}
+
+/** Progress ring for "x of goal this week". */
+export function Ring({ value, goal, color, size = 44 }: { value: number; goal: number; color: string; size?: number }) {
+  const r = size / 2 - 4
+  const c = 2 * Math.PI * r
+  const f = Math.min(value / goal, 1)
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0 -rotate-90" aria-hidden>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={5} />
+      {f > 0 && <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={5} strokeLinecap="round"
+        strokeDasharray={`${c * f} ${c}`} className="transition-[stroke-dasharray] duration-500" />}
+    </svg>
+  )
+}
+
+/** Single-series bar chart with a hover/tap readout. */
+export function Bars({
+  data, color = "var(--primary)", height = 96, format = (v: number) => String(v), goal,
+}: {
+  data: { label: string; value: number; tip?: string }[]; color?: string; height?: number
+  format?: (v: number) => string; goal?: number
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const max = Math.max(goal ?? 0, ...data.map((d) => d.value), 1)
+  const shown = hover ?? data.length - 1
+  return (
+    <div>
+      <div className="mb-2 h-5 text-[13px] text-muted-foreground tabular-nums">
+        {data[shown] && (
+          <>
+            <span className="num font-semibold text-foreground">{format(data[shown].value)}</span> · {data[shown].tip ?? data[shown].label}
+          </>
+        )}
+      </div>
+      <div className="relative flex items-end gap-[3px]" style={{ height }} onMouseLeave={() => setHover(null)}>
+        {goal !== undefined && (
+          <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted-foreground/40"
+            style={{ bottom: (goal / max) * height }} />
+        )}
+        {data.map((d, i) => (
+          <button key={i} type="button" className="flex h-full flex-1 items-end" aria-label={`${d.tip ?? d.label}: ${format(d.value)}`}
+            onMouseEnter={() => setHover(i)} onClick={() => setHover(i)}>
+            <span className="w-full rounded-t-[4px] transition-opacity"
+              style={{
+                height: d.value ? Math.max((d.value / max) * height, 3) : 2,
+                background: d.value ? color : "var(--muted)",
+                opacity: hover === null || hover === i ? 1 : 0.45,
+              }} />
+          </button>
+        ))}
+      </div>
+      <div className="mt-1.5 flex gap-[3px] text-[11px] text-muted-foreground">
+        {data.map((d, i) => (
+          <span key={i} className="flex-1 truncate text-center">{d.label}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** A list row: title (two lines at most) and meta line; `onOpen` makes it a disclosure row, `href` a new-tab link. On
+ *  phones the meta wraps too (no tooltip there); on desktop only with `wrap`. Other props go on the row. */
+export function Row({ title, meta, right, lead, className, onOpen, href, wrap, ...rest }: {
+  title: ReactNode; meta?: ReactNode; right?: ReactNode; lead?: ReactNode; className?: string
+  onOpen?: (e: ReactMouseEvent<HTMLElement>) => void; href?: string
+  /** Let the meta line wrap to two lines on desktop too (detail sheets) instead of truncating. */
+  wrap?: boolean
+} & Omit<HTMLAttributes<HTMLElement>, "title" | "onClick">) {
+  const body = (
+    <>
+      {lead}
+      <div className="min-w-0 flex-1">
+        <div className="line-clamp-2 text-[15px] leading-[20px] max-md:text-[17px] max-md:leading-[22px]">{typeof title === "string" ? plain(title) : title}</div>
+        {meta && <div className={cn("text-[13px] text-muted-foreground max-md:text-[15px] max-md:leading-[20px]", wrap ? "line-clamp-2" : "max-md:line-clamp-2 md:truncate")}>{meta}</div>}
+      </div>
+      {right && <div className="shrink-0 text-[14px] text-muted-foreground tabular-nums max-md:text-[15px]">{right}</div>}
+      {onOpen && <ChevronRight className="-ml-1.5 size-4 shrink-0 text-tertiary" strokeWidth={2.5} />}
+    </>
+  )
+  const pressable = cn(
+    "relative isolate flex min-h-11 w-full cursor-pointer items-center gap-3 py-2 text-left",
+    "before:absolute before:inset-y-0 before:-inset-x-2 before:-z-10 before:rounded-[8px] before:transition-colors",
+    "hover:before:bg-foreground/[0.04] active:before:bg-foreground/[0.07]", className,
+  )
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" className={pressable} {...rest}>{body}</a>
+  ) : onOpen ? (
+    <button type="button" data-opens onClick={onOpen} className={pressable} {...rest}>{body}</button>
+  ) : (
+    <div className={cn("flex min-h-11 items-center gap-3 py-2", className)} {...rest}>{body}</div>
+  )
+}
+
+export function List({ children }: { children: ReactNode }) {
+  return <div className="hairline">{children}</div>
+}
+
+const InSection = createContext(false)
+/** A labelled group inside a card ("Up next", "Lifts"); `grouped`: its title lines up with a Group's rows. */
+export function Section({ title, children, className, grouped }: { title: ReactNode; children: ReactNode; className?: string; grouped?: boolean }) {
+  const dense = useContext(DenseRows), inner = useContext(InSection)
+  return (
+    <div className={className}>
+      {title !== null && <div className={cn("mb-1 text-[13px] font-semibold text-muted-foreground", (dense || grouped) && "px-3", dense && "md:mb-1.5 md:text-[12px]",
+        inner && "text-[12px] font-medium")}>{title}</div>}
+      <InSection.Provider value>{children}</InSection.Provider>
+    </div>
+  )
+}
+
+/** A setting: name and line on the left, control on the right (`stack`: under it on phones; `below`: always, a chip
+ *  list); `onClick`: a button with `value` and a chevron; `preview`: pictures of what it changes (SettingPreview.tsx). */
+export function SettingRow({ label, sub, stack, below, value, onClick, chevron = ChevronRight, preview, children, className, ...rest }: {
+  label: ReactNode; sub?: ReactNode; stack?: boolean; below?: boolean; value?: ReactNode; onClick?: () => void; chevron?: LucideIcon | null; preview?: Preview; children?: ReactNode
+} & Omit<HTMLAttributes<HTMLElement>, "onClick">) {
+  const Chevron = chevron
+  const dense = useContext(DenseRows)
+  const ref = useRef<HTMLElement>(null)
+  const attach = useCallback((el: HTMLElement | null) => { ref.current = el }, [])
+  const pv = usePreview(preview, ref, { said: !!sub })
+  const body = (
+    <>
+      <div className="min-w-0 flex-1">
+        <div className={cn("text-[15px] leading-[20px]", dense && "md:text-[13px] md:leading-[18px]")}>{label}{pv?.button}</div>
+        {sub && <div className={cn("text-[13px] leading-[18px] text-muted-foreground", dense && "md:text-[12px] md:leading-[16px]")}>{sub}</div>}
+        {pv && <span id={pv.desc} hidden>{preview!.text}</span>}
+      </div>
+      {value != null && <span className={cn("min-w-0 max-w-[50%] truncate text-right text-[14px] text-muted-foreground", dense && "md:text-[13px]")}>{value}</span>}
+      {pv ? <Described.Provider value={pv.desc}>{children}</Described.Provider> : children}
+      {onClick && Chevron && <Chevron aria-hidden className="-ml-1.5 size-4 shrink-0 text-tertiary" strokeWidth={2.5} />}
+      {pv?.inline}{pv?.card}
+    </>
+  )
+  const cls = cn("flex min-h-12 w-full gap-3 py-2 text-left", dense && "md:min-h-10", below ? "flex-col items-stretch" : stack ? "flex-col items-stretch sm:flex-row sm:items-center" : "items-center", pv?.inline && "flex-wrap", className)
+  return onClick
+    ? <button ref={attach} type="button" onClick={onClick} {...rest} className={cn(cls, "cursor-pointer")}>{body}</button>
+    : <div ref={attach} {...pv?.props} {...rest} className={cls}>{body}</div>
+}
+
+/** A choice of a few, side by side. `big`: a page's tabs, finger-tall on phones; `small`: a sidebar's, at its rows'
+ *  size. An option's `count`: how many it has, after its label (none at 0). */
+export function Segmented<T extends string>({ value, options, onChange, label, big, small, className }: {
+  value: T; options: { value: T; label: string; icon?: LucideIcon; count?: number; attrs?: Record<`data-${string}`, string> }[]; onChange: (v: T) => void; label: string; big?: boolean; small?: boolean; className?: string
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} aria-describedby={useContext(Described)} className={cn("flex bg-muted p-[2px]", small ? "rounded-[8px]" : "rounded-[9px]", className)}>
+      {options.map((o) => {
+        const on = o.value === value
+        return (
+          <button key={o.value} type="button" role="radio" aria-checked={on} data-option={o.value} {...o.attrs} onClick={() => { if (!on) haptic("selection"); onChange(o.value) }}
+            className={cn(
+              "relative flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap transition-[background,box-shadow] duration-(--motion)",
+              small ? "h-6.5 rounded-[6px] px-2.5 text-[12.5px]" : "min-h-8 rounded-[7px] px-4 text-[13px]",
+              big && "max-md:min-h-10 max-md:text-[15px]",
+              on ? cn("bg-card font-semibold dark:bg-[var(--segment-on)]", small ? "shadow-[0_1px_3px_rgb(0_0_0/0.12)]" : "shadow-[0_3px_8px_rgb(0_0_0/0.12),0_3px_1px_rgb(0_0_0/0.04)]")
+                : cn("font-medium", small ? "text-muted-foreground hover:text-foreground" : "text-foreground/80"),
+            )}>
+            {o.icon && <o.icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />}{o.label}
+            {!!o.count && <span className="-ml-0.5 font-medium tabular-nums opacity-60">{o.count}</span>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Rows under a heading that folds them (a panel's sections). `keep`: its open state kept on this device, by that name. */
+export function Foldable({ title, count, big, keep, dflt = true, children, ...rest }: {
+  title: ReactNode; count?: number | null; big?: boolean; keep?: string; dflt?: boolean; children: ReactNode
+} & Record<`data-${string}`, unknown>) {
+  const key = keep && `vaultite.${keep}`
+  const [open, set] = useState(() => { try { const v = key ? localStorage.getItem(key) : null; return v === null ? dflt : v === "1" } catch { return dflt } })
+  const setOpen = (v: boolean) => { set(v); try { if (key) localStorage.setItem(key, v ? "1" : "0") } catch {} }
+  return (
+    <div {...rest}>
+      <button type="button" data-keyrow onClick={() => setOpen(!open)} aria-expanded={open}
+        className={cn("flex w-full cursor-pointer items-center gap-1 rounded-[5px] pr-1 pl-1.5 text-left font-medium text-muted-foreground hover:bg-foreground/[0.04]",
+          big ? "h-8 text-[14px]" : "h-7 text-[12px]")}>
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} strokeWidth={2.5} />
+        <span className="flex-1 truncate">{title}</span>
+        {count != null && <span className="text-tertiary tabular-nums" data-count>{count}</span>}
+      </button>
+      {open && <div className="flex flex-col gap-px pb-1">{children}</div>}
+    </div>
+  )
+}
+
+export function ResetButton({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+  return (
+    <button type="button" aria-label={label} data-tip={on ? "Restore default" : undefined} data-reset-default={on || undefined}
+      aria-hidden={!on || undefined} tabIndex={on ? undefined : -1} onClick={(e) => { e.stopPropagation(); onClick() }}
+      className={cn("-my-1 grid size-8 shrink-0 cursor-pointer place-items-center rounded-[7px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground", !on && "invisible")}>
+      <RotateCcw className="size-3.5" strokeWidth={2} />
+    </button>
+  )
+}
+
+/** A value along a track, in the accent colour (index.css .slider). `onInput` as it's dragged (show it, save nothing),
+ *  `onChange` once it's let go: one write for a whole drag. */
+export function Slider({ value, min = 0, max = 100, step = 1, label, onInput, onChange, className }: {
+  value: number; min?: number; max?: number; step?: number; label: string; onInput?: (v: number) => void; onChange: (v: number) => void; className?: string
+}) {
+  const [held, setHeld] = useState<number | null>(null)
+  const v = held ?? value
+  const el = useRef<HTMLInputElement>(null), commit = useRef(onChange)
+  commit.current = onChange
+  // (the element's own change event: once it's let go, or at each key; React's onChange is every step)
+  useEffect(() => {
+    const input = el.current!
+    const done = () => { setHeld(null); commit.current(Number(input.value)) }
+    input.addEventListener("change", done)
+    return () => input.removeEventListener("change", done)
+  }, [])
+  return (
+    <input ref={el} type="range" min={min} max={max} step={step} value={v} aria-label={label} aria-describedby={useContext(Described)}
+      onChange={(e) => { const n = Number(e.currentTarget.value); setHeld(n); onInput?.(n) }}
+      style={{ "--pct": `${max > min ? ((v - min) / (max - min)) * 100 : 0}%` }}
+      className={cn("slider h-6 cursor-pointer", className)} />
+  )
+}
+
+/** Inset grouped list, like iOS Settings (detail sheets). */
+export const Group = ({ children }: { children: ReactNode }) => (
+  <div data-setting-group className="rounded-card bg-foreground/[0.04] px-3"><List>{children}</List></div>
+)
+
+export function GroupNote({ children, above, className, ...rest }: { children: ReactNode; above?: boolean; className?: string } & Record<`data-${string}`, string | boolean | undefined>) {
+  return <p {...rest} className={cn("px-3 text-[13px] leading-[18px] text-muted-foreground md:text-[12px] md:leading-[16px]", above ? "pb-1.5" : "pt-1.5", className)}>{children}</p>
+}
+
+/** A label and its value, in a Group. */
+export function KV({ label, children, ...rest }: { label: ReactNode; children: ReactNode } & Record<`data-${string}`, string | boolean | undefined>) {
+  const dense = useContext(DenseRows)
+  return (
+    <div {...rest} className={cn("flex min-h-11 items-center justify-between gap-4 py-2 text-[15px]", dense && "md:min-h-10 md:text-[13px] md:leading-[18px]")}>
+      <span className="shrink-0">{label}</span>
+      <span className="min-w-0 text-right break-words text-muted-foreground select-text">{children}</span>
+    </div>
+  )
+}
+
+/** A value a block shows that can be changed in place (a person's context): click, type, Enter. `set` (the ctx's
+ *  setProperty for a key): absent, it's only shown; "" is undefined (the key goes). Empty, it offers `placeholder`. */
+export function Editable({ value, set, placeholder, className, children }: {
+  value: string; set?: (v: string | undefined) => void; placeholder: string; className?: string; children?: ReactNode
+}) {
+  const [editing, setEditing] = useState(false)
+  const [v, setV] = useDraft(value)
+  if (!set) return value ? <span className={className}>{children ?? value}</span> : null
+  if (editing) {
+    const commit = () => { setEditing(false); if (v.trim() !== value) set(v.trim() || undefined) }
+    return (
+      <input autoFocus value={v} placeholder={placeholder} spellCheck={false} aria-label={placeholder}
+        onChange={(e) => setV(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur() }
+          if (e.key === "Escape") { e.preventDefault(); setV(value); setEditing(false) }
+        }}
+        className={cn("-mx-1 w-[calc(100%+8px)] min-w-0 rounded-[6px] bg-foreground/[0.06] px-1 outline-none placeholder:text-muted-foreground", className)} />
+    )
+  }
+  const look = cn("-mx-1 cursor-text rounded-[6px] px-1 hover:bg-foreground/[0.04] max-md:relative max-md:after:absolute max-md:after:inset-x-0 max-md:after:-inset-y-2", !value && "text-tertiary", className)
+  const change = `Change ${placeholder.replace(/^Add /, "")}`
+  // Links can't sit inside a button: the keyboard's way in is a button of its own.
+  if (value && children) return (
+    <span data-no-edit data-tip={change} onClick={(e) => { if (!closestOf(e.target, "a, button")) setEditing(true) }} className={look}>
+      {children}
+      <button type="button" aria-label={change} onClick={() => setEditing(true)}
+        className="sr-only focus-visible:not-sr-only focus-visible:ml-1 focus-visible:rounded-[4px] focus-visible:px-1 focus-visible:text-[12px] focus-visible:text-muted-foreground">Change</button>
+    </span>
+  )
+  return (
+    <span role="button" tabIndex={0} data-no-edit data-tip={value ? change : undefined}
+      onClick={(e) => { if (!closestOf(e.target, "a")) setEditing(true) }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditing(true) } }}
+      className={look}>
+      {value || placeholder}
+    </span>
+  )
+}
+
+/** A field that filters a list (plugins, hotkeys, a table's rows): one look everywhere. Escape clears it (and goes no
+ *  further while it has text), the x too. */
+export function FilterField({ value, onChange, placeholder, className, autoFocus = false }: {
+  value: string; onChange: (v: string) => void; placeholder: string; className?: string
+  /** In a sheet, on a computer, take the keyboard as it shows: a sheet that's a list to find in (Hotkeys) is typed into
+   *  at once. (Not in a page: Settings' Hotkeys is reached through its own search.) */
+  autoFocus?: boolean
+}) {
+  const field = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!autoFocus || !isDesktop()) return
+    const f = requestAnimationFrame(() => { if (field.current?.closest("dialog[open]")) field.current.focus({ preventScroll: true }) })
+    return () => cancelAnimationFrame(f)
+  }, [autoFocus])
+  return (
+    <label className={cn("relative block min-w-0 flex-1", className)}>
+      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={2.25} />
+      <input ref={field} type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+        spellCheck={false} autoComplete="off"
+        onKeyDown={(e) => { if (e.key === "Escape" && value) { e.stopPropagation(); onChange("") } }}
+        className="h-11 w-full rounded-[10px] border-[0.5px] border-border bg-card pr-8 pl-8 text-[17px] outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 md:h-7.5 md:rounded-[8px] md:text-[13px] [&::-webkit-search-cancel-button]:hidden" />
+      {value && (
+        <button type="button" onClick={() => onChange("")} aria-label="Clear" data-tip="Clear"
+          className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 cursor-pointer place-items-center rounded-full text-muted-foreground hover:text-foreground max-md:after:absolute max-md:after:-inset-3">
+          <X className="size-3.5" strokeWidth={2.25} />
+        </button>
+      )}
+    </label>
+  )
+}

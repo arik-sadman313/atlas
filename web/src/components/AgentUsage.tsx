@@ -1,0 +1,574 @@
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react"
+import type { LucideIcon } from "lucide-react"
+import { BarChart3, Boxes, ChevronRight, FolderGit2, Gauge, RefreshCw, Terminal } from "lucide-react"
+import { AgentSession } from "@/components/AgentSession"
+import { AmbientButton } from "@/components/Ambient"
+import { Bar, Bars, Empty, List, Loading, LoadingRows, Panel, Row, Section, Segmented, Stat } from "@/components/kit"
+import { usePluginSettings } from "@/components/PluginSettings"
+import { Button } from "@/components/Button"
+import { canRunAgents, choosePlace, openAgent } from "@/core/agents"
+import { addDays, dateText, fmtAgo, fmtDay, fmtMin, fmtTime, numberText, today, useLive, useTick } from "@/core/data"
+import { api } from "@/core/http"
+import type { BlockCtx, PluginDef, ViewDef } from "@/core/define"
+import { isViewOpen, openView } from "@/core/files"
+import { namedIcon } from "@/core/pages"
+import { machinePath, onMachine, useMachines } from "@/core/machines"
+import { notify } from "@/core/notify"
+import { useKeptCount } from "@/core/heights"
+import { useEnabled } from "@/core/plugins"
+import { cn, plural } from "@/lib/utils"
+
+/** Which agent, and where its plugin answers. */
+export type AgentSource = {
+  /** Its routes under /api/: GET <path>?days= (AgentUsage), GET <path>/session/<id> (SessionPage, AgentSession.tsx). */
+  path: string
+  /** Its name ("Claude Code"), and what its replies are signed with in a conversation ("Claude"; default: the name). */
+  label: string
+  speaker?: string
+  icon: LucideIcon
+  tint: string
+  /** Its name in Terminal ("claude"): Resume in terminal opens terminal/resume-<agent>-<id>. */
+  agent: string
+  /** false: its sessions can't be resumed in a terminal (an agent that runs elsewhere). */
+  resume?: boolean
+  /** Its view of one session: view:<view>/<session id>. */
+  view: string
+  /** Said when there are no limits (yet): where they come from. */
+  noLimits?: string
+  /** What `cost` is, when it isn't an estimate at list prices ("Cost as Hermes recorded it"). */
+  costNote?: string
+  /** A plugin setting that must be yes before its limits are read from the user's account: asked in the limits block. */
+  consent?: { setting: string; ask: string; detail: string }
+  /** It runs in the cloud (Grok Bot): none of its sessions is open here or resumes; what a session's view says instead
+   *  of a conversation. */
+  cloud?: string
+}
+
+export type Window = { id: string; label: string; minutes: number; used: number; resets_at: string | null }
+type OfAccount = { account?: string; accountLabel?: string; private?: boolean }
+export type Session = OfAccount & {
+  id: string; title: string; project: string; root: string; cwd?: string; first: string; last: string
+  cost: number; tokens: number; active_min: number; model: string
+}
+export type LiveSession = OfAccount & {
+  pid: number; id: string; title: string; name: string; project: string; status: string; kind: string
+  started: string | null; since: string | null; model: string | null; cost: number; tokens: number
+  cwd?: string
+  /** The app's terminal it runs in (Terminal plugin), when it does. */
+  terminal?: string | null
+}
+export type Day = { date: string; cost: number; tokens: number; active_min: number; sessions: number }
+export type Share = { name: string; cost: number; tokens: number; root?: string; sessions?: number; active_min?: number; last?: string }
+type AccountPlan = { id: string; label: string; private?: boolean; uses?: string[]; plan: AgentUsage["plan"]; limits: AgentUsage["limits"] }
+export type AgentUsage = {
+  plan: { name: string; monthly: number | null } | null
+  limits: { source: string; observed: string; windows: Window[] } | null
+  live: LiveSession[]; days: Day[]; projects: Share[]; models: Share[]; sessions: Session[]
+  total: { cost: number; tokens: number; unpriced: number; cache_hit: number | null }
+  /** Each account's plan and limits, when the plugin has several (all of them asked at once). */
+  accounts?: AccountPlan[]
+  /** Servers waiting for sessions started elsewhere (Claude Code's Remote Control): name, account, since when. */
+  servers?: { pid: number; name: string; account: string; accountLabel: string; started: string | null }[]
+}
+
+const EVERY = 15_000
+const str = (v: unknown) => (typeof v === "string" ? v : "")
+
+/** A plugin's `route` for a block, with `query`, on its options' `machine` (this one when it's none or this) and
+ *  `account` (and `for`: a plugin whose accounts come first): `on` names another machine (" on Studio"). */
+export function useAgentRoute<T>(route: string, options: Record<string, unknown>, query: Record<string, string | number> = {}, version?: string) {
+  const machine = str(options.machine), account = str(options.account), by = str(options.for)
+  const m = useMachines()?.find((x) => x.id === machine)
+  const there = m?.self ? "" : machine
+  const q = new URLSearchParams(Object.entries({ ...query, ...(account ? { account } : {}), ...(by ? { for: by } : {}) }).map(([k, v]) => [k, String(v)])).toString()
+  const { data, error, retry } = useLive<T>(machinePath(there, q ? `${route}?${q}` : route), version)
+  return { data, error: data ? null : error, retry, on: there ? ` on ${m?.label ?? machine}` : "", machine: there }
+}
+
+function useAgentUsage(src: AgentSource, options: Record<string, unknown>, days = 30) {
+  const [tick, setTick] = useState(() => Math.floor(Date.now() / EVERY))
+  useEffect(() => {
+    const id = setInterval(() => { if (!document.hidden) setTick(Math.floor(Date.now() / EVERY)) }, 1000)
+    return () => clearInterval(id)
+  }, [])
+  const [again, setAgain] = useState(0)
+  const got = useAgentRoute<AgentUsage>(src.path, options, { days }, `${tick}.${again}`)
+  const { data, machine } = got
+  useEffect(() => {
+    if (data) for (const s of [...data.sessions, ...data.live]) if (s.title) titles.set(`${src.view}/${onMachine(s.id, machine)}`, s.title)
+  }, [data, src.view, machine])
+  const refresh = () => api("POST", machinePath(machine, `${src.path}/refresh`)).then(() => setAgain((n) => n + 1))
+  return { ...got, refresh }
+}
+
+const titles = new Map<string, string>()
+/** A session tab's label: its title once a block has seen it, else "<label> session". */
+export const sessionTitle = (src: AgentSource, id: string) => titles.get(`${src.view}/${id}`) || `${src.label} session`
+
+/** Open a session: the terminal tab it runs in (Terminal plugin), or its conversation in a tab (not a private one's).
+ *  `machine`: another machine's session. */
+export function openSession(src: AgentSource, s: { id: string; terminal?: string | null; private?: boolean }, terminalOn: boolean, e?: MouseEvent, machine = "") {
+  if (s.terminal && terminalOn) {
+    const to = `terminal/${onMachine(s.terminal, machine)}`
+    return openView(to, { newTab: !isViewOpen(to) })
+  }
+  if (s.private) return notify("A private account's conversations aren't shown")
+  openView(`${src.view}/${onMachine(s.id, machine)}`, { newTab: !!(e?.metaKey || e?.ctrlKey) })
+}
+
+const titleOf = (s: { title: string; private?: boolean }, untitled: string) => (s.private ? "Private session" : s.title || untitled)
+
+const daysOf = (o: Record<string, unknown>) => Math.min(Math.max(typeof o.days === "number" ? Math.round(o.days) : 30, 1), 3650)
+const costNote = (src: AgentSource) => src.costNote ?? "Estimated at list prices"
+export const money = (v: number) => (v < 100 ? `$${v.toFixed(2)}` : `$${numberText(Math.round(v))}`)
+export const tokens = (n: number) =>
+  n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n)
+const minsSince = (s: string | null) => (s ? Math.max((Date.now() - new Date(s).getTime()) / 60000, 0) : 0)
+const status = (s: string) => (s === "busy" ? "Working" : s ? s[0].toUpperCase() + s.slice(1) : "Open")
+
+function Waiting({ src, error, retry, on = "" }: { src: AgentSource; error: string | null; retry?: () => void; on?: string }) {
+  return <Loading error={error && `Couldn't read ${src.label}${on || " on this machine"}. ${error}`} retry={retry} />
+}
+
+function renews(at: string) {
+  const d = new Date(at)
+  const left = (d.getTime() - Date.now()) / 60000
+  const clock = left < 20 * 60 ? fmtTime(at) : `${dateText(d, { weekday: "short" })} ${fmtTime(at)}`
+  return `Renews in ${left < 48 * 60 ? fmtMin(Math.max(Math.round(left), 1)) : `${Math.round(left / 1440)} days`}, ${clock}`
+}
+
+function MeterSkeleton() {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 text-[15px]"><span><Bar w="8em" /></span><span><Bar w="2.5em" /></span></div>
+      <div className="mt-1.5 h-2 rounded-full bg-muted" />
+      <div className="mt-1 text-[13px] text-muted-foreground"><Bar w="14em" /></div>
+    </div>
+  )
+}
+
+function Meter({ w, tint }: { w: Window; tint: string }) {
+  const left = w.resets_at ? new Date(w.resets_at).getTime() - Date.now() : null
+  const passed = left != null ? Math.min(Math.max(1 - left / (w.minutes * 60000), 0), 1) : null
+  const ahead = passed != null && w.used / 100 > passed + 0.1
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 text-[15px]">
+        <span className="truncate">{w.label}</span>
+        <span className="num shrink-0 font-semibold">{Math.round(w.used)}%</span>
+      </div>
+      <div className="relative mt-1.5 h-2">
+        <div className="h-full overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full transition-[width] duration-500"
+            style={{ width: `${Math.min(w.used, 100)}%`, background: w.used >= 90 ? "var(--red)" : tint }} />
+        </div>
+        {passed != null && passed > 0.02 && passed < 0.98 && (
+          <div data-tip={`${Math.round(passed * 100)}% of the window has passed`}
+            className="absolute -top-1 -bottom-1 w-[2px] -translate-x-1/2 rounded-full bg-foreground/35"
+            style={{ left: `${passed * 100}%` }} />
+        )}
+      </div>
+      <div className="mt-1 text-[13px] text-muted-foreground">
+        {[w.resets_at ? renews(w.resets_at) : w.used ? "Renewal time unknown" : "Not started", ahead && "ahead of pace"].filter(Boolean).join(" · ")}
+      </div>
+    </div>
+  )
+}
+
+function Limits({ src, lim }: { src: AgentSource; lim: AgentUsage["limits"] }) {
+  if (!lim) return <Empty>{src.noLimits ?? "No limits yet."}</Empty>
+  return (
+    <div className="space-y-4">
+      {lim.windows.map((w) => <Meter key={w.id} w={w} tint={src.tint} />)}
+      <p className="text-[13px] text-muted-foreground">From the {lim.source}, {fmtAgo(lim.observed)}</p>
+    </div>
+  )
+}
+
+const iconFor = (src: AgentSource, fm: Record<string, unknown>, icon: LucideIcon) =>
+  namedIcon(typeof fm.icon === "string" ? fm.icon : null) === src.icon ? icon : src.icon
+
+function Consent({ src, consent }: { src: AgentSource; consent: NonNullable<AgentSource["consent"]> }) {
+  const [, set] = usePluginSettings(src.path)
+  const answer = (yes: boolean) => void set({ [consent.setting]: yes }).catch(() => notify(`Couldn't save ${src.label}'s setting`))
+  return (
+    <div className="space-y-3">
+      <p className="text-[15px] leading-[20px]">{consent.ask}</p>
+      <p className="text-[13px] text-muted-foreground">{consent.detail}</p>
+      <div className="flex gap-2">
+        <Button look="primary" size="small" onClick={() => answer(true)}>Read usage</Button>
+        <Button size="small" look="outline" onClick={() => answer(false)}>Not now</Button>
+      </div>
+    </div>
+  )
+}
+
+/** Its plan's limits in the status bar (AmbientItem): each account's tightest window, a click to `open`. */
+export function AgentLimitsChip({ src, open }: { src: AgentSource; open: () => void }) {
+  const [unknown, setUnknown] = useState(false)
+  const tick = useTick(unknown ? 8 * EVERY : EVERY)
+  const { data } = useLive<Pick<AgentUsage, "limits" | "accounts">>(`${src.path}/limits`, tick)
+  const each = data?.accounts && data.accounts.length > 1 ? data.accounts : data?.limits ? [{ label: "", limits: data.limits }] : []
+  const shown = each.flatMap((a) => (a.limits?.windows.length ? [{ label: a.label, top: Math.max(...a.limits.windows.map((w) => w.used)), all: a.limits.windows }] : []))
+  useEffect(() => setUnknown(!!data && !shown.length), [data, shown.length])
+  if (!shown.length) return null
+  const top = Math.max(...shown.map((a) => a.top))
+  const tip = shown.map((a) => `${a.label ? `${a.label}: ` : ""}${a.all.map((w) => `${w.label.toLowerCase()} ${Math.round(w.used)}%`).join(", ")}`).join("; ")
+  return <AmbientButton icon={src.icon} text={shown.map((a) => `${Math.round(a.top)}%`).join(" · ")} tip={`${src.label} limits: ${tip}`}
+    tint={top >= 90 ? "var(--red)" : top >= 75 ? "var(--orange)" : undefined} onClick={open} />
+}
+
+/** Its plan's allowances; with several accounts, each one's under its name (`account:` for one). */
+export function AgentLimits({ src, options, fm }: BlockCtx & { src: AgentSource }) {
+  const { data, error, retry, on, refresh } = useAgentUsage(src, options)
+  const [settings] = usePluginSettings(src.path)
+  const [asking, setAsking] = useState(false)
+  const again = () => {
+    setAsking(true)
+    refresh().catch(() => notify(`Couldn't ask ${src.label} again`)).finally(() => setAsking(false))
+  }
+  const each = data?.accounts && data.accounts.length > 1 ? data.accounts : null
+  const ask = !on && src.consent && settings && settings[src.consent.setting] === undefined ? src.consent : null
+  const meters = useKeptCount(`agent:${src.path}:limits${on}`,
+    data ? (each ? each.reduce((n, a) => n + (a.limits?.windows.length ?? 0), 0) : data.limits?.windows.length ?? 0) : undefined, 2, 6)
+  return (
+    <Panel title={`Plan limits${on}`} icon={iconFor(src, fm, Gauge)} tint={src.tint}
+      action={
+        <div className="flex items-center gap-1">
+          {!each && data?.plan && <span className="text-[13px] text-muted-foreground">{data.plan.name}</span>}
+          {data && !ask && (
+            <button type="button" onClick={again} disabled={asking} aria-label="Ask for the limits again" data-tip="Refresh" data-limits-refresh
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[8px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50 max-md:size-11">
+              <RefreshCw className={cn("size-4", asking && "animate-spin")} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+      }>
+      {ask ? <Consent src={src} consent={ask} /> : !data ? (error || !meters ? <Waiting src={src} error={error} retry={retry} on={on} /> : (
+        <div className="loading-in space-y-4" aria-busy>
+          {Array.from({ length: meters }, (_, i) => <MeterSkeleton key={i} />)}
+          <p className="text-[13px] text-muted-foreground"><Bar w="12em" /></p>
+        </div>
+      )) : each ? <Accounts src={src} each={each} /> : <Limits src={src} lim={data.limits} />}
+    </Panel>
+  )
+}
+
+const accountTitle = (a: AccountPlan) => (a.plan ? `${a.label} · ${a.plan.name}` : a.label)
+
+function Accounts({ src, each }: { src: AgentSource; each: AccountPlan[] }) {
+  const used = each.filter((a) => a.uses?.length), rest = each.filter((a) => !a.uses?.length)
+  const plain = (xs: AccountPlan[]) => xs.map((a) => <Section key={a.id} title={accountTitle(a)}><Limits src={src} lim={a.limits} /></Section>)
+  if (!used.length) return <div className="space-y-5">{plain(each)}</div>
+  return (
+    <div className="space-y-5">
+      {used.map((a) => (
+        <div key={a.id} data-account-used={a.id} className="-mx-2 rounded-control px-2 pt-2 pb-3"
+          style={{ background: `color-mix(in srgb, ${src.tint} 7%, transparent)` }}>
+          <Section title={
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-foreground">{accountTitle(a)}</span>
+              {a.uses!.map((u) => (
+                <span key={u} className="rounded-full px-2 py-px text-[12px] font-medium"
+                  style={{ color: src.tint, background: `color-mix(in srgb, ${src.tint} 14%, transparent)` }}>{u}</span>
+              ))}
+            </span>
+          }><Limits src={src} lim={a.limits} /></Section>
+        </div>
+      ))}
+      {plain(rest)}
+    </div>
+  )
+}
+
+const dot = (s: string) => (s === "busy" ? "var(--green)" : s === "idle" ? "var(--gray)" : "var(--yellow)")
+
+const rowButton = "relative isolate flex min-h-11 w-full cursor-pointer items-center gap-3 py-2 text-left before:absolute before:inset-y-0 " +
+  "before:-inset-x-2 before:-z-10 before:rounded-[8px] before:transition-colors hover:before:bg-foreground/[0.04] active:before:bg-foreground/[0.07]"
+
+function LiveRow({ src, s, machine = "" }: { src: AgentSource; s: LiveSession; machine?: string }) {
+  const on = useEnabled()
+  const inTerminal = !!s.terminal && on("terminal")
+  return (
+    <button type="button" className={rowButton} data-session={s.id} onClick={(e) => openSession(src, s, on("terminal"), e, machine)}
+      data-tip={inTerminal ? "Go to its terminal" : s.private ? "A private account's session" : "Open the conversation"}>
+      <span className="size-2 shrink-0 rounded-full" style={{ background: dot(s.status) }} data-tip={status(s.status)} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] leading-[20px]">{titleOf({ ...s, title: s.title || s.name }, "New session")}</div>
+        <div className="truncate text-[13px] text-muted-foreground">
+          {[s.project, s.accountLabel, s.model, `${status(s.status)} ${fmtMin(Math.round(minsSince(s.since)))}`, s.kind && s.kind !== "interactive" && s.kind].filter(Boolean).join(" · ")}
+        </div>
+      </div>
+      <div className="shrink-0 text-[14px] text-muted-foreground tabular-nums">{money(s.cost)}</div>
+      <ChevronRight className="-ml-1.5 size-4 shrink-0 text-tertiary" strokeWidth={2.5} />
+    </button>
+  )
+}
+
+function SessionRow({ src, s, machine = "" }: { src: AgentSource; s: Session; machine?: string }) {
+  return (
+    <Row title={titleOf(s, "Untitled session")} right={money(s.cost)} onOpen={() => openSession(src, s, false, undefined, machine)}
+      meta={[s.project, s.accountLabel, s.model, s.active_min >= 1 && fmtMin(Math.round(s.active_min)), fmtAgo(s.last)].filter(Boolean).join(" · ")} />
+  )
+}
+
+/** What's open now (working or idle), then the latest sessions (`recent: 5`). */
+export function AgentSessions({ src, options, fm }: BlockCtx & { src: AgentSource }) {
+  const { data, error, retry, on, machine } = useAgentUsage(src, options)
+  const n = typeof options.recent === "number" ? options.recent : 5
+  const open = new Set(data?.live.map((s) => s.id))
+  const recent = data?.sessions.filter((s) => !open.has(s.id)).slice(0, n) ?? []
+  const liveRows = useKeptCount(`agent:${src.path}:live${on}`, data?.live.length, 1, 6)
+  const recentRows = useKeptCount(`agent:${src.path}:recent${on}`, data ? recent.length : undefined, n, n)
+  return (
+    <Panel title={`Sessions${on}`} icon={iconFor(src, fm, Terminal)} tint={src.tint}
+      action={data && !src.cloud && <span className="text-[13px] text-muted-foreground">{data.live.length} open</span>}>
+      {!data ? (error ? <Waiting src={src} error={error} retry={retry} on={on} /> : (
+        <>
+          {!src.cloud && (
+            <Section title="Now">
+              {liveRows ? <LoadingRows count={liveRows} right lead={<span className="size-2 shrink-0 rounded-full bg-muted" />} /> : <Loading />}
+            </Section>
+          )}
+          {n > 0 && <Section title="Recent" className={src.cloud ? undefined : "mt-4"}>{recentRows ? <LoadingRows count={recentRows} right /> : <Loading />}</Section>}
+        </>
+      )) : (
+        <>
+          {!src.cloud && (
+            <Section title="Now">
+              {data.live.length ? <List>{data.live.map((s) => <LiveRow key={s.pid || s.id} src={src} s={s} machine={machine} />)}</List> : <Empty>No session is open.</Empty>}
+            </Section>
+          )}
+          {n > 0 && (
+            <Section title="Recent" className={src.cloud ? undefined : "mt-4"}>
+              {recent.length ? <List>{recent.map((s) => <SessionRow key={s.id} src={src} s={s} machine={machine} />)}</List> : <Empty>Nothing yet.</Empty>}
+            </Section>
+          )}
+          {[...data.live, ...recent].some((s) => s.cost) && <p className="mt-2 text-[13px] text-muted-foreground">{costNote(src)}.</p>}
+          {!!data.servers?.length && (
+            <Section title="Remote Control" className="mt-4">
+              <List>
+                {data.servers.map((r) => (
+                  <div key={r.pid} className="flex items-center gap-3 py-2" data-server={r.name}>
+                    <span className="size-2 shrink-0 rounded-full bg-[var(--green)]" data-tip="Waiting for sessions" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] leading-[20px]">{r.name || "Unnamed"}</div>
+                      <div className="truncate text-[13px] text-muted-foreground">{[r.accountLabel, r.started && `since ${fmtAgo(r.started)}`].filter(Boolean).join(" · ")}</div>
+                    </div>
+                  </div>
+                ))}
+              </List>
+            </Section>
+          )}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+/** Its value estimated at list prices (or tokens) per day, today and the period (`days: 30`). */
+export function AgentUsageBlock({ src, options, fm }: BlockCtx & { src: AgentSource }) {
+  const days = daysOf(options)
+  const [by, setBy] = useState<"cost" | "tokens">("cost")
+  const { data, error, retry, on } = useAgentUsage(src, options, days)
+  const today = data?.days.at(-1)
+  const plan = data?.plan?.monthly ? data.plan : null
+  return (
+    <Panel title={`Usage${on}`} icon={iconFor(src, fm, BarChart3)} tint={src.tint}>
+      {!data || !today ? (error ? <Waiting src={src} error={error} retry={retry} on={on} /> : (
+        <div className="loading-in" aria-busy>
+          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {["Today", "Working today", `Last ${days} days`, "Cache hits"].map((l) => <Stat key={l} label={l} value={<Bar w="2.5em" />} hint={<Bar w="5em" />} />)}
+          </div>
+          <div className="skeleton mt-7 h-[96px]" />
+          <div className="flex justify-between text-[11px] text-muted-foreground"><span><Bar w="4em" /></span><span>Today</span></div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[13px] text-muted-foreground">{costNote(src)}.</p>
+            <Segmented label="Show" value={by} onChange={setBy} options={[{ value: "cost", label: "Value" }, { value: "tokens", label: "Tokens" }]} />
+          </div>
+        </div>
+      )) : (
+        <>
+          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <Stat label="Today" value={money(today.cost)} hint={`${tokens(today.tokens)} tokens`} />
+            <Stat label="Working today" value={fmtMin(Math.round(today.active_min))} hint={plural(today.sessions, "session")} />
+            <Stat label={`Last ${days} days`} value={money(data.total.cost)}
+              hint={plan ? `${((data.total.cost / plan.monthly!) * (30 / days)).toFixed(1)}x ${plan.name}'s price` : `${tokens(data.total.tokens)} tokens`} />
+            <Stat label="Cache hits" value={data.total.cache_hit != null ? `${Math.round(data.total.cache_hit * 100)}%` : "–"} hint="of what it read" />
+          </div>
+          <Bars color={src.tint} format={by === "cost" ? money : tokens}
+            data={data.days.map((d) => ({
+              label: "",
+              value: by === "cost" ? d.cost : d.tokens,
+              tip: [fmtDay(d.date), d.sessions && plural(d.sessions, "session"), d.active_min >= 1 && fmtMin(Math.round(d.active_min))].filter(Boolean).join(" · "),
+            }))} />
+          <div className="flex justify-between text-[11px] text-muted-foreground">
+            <span>{fmtDay(data.days[0].date)}</span><span>Today</span>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[13px] text-muted-foreground">
+              {costNote(src)}{data.total.unpriced ? ", models without a price left out" : ""}{plan ? `; ${plan.name} is ${money(plan.monthly!)} a month` : ""}.
+            </p>
+            <Segmented label="Show" value={by} onChange={setBy} options={[{ value: "cost", label: "Value" }, { value: "tokens", label: "Tokens" }]} />
+          </div>
+        </>
+      )}
+    </Panel>
+  )
+}
+
+function ShareRow({ name, meta, value, share, tint }: { name: ReactNode; meta?: ReactNode; value: ReactNode; share: number; tint: string }) {
+  return (
+    <div className="py-2">
+      <div className="flex items-baseline gap-3">
+        <span className="min-w-0 flex-1 truncate text-[15px]">{name}</span>
+        <span className="shrink-0 text-[14px] text-muted-foreground tabular-nums">{value}</span>
+      </div>
+      {meta && <div className="truncate text-[13px] text-muted-foreground">{meta}</div>}
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full" style={{ width: `${Math.max(share * 100, 1)}%`, background: tint }} />
+      </div>
+    </div>
+  )
+}
+
+const share = (x: Share) => x.cost || x.tokens / 1e6
+const top = (xs: Share[]) => Math.max(...xs.map(share), 1e-9)
+
+function Shares({ src, options, fm, by }: BlockCtx & { src: AgentSource; by: "projects" | "models" }) {
+  const days = daysOf(options)
+  const { data, error, retry, on } = useAgentUsage(src, options, days)
+  const list = by === "projects" ? data?.projects.slice(0, 10) : data?.models
+  const meta = (x: Share) => by === "models" ? `${tokens(x.tokens)} tokens`
+    : [plural(x.sessions!, "session"), (x.active_min ?? 0) >= 1 && fmtMin(Math.round(x.active_min!)), x.last && fmtAgo(x.last)].filter(Boolean).join(" · ")
+  const rows = useKeptCount(`agent:${src.path}:${by}${on}`, list?.length, 3, 10)
+  return (
+    <Panel title={`${by === "projects" ? "Projects" : "Models"}${on}`} icon={iconFor(src, fm, by === "projects" ? FolderGit2 : Boxes)} tint={src.tint}
+      action={<span className="text-[13px] text-muted-foreground">Last {days} days</span>}>
+      {!data || !list ? (error || !rows ? <Waiting src={src} error={error} retry={retry} on={on} /> : (
+        <div className="loading-in hairline" aria-busy>
+          {Array.from({ length: rows }, (_, i) => (
+            <ShareRow key={i} tint="transparent" name={<Bar w={i % 2 ? "45%" : "60%"} />} value={<Bar w="3em" />} meta={<Bar w="35%" />} share={0} />
+          ))}
+        </div>
+      )) : !list.length ? <Empty>No sessions in the last {days} days.</Empty> : (
+        <List>
+          {list.map((x) => (
+            <ShareRow key={x.root || x.name} tint={src.tint} name={x.name} value={money(x.cost)} meta={meta(x)} share={share(x) / top(data[by])} />
+          ))}
+        </List>
+      )}
+      {!!list?.some((x) => x.cost) && <p className="mt-2 text-[13px] text-muted-foreground">{costNote(src)}.</p>}
+    </Panel>
+  )
+}
+export const AgentProjects = (ctx: BlockCtx & { src: AgentSource }) => <Shares {...ctx} by="projects" />
+export const AgentModels = (ctx: BlockCtx & { src: AgentSource }) => <Shares {...ctx} by="models" />
+
+function keysFor(ctx: BlockCtx) {
+  if (typeof ctx.options.project === "string") return new Set([ctx.options.project.toLowerCase()])
+  const ks = new Set([(ctx.path.split("/").pop() ?? "").replace(/\.md$/, "").toLowerCase()])
+  for (const v of [ctx.fm.path, ctx.fm.repo]) if (typeof v === "string" && v) ks.add((v.replace(/\/+$/, "").split("/").pop() ?? "").toLowerCase())
+  return ks
+}
+
+/** In a project file: that project's last 30 days and its sessions (`project: Name` for another). */
+export function AgentProject({ src, ...ctx }: BlockCtx & { src: AgentSource }) {
+  const { data, error, retry, machine } = useAgentUsage(src, ctx.options)
+  if (!data) return <Waiting src={src} error={error} retry={retry} />
+  const ks = keysFor(ctx)
+  const p = data.projects.find((x) => ks.has(x.name.toLowerCase()))
+  const live = data.live.filter((s) => ks.has(s.project.toLowerCase()))
+  if (!p && !live.length) return <Empty>No {src.label} sessions here in the last 30 days.</Empty>
+  const open = new Set(live.map((s) => s.id))
+  const recent = p ? data.sessions.filter((s) => s.project === p.name && !open.has(s.id)).slice(0, 3) : []
+  return (
+    <div className="space-y-3">
+      {p && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Stat label={`${src.speaker ?? src.label}, 30 days`} value={money(p.cost)} hint={src.costNote ? undefined : "estimated at list prices"} />
+          <Stat label="Tokens" value={tokens(p.tokens)} />
+          <Stat label="Sessions" value={p.sessions ?? 0} />
+          <Stat label="Working" value={fmtMin(Math.round(p.active_min ?? 0))} />
+        </div>
+      )}
+      {(live.length > 0 || recent.length > 0) && (
+        <List>
+          {live.map((s) => <LiveRow key={s.pid || s.id} src={src} s={s} machine={machine} />)}
+          {recent.map((s) => <SessionRow key={s.id} src={src} s={s} machine={machine} />)}
+        </List>
+      )}
+    </div>
+  )
+}
+
+type Named = { id: string; desktop?: boolean; name: string }
+type AgentBlock = "limits" | "sessions" | "usage" | "projects" | "models" | "project"
+const BLOCKS: Record<AgentBlock, (ctx: BlockCtx & { src: AgentSource }) => ReactNode> = {
+  limits: AgentLimits, sessions: AgentSessions, usage: AgentUsageBlock, projects: AgentProjects, models: AgentModels, project: AgentProject,
+}
+
+/** A coding agent plugin's definition: its blocks, a session's view, its agent in Terminal, the commands opening it
+ *  (literal: the server reads them), demo usage. It runs at load, so it reads only its arguments until called. */
+export function agentPlugin(src: AgentSource, o: Omit<PluginDef, "blocks"> & {
+  blocks: Record<string, AgentBlock | ((ctx: BlockCtx) => ReactNode)>
+  /** Its program's names, its accounts' route (AgentDef); none: Terminal doesn't run it (a cloud agent). */
+  process?: string[]; accounts?: string
+  /** Open it, in a split (desktop: before its name, so the server's list leaves it out), in an account or on a machine. */
+  opens?: { open: Named; split: Named; where?: Named }
+  /** Its session's tab drawn its own way (Claude Code's chat), in place of the conversation read back. */
+  sessionView?: Partial<ViewDef>
+  demo: AgentMock; demoMore?: () => Record<string, unknown>
+}): PluginDef {
+  const { blocks, process, accounts, opens, demo, demoMore, sessionView, ...def } = o
+  const when = () => canRunAgents()
+  return {
+    ...def,
+    blocks: Object.fromEntries(Object.entries(blocks).map(([k, b]) => [k, typeof b === "string" ? (ctx: BlockCtx) => {
+      const Block = BLOCKS[b]
+      return <Block src={src} {...ctx} />
+    } : b])),
+    views: { [src.view]: { icon: src.icon, title: (id) => sessionTitle(src, id), pinAs: (id) => id || null, render: ({ arg }) => <AgentSession key={arg} src={src} id={arg} />, ...sessionView } },
+    ...(process && opens ? {
+      agents: { [src.agent]: { label: src.label, icon: src.icon, tint: src.tint, process, session: src.view, ...(src.speaker ? { speaker: src.speaker } : {}), ...(accounts ? { accounts } : {}) } },
+      commands: [
+        ...(def.commands ?? []),
+        { ...opens.open, words: "new", when, run: () => openAgent(src.agent), icon: src.icon },
+        ...(opens.where ? [{ ...opens.where, when, run: () => choosePlace({ agent: src.agent }) }] : []),
+        { ...opens.split, words: "new", desktop: true, when, run: () => openAgent(src.agent, { split: true }) },
+      ],
+    } : {}),
+    mockLive: () => ({ [src.path]: mockUsage(demo), ...demoMore?.() }),
+  }
+}
+
+/** Made-up usage for the demo, times in minutes ago: `daily`, ten days' value repeated over 30 days and growing, each
+ *  dollar `per` so many tokens and minutes working, a session per so many dollars; the totals are the projects'. */
+export type AgentMock = {
+  plan?: AgentUsage["plan"]
+  limits?: { source: string; observed: number; windows: [id: string, label: string, minutes: number, used: number, renewsIn: number][] }
+  daily: number[]; per: [tokens: number, minutes: number, dollars: number]; cacheHit: number
+  live: (Omit<LiveSession, "pid" | "name" | "started" | "since"> & { pid?: number; name?: string; at: [started: number, since: number] })[]
+  projects: (Omit<Share, "last"> & { last: number })[]
+  models: Share[]
+  sessions: (Omit<Session, "first" | "last"> & { at: [first: number, last: number] })[]
+}
+
+function mockUsage(m: AgentMock): AgentUsage {
+  const ago = (min: number) => new Date(Date.now() - min * 60000).toISOString()
+  const sum = (k: "cost" | "tokens") => m.projects.reduce((n, p) => n + p[k], 0)
+  return {
+    plan: m.plan ?? null,
+    limits: m.limits ? { source: m.limits.source, observed: ago(m.limits.observed),
+      windows: m.limits.windows.map(([id, label, minutes, used, renews]) => ({ id, label, minutes, used, resets_at: ago(-renews) })) } : null,
+    live: m.live.map(({ at: [started, since], ...s }, i) => ({ pid: i + 1, name: "", ...s, started: ago(started), since: ago(since) })),
+    days: Array.from({ length: 30 }, (_, i) => {
+      const v = m.daily[i % 10] * (1 + i / 30)
+      return { date: addDays(today(), i - 29), cost: v, tokens: Math.round(v * m.per[0]), active_min: v * m.per[1], sessions: Math.ceil(v / m.per[2]) }
+    }),
+    projects: m.projects.map((p) => ({ ...p, last: ago(p.last) })),
+    models: m.models,
+    sessions: m.sessions.map(({ at: [first, last], ...s }) => ({ ...s, first: ago(first), last: ago(last) })),
+    total: { cost: Math.round(sum("cost") * 100) / 100, tokens: sum("tokens"), unpriced: 0, cache_hit: m.cacheHit },
+  }
+}

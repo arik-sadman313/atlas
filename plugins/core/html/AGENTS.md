@@ -1,0 +1,42 @@
+## Mini-apps
+A mini-app the user describes is one file you write, never a new kind of thing: an `.html` page (below), or a note with a
+```genui or ```block-mcp-app block when that's enough (`vau docs genui`, `vau docs mcp-apps`; smaller, and drawn with the
+app's own controls). It goes where they ask: in a note (`![[Weather.html]]`), as a tab (`vau open`), or in a sidebar
+(`vau panels right Apps/Weather.html`). New ones go in `Apps/`, unless they say where. Asking about one: the companion
+reads the pane it's over.
+
+## Interactive pages (`*.html`)
+**Interactive pages are HTML files** (artifacts, like Claude's): a dashboard, a calculator, a chart, anything a
+Markdown page can't do. The app runs them sandboxed: no network, no access to the app. They read the vault through
+`vau`, which the app gives every artifact:
+- `await vau.csv("Transactions.csv")` (records), `vau.read(path)` (text), `vau.json(path)`, `vau.files(prefix)`;
+  paths are relative to the artifact's folder, or from the vault's top with a leading `/`. `fetch("Transactions.csv")`
+  works too. Read the data every time: don't copy it into the HTML, so the page never goes stale.
+- `vau.on("change", paths => ...)` redraws when a file it read changes (without it, the page reloads).
+- `localStorage` works and is kept in the vault (filters, a view); links open in the app or a new tab.
+- Shared, live state (a game, a board, an exercise for two): `const room = await vau.shared()`, the same in every view
+  of the page (the user's devices, and a shared folder's guests: a page there reads only inside it). `room.state` (JSON by key), `room.set(key, value)` or
+  `room.set({k: v})` (null deletes; each key is the last write's, so give each player keys of their own:
+  `answer:${room.me.id}`), `room.on("change", (state, keys, by) => ...)`. Who's here: `room.me`, `room.people`
+  (`{id, name, device, color}`), `room.on("people", ...)`; `room.online`. Kept in `.vaultite/artifacts/<page>.shared.json`;
+  agents read and set it with `vau html shared` and `vau html shared-set`.
+- Colours: follow the app's light and dark with `:root[data-theme="dark"]`, or use its colours, `var(--vau-background)`,
+  `--vau-foreground`, `--vau-card`, `--vau-border`, `--vau-muted-foreground`, `--vau-blue`, `--vau-green`,
+  `--vau-red`...
+- Libraries and fonts from public CDNs (jsdelivr, unpkg, cdnjs, esm.sh, Google Fonts) work; other hosts don't.
+- `<title>` is its name in the app; `<meta name="vaultite:icon" content="wallet">` (a lucide name) and
+  `<meta name="vaultite:tint" content="green">` its icon when pinned. Make it work on a phone (390px wide).
+- A claude.ai artifact runs as is (write its HTML as a `.html` file): `window.claude.use()` gives `sample` (Claude
+  Code here, asked once per page), `db`, `artifact.publish`, `user`, `downloads`; `window.storage` and `complete()` too.
+- Show one inside any Markdown file with `![[Spending.html]]` on a line of its own (`![[Spending.html|400]]`: 400px
+  tall); the same works for a CSV. A link to it in the sidebar: `vau pin <file>`. Drawn in the sidebar: `vau panels right <file>`.
+- `/api/render?path=Finance/Spending.html` gives its title, its text and the files it reads (not what its code
+  draws: read those files to answer questions about it).
+
+## Mockups and pictures of a UI
+A UI proposal or explanation shows each option as a real picture, never ASCII art or a layout told in words: a
+screenshot of a quick prototype running on your own copy, or a polished HTML mockup in the vault (the app's colours,
+real text, one element per option, e.g. `<div class="option">`). Make the pictures with `vau html picture "<page>.html"
+--selector ".option"` (or `--url <your dev server's page> --out "<folder>/<name>.png"` for a prototype; `--full`,
+`--dark`), then embed each in the note (`![[<folder>/<name> 1.png]]`) with a plain sentence under it. Look at each
+before you show it.

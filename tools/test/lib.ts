@@ -1,0 +1,276 @@
+// The tests' shared kit: check, skip, sections (timed; one that throws ends there, not the run), the summary, the
+// record of runs (tools/.runs/test-runs.jsonl).
+import "./isolate.ts" // (first: a run of its own, kept off the user's vaults)
+import { type ChildProcess, spawn, spawnSync, type SpawnOptions } from "node:child_process"
+import fs from "node:fs"
+import net from "node:net"
+import os from "node:os"
+import path from "node:path"
+import { runtimeDir } from "../../core/runtime.ts"
+import { PROTOCOL } from "../../plugins/core/terminal/termd/protocol.ts"
+
+// (servers and apps under test, from every checkout and copy: Node's compile cache in the shared temp folder is never
+// pruned, and filled a Linux /tmp's quota till Xvfb couldn't start)
+process.env.NODE_DISABLE_COMPILE_CACHE ??= "1"
+// (a test's git, run from a hook or `git bisect run`, would otherwise reach the repo running it)
+for (const k of Object.keys(process.env)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|NAMESPACE|PREFIX)$/.test(k)) delete process.env[k]
+
+export type Any = any
+export type Status = "ok" | "FAIL" | "skip"
+export type Result = { name: string; status: Status; note: string; section: string }
+type SectionRun = { name: string; ms: number; ok: boolean; fails: string[]; threw?: string }
+
+export const results: Result[] = []
+const sections: SectionRun[] = []
+let current: SectionRun | null = null
+let started = 0
+
+/** A stand-in program `name` in `dir` (put on PATH) running the Node module `js` (its source): an npm-style .cmd on
+ *  Windows (how agents' npm installs look there), a sh script elsewhere. Its path. */
+export function standIn(dir: string, name: string, js: string) {
+  fs.mkdirSync(dir, { recursive: true })
+  const mod = path.join(dir, `${name}.mjs`)
+  fs.writeFileSync(mod, js)
+  if (process.platform === "win32") {
+    fs.writeFileSync(path.join(dir, `${name}.cmd`), `@ECHO off\r\n"${process.execPath}"  "%~dp0\\${name}.mjs" %*\r\n`)
+    return path.join(dir, `${name}.cmd`)
+  }
+  fs.writeFileSync(path.join(dir, name), `#!/bin/sh\nexec '${process.execPath}' '${mod}' "$@"\n`, { mode: 0o755 })
+  return path.join(dir, name)
+}
+
+const servers = new Set<ChildProcess>()
+const killServers = () => { for (const s of servers) if (s.exitCode === null && s.signalCode === null) try { s.kill("SIGKILL") } catch { /* gone */ } }
+
+/** A temp folder for this test, removed when it exits, however it does: removed at its end, an app's last writes would
+ *  make it again. */
+export function tempDir(prefix: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  // (its servers ended first, which may hold files in it; Windows may still: retried, and a leftover isn't a failure)
+  process.on("exit", () => { killServers(); try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) } catch { /* left */ } })
+  return dir
+}
+
+/** chmod keeps files from being read or written: not on Windows (it only sets read-only), nor as root. */
+export const modesEnforced = process.platform !== "win32" && process.getuid?.() !== 0
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** A port nothing listens on now, on 127.0.0.1. */
+export const freePort = () => new Promise<number>((resolve) => {
+  const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const { port } = s.address() as net.AddressInfo; s.close(() => resolve(port)) })
+})
+
+let ending = false
+/** This checkout's server.ts for a test (spawn's options): killed when the test ends, by its end, a signal or a crash,
+ *  and ending itself should the test die unseen (VAULTITE_PARENT_PID, server.ts). */
+export function testServer(o: SpawnOptions = {}): ChildProcess {
+  if (!ending) {
+    ending = true
+    process.on("exit", killServers)
+    for (const [sig, n] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]] as const) {
+      // (a script with its own handler decides when to exit; else this one does, as the signal would have)
+      process.on(sig, () => { killServers(); if (process.listenerCount(sig) === 1) process.exit(128 + n) })
+    }
+  }
+  const s = spawn(process.execPath, [path.join(REPO, "server.ts")], { cwd: REPO, ...o, env: { ...(o.env ?? process.env), VAULTITE_PARENT_PID: String(process.pid) } })
+  servers.add(s)
+  s.once("exit", () => servers.delete(s))
+  return s
+}
+
+/** Ends the terminals of a test server on `port`: its terminal server outlives it on purpose (CLAUDE.md, Running and
+ *  verifying), its pid where the server keeps it (Linux: $XDG_RUNTIME_DIR/vaultite, not $TMPDIR). */
+export function stopTerminals(port: number | string) {
+  try { process.kill(Number(fs.readFileSync(path.join(runtimeDir(), `vaultite-termd${PROTOCOL}-vaultite-${port}.sock.pid`), "utf8"))) } catch { /* none */ }
+}
+
+/** Kills `pid` and everything it started, at once (a browser Playwright launched is in a process group of its own). */
+export function killTree(pid: number) {
+  if (process.platform === "win32") { spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" }); return }
+  const kids = new Map<number, number[]>()
+  for (const line of spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" }).stdout?.split("\n") ?? []) {
+    const [p, pp] = line.trim().split(/\s+/).map(Number)
+    if (p && pp) kids.set(pp, [...kids.get(pp) ?? [], p])
+  }
+  const all: number[] = []
+  for (let todo = [pid]; todo.length;) { const p = todo.pop()!; all.push(p); todo.push(...kids.get(p) ?? []) }
+  for (const p of all) { try { process.kill(p, "SIGKILL") } catch { /* gone */ } }
+}
+
+// A test that hangs fails where it is, rather than holding its CI job until the job's timeout: nothing checked for this
+// long ends it (VAULTITE_TEST_STALL: seconds).
+const STALL = Number(process.env.VAULTITE_TEST_STALL || 600) * 1000
+let progress = 0, watchdog: NodeJS.Timeout | null = null
+function alive() {
+  progress = Date.now()
+  if (watchdog) return
+  watchdog = setInterval(() => {
+    if (Date.now() - progress < STALL) return
+    const last = results.at(-1)
+    const said = `${current?.name ?? "test"}: stalled, nothing checked for ${STALL / 1000} s${last ? ` after "${last.name}"` : ""}`
+    console.log(`FAIL ${said}`)
+    annotate(said)
+    void exit(1)
+  }, Math.min(STALL, 5000))
+  watchdog.unref()
+}
+
+/** On GitHub Actions, a failure is also an annotation: the run's page and its API list it, where the log needs a sign-in. */
+function annotate(text: string) {
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=${path.basename(process.argv[1] ?? "test")}::${text.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`)
+}
+
+export function check(name: string, ok: unknown, got?: unknown) {
+  alive()
+  const note = ok ? "" : JSON.stringify(got)?.slice(0, 400) ?? ""
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : `  -> ${note}`}`)
+  results.push({ name, status: ok ? "ok" : "FAIL", note, section: current?.name ?? "" })
+  if (!ok) current?.fails.push(name)
+  return !!ok
+}
+
+export function skip(name: string, why: string) {
+  alive()
+  console.log(`skip ${name}: ${why}`)
+  results.push({ name, status: "skip", note: why, section: current?.name ?? "" })
+}
+
+function close() {
+  if (!current) return
+  current.ms = Date.now() - started
+  current.ok = !current.fails.length && !current.threw
+  current = null
+}
+function open(name: string) {
+  close()
+  alive()
+  console.log(`\n== ${name}`)
+  current = { name, ms: 0, ok: true, fails: [] }
+  sections.push(current)
+  started = Date.now()
+}
+
+/** With fn: runs it as a section, timed, an exception failing it (and only it). Without: what follows is the section. */
+export function section(name: string): void
+export function section(name: string, fn: () => Promise<unknown> | unknown): Promise<boolean>
+export function section(name: string, fn?: () => Promise<unknown> | unknown): Promise<boolean> | void {
+  open(name)
+  if (!fn) return
+  const run = current!
+  return (async () => {
+    try { await fn() } catch (e) {
+      run.threw = String((e as Error)?.stack ?? e).split("\n").slice(0, 6).join("\n")
+      console.log(`FAIL ${name}: threw  -> ${run.threw}`)
+      results.push({ name: `${name}: threw`, status: "FAIL", note: run.threw, section: name })
+      run.fails.push(`${name}: threw`)
+    }
+    close()
+    return run.fails.length === 0
+  })()
+}
+
+/** How long `fn` kept this thread busy, in ms: what would hold a server up. Unlike the clock, it doesn't count what else
+ *  a loaded machine runs meanwhile, so "at once" checks hold on a slow CI runner. */
+export async function busy<T>(fn: () => T | Promise<T>): Promise<{ value: T; ms: number }> {
+  const t0 = process.threadCpuUsage()
+  const value = await fn()
+  return { value, ms: cpuSince(t0) }
+}
+/** busy() for work that doesn't wait: what it computed, and its CPU time in ms. */
+export function cpuMs<T>(fn: () => T): { value: T; ms: number } {
+  const t0 = process.threadCpuUsage()
+  const value = fn()
+  return { value, ms: cpuSince(t0) }
+}
+const cpuSince = (t0: NodeJS.CpuUsage) => { const d = process.threadCpuUsage(t0); return (d.user + d.system) / 1000 }
+
+export async function waitFor<T>(fn: () => Promise<T> | T, ms = 15000, step = 500): Promise<T | null> {
+  const end = Date.now() + ms
+  for (;;) {
+    try { const v = await fn(); if (v) return v } catch { /* not yet */ }
+    if (Date.now() > end) return null
+    await sleep(step)
+  }
+}
+
+const REPO = path.resolve(import.meta.dirname, "..", "..")
+/** Where runs are kept: tools/.runs/ (ignored by its own .gitignore), or $VAULTITE_RUNS_DIR. */
+function runsFile() {
+  return path.join(process.env.VAULTITE_RUNS_DIR ?? path.join(REPO, "tools", ".runs"), "test-runs.jsonl")
+}
+const KEPT_RUNS = 500
+type RunRecord = { suite: string; at: string; ms: number; ok: boolean; sections: { name: string; ms: number; ok: boolean; fails: string[] }[] }
+
+export function record(suite: string, rows: { name: string; ms: number; ok: boolean; fails: string[] }[], ms: number) {
+  const rec: RunRecord = { suite, at: new Date().toISOString(), ms, ok: rows.every((r) => r.ok), sections: rows }
+  try {
+    fs.mkdirSync(path.dirname(runsFile()), { recursive: true })
+    if (!process.env.VAULTITE_RUNS_DIR) fs.writeFileSync(path.join(path.dirname(runsFile()), ".gitignore"), "*\n")
+    fs.appendFileSync(runsFile(), JSON.stringify(rec) + "\n")
+    const lines = fs.readFileSync(runsFile(), "utf8").split("\n").filter(Boolean)
+    if (lines.length > 2 * KEPT_RUNS) { const tmp = `${runsFile()}.${process.pid}`; fs.writeFileSync(tmp, lines.slice(-KEPT_RUNS).join("\n") + "\n"); fs.renameSync(tmp, runsFile()) }
+  } catch { /* a read-only checkout: runs aren't kept */ }
+}
+
+/** The slowest sections (their latest time) and the ones that failed in the last runs, of one suite. */
+export function report(suite: string, last = 20) {
+  let runs: RunRecord[] = []
+  try { runs = fs.readFileSync(runsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.suite === suite) } catch { /* none yet */ }
+  if (!runs.length) return console.log(`no ${suite} runs kept yet (${runsFile()})`)
+  runs = runs.slice(-last)
+  const latest = new Map<string, number>(), failed = new Map<string, { n: number; at: string; fails: string[] }>()
+  for (const r of runs) for (const s of r.sections) {
+    latest.set(s.name, s.ms)
+    if (!s.ok) failed.set(s.name, { n: (failed.get(s.name)?.n ?? 0) + 1, at: r.at, fails: s.fails })
+  }
+  console.log(`${suite}: ${runs.length} runs kept, the last ${runs.at(-1)!.ok ? "passed" : "failed"} in ${(runs.at(-1)!.ms / 1000).toFixed(1)} s\n\nslowest:`)
+  for (const [n, ms] of [...latest].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`  ${(ms / 1000).toFixed(1).padStart(6)} s  ${n}`)
+  console.log(failed.size ? `\nfailed in the last ${runs.length} runs:` : `\nnothing failed in the last ${runs.length} runs`)
+  for (const [n, f] of [...failed].sort((a, b) => b[1].at.localeCompare(a[1].at)))
+    console.log(`  ${n}: ${f.n}x, last ${f.at.slice(0, 16)}  ${f.fails.slice(0, 2).join("; ").slice(0, 160)}`)
+}
+
+/** A shard's results (its VAULTITE_TEST_OUT), taken in as this run's: its sections `own` names, and any failure. */
+export function absorb(file: string, own: Set<string>) {
+  const r = JSON.parse(fs.readFileSync(file, "utf8")) as { results: Result[]; sections: SectionRun[] }
+  results.push(...r.results.filter((x) => own.has(x.section) || x.status === "FAIL"))
+  sections.push(...r.sections.filter((x) => own.has(x.name)))
+}
+
+/** Each section's time in the suite's latest kept run that ran it, in ms. */
+export function lastTimes(suite: string) {
+  const ms = new Map<string, number>()
+  try {
+    for (const l of fs.readFileSync(runsFile(), "utf8").split("\n")) {
+      if (!l.includes(`"suite":"${suite}"`)) continue
+      for (const s of (JSON.parse(l) as RunRecord).sections) ms.set(s.name, s.ms)
+    }
+  } catch { /* none yet */ }
+  return ms
+}
+
+/** Prints the totals (and each section's time when there were several), keeps the run, returns the exit code. */
+/** Exits once what was printed is out: a pipe's writes on macOS are asynchronous, and exiting at once cut a log short. */
+export async function exit(code: number): Promise<never> {
+  await Promise.all([process.stdout, process.stderr].map((s) => new Promise((r) => s.write("", r))))
+  process.exit(code)
+}
+
+export function summary(suite: string, t0: number) {
+  close()
+  if (watchdog) clearInterval(watchdog)
+  const fails = results.filter((r) => r.status === "FAIL"), skips = results.filter((r) => r.status === "skip")
+  if (sections.length > 1) {
+    console.log("\nsections:")
+    for (const s of sections) console.log(`  ${s.ok ? "ok  " : "FAIL"} ${(s.ms / 1000).toFixed(1).padStart(6)} s  ${s.name}${s.fails.length ? ` (${s.fails.length} failed)` : ""}`)
+  }
+  console.log(`\n${results.length - fails.length - skips.length} passed, ${fails.length} failed${skips.length ? `, ${skips.length} skipped` : ""}` +
+    ` in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+  for (const f of fails) console.log(`  FAIL ${f.name}`)
+  // (a shard of a run in parallel: its parent says the failures and keeps the run)
+  if (process.env.VAULTITE_TEST_OUT) { fs.writeFileSync(process.env.VAULTITE_TEST_OUT, JSON.stringify({ results, sections })); return fails.length ? 1 : 0 }
+  // (GitHub shows 10 errors a step)
+  for (const f of fails.slice(0, 10)) annotate(`${f.section && !f.name.startsWith(f.section) ? `${f.section}: ` : ""}${f.name}${f.note ? `  -> ${f.note}` : ""}`)
+  record(suite, sections.map(({ name, ms, ok, fails }) => ({ name, ms, ok, fails })), Date.now() - t0)
+  return fails.length ? 1 : 0
+}

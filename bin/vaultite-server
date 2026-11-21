@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+// The service's stable path (vau service install --updates, macOS and Linux), in a checkout nothing updates: it runs
+// the launcher of the code store's current root, else its good one's, else this checkout's, so a new one takes effect.
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+import * as own from "./vaultite-launch.mjs"
+
+const checkout = path.dirname(import.meta.dirname)
+const root = own.launcherRoot(process.env.VAULTITE_CODE_STORE)
+let launcher = own
+if (root) {
+  try {
+    const theirs = await import(pathToFileURL(path.join(root, "bin", "vaultite-launch.mjs")).href)
+    if (typeof theirs.launch === "function") launcher = theirs
+    else console.error(`vaultite: root ${path.basename(root).slice(0, 7)}'s launcher has no launch(): this checkout's runs`)
+  } catch (e) {
+    console.error(`vaultite: root ${path.basename(root).slice(0, 7)}'s launcher didn't load (${e instanceof Error ? e.message : e}): this checkout's runs`)
+  }
+}
+await launcher.launch({ checkout })

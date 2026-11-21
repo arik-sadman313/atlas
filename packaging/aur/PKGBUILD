@@ -1,0 +1,28 @@
+# Maintainer: Vaultite <https://github.com/Vaultite/vaultite>
+# The release's .deb repackaged; the release workflow sets pkgver and the sums (packaging/aur/bump.sh) and pushes it.
+pkgname=vaultite-bin
+pkgver=0.15.0
+pkgrel=1
+pkgdesc="Your notes as plain Markdown files, with your coding agents in them"
+arch=('x86_64' 'aarch64')
+url="https://vaultite.com"
+license=('Apache-2.0')
+depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libnotify' 'libsecret' 'libxss' 'libxtst' 'nss' 'util-linux-libs' 'xdg-utils')
+optdepends=('libappindicator-gtk3: the tray icon on desktops that need it')
+provides=('vaultite')
+conflicts=('vaultite')
+options=('!strip' '!debug')
+_release="https://github.com/Vaultite/vaultite/releases/download/v${pkgver}"
+source_x86_64=("vaultite-${pkgver}-x86_64.deb::${_release}/vaultite_${pkgver}_amd64.deb")
+source_aarch64=("vaultite-${pkgver}-aarch64.deb::${_release}/vaultite_${pkgver}_arm64.deb")
+sha256sums_x86_64=('e147bbc4be4903a26e11eb49d0bc62f08e10c4be4ff1dc1c603d6a1184b396d4')
+sha256sums_aarch64=('e2b56a59865faf97e2b99118bb638d7744d88a4dffb04788f4801ae48a670636')
+
+package() {
+  bsdtar -xf data.tar.xz -C "$pkgdir"
+  # (Vaultite reads it: updates are then pacman's, not the app's)
+  printf 'pacman\n' > "$pkgdir/opt/Vaultite/resources/package-type"
+  rm -rf "$pkgdir/usr/share/doc" "$pkgdir/opt/Vaultite/resources/apparmor-profile"
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/Vaultite/vaultite "$pkgdir/usr/bin/vaultite"
+}

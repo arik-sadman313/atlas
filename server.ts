@@ -1,0 +1,704 @@
+import "./core/winspawn.ts"
+import "./electron/inheritedclose.ts"
+import { errorContext, onServerError, startServerLog } from "./core/serverlog.ts"
+import { logger } from "./core/log.ts"
+import { execFile, spawn } from "node:child_process"
+import crypto from "node:crypto"
+import fs from "node:fs"
+import http from "node:http"
+import module from "node:module"
+import net from "node:net"
+import os from "node:os"
+import type { Duplex } from "node:stream"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+import { promisify } from "node:util"
+import zlib from "node:zlib"
+import { fromThisMachine, hostName, originHost, overNetwork, tailnetNames } from "./core/owner.ts"
+import type { App } from "./core/app.ts"
+import type { FileAnswer as Answered } from "./core/plugins.ts"
+import type { Live as LiveType } from "./core/live.ts"
+import type { Vault } from "./core/vault.ts"
+import { codeOf, errnoOf, isObj, messageOf } from "./core/values.ts"
+import { prefetchCode } from "./core/prefetch.ts"
+
+// Node's compile cache must be on before the app's modules load, so they're imported below rather than above.
+// Vault files are read on libuv's threads (core/vault.ts, readSoon): one iCloud holds keeps its thread, so have many.
+process.env.UV_THREADPOOL_SIZE ??= "128"
+module.enableCompileCache?.()
+prefetchCode(import.meta.dirname)
+startServerLog()
+const log = logger("vaultite")
+const DESKTOP = process.env.VAULTITE_DESKTOP === "1"
+const startup = await import("./core/startup.ts")
+;(await import("./core/reports.ts")).reportOnSignal()
+const restartedByServiceManager = !DESKTOP && !!(process.env.VAULTITE_SERVICE || process.env.VAULTITE_UPDATES)
+const pausedByDebugger = process.execArgv.some((x) => x.startsWith("--inspect"))
+if (restartedByServiceManager && !pausedByDebugger && process.env.VAULTITE_WATCHDOG !== "off") (await import("./core/watchdog.ts")).killWhenStuck()
+if (Number(process.env.VAULTITE_PARENT_PID) > 1) {
+  const { Worker } = await import("node:worker_threads")
+  new Worker(`const pid = ${Number(process.env.VAULTITE_PARENT_PID)}
+setInterval(() => { if (process.ppid === pid) return; try { process.kill(pid, 0); return } catch {} process.kill(process.pid, "SIGKILL") }, 1000)`, { eval: true }).unref()
+}
+if ((await (await import("./core/http1.ts")).fetchOverHttp1()) !== "http1") log.warn("fetch may speak HTTP/2: Node's undici keeps its dispatcher elsewhere now")
+const { askedAt, span } = await import("./core/spans.ts")
+const starting = span("server.start", {}, askedAt - performance.timeOrigin)
+const timing = { mark: (part: string) => { starting.mark(part); startup.markPassed(part) } }
+timing.mark("spawn")
+const { WebSocketServer } = await import("ws")
+const { decodePart: decode, jsonOf, open, queryOf } = await import("./core/app.ts")
+;(await import("./core/update/graph.ts")).giveGraph(() => import("./core/update/closure.ts"))
+const { Live } = await import("./core/live.ts")
+const { readAhead } = await import("./core/readahead.ts")
+const { served: web } = await import("./core/webbuild.ts")
+const { flushKept } = await import("./core/kept.ts")
+const events = await import("./core/events.ts")
+Live.web = () => web.read().entry
+web.on(() => Live.newWeb())
+const { clean } = await import("./core/files.ts")
+const { allowedPath, isOutside } = await import("./core/outside.ts")
+const { isHeic, jpegOf } = await import("./core/heic.ts")
+const { thumbOf } = await import("./core/thumbs.ts")
+const { tooBig } = await import("./core/filetypes.ts")
+const { runsCode } = await import("./core/opening.ts")
+const { contentType, enabled, FileAnswer, HTTPError, LOADED, LOCAL, matchSocket, ROOT, Text, VAULT_PATH } = await import("./core/plugins.ts")
+const KEPT_ASSETS = path.join(LOCAL, "web-assets")
+const { keepAssets, keptAsset } = await import("./core/keptassets.ts")
+web.on(() => void keepAssets(web.dist, KEPT_ASSETS).catch((e) => log.warn("couldn't keep the new build's assets", e)))
+const { fetchFromICloud, iCloud, keepDownloaded, slowReads } = await import("./core/vault.ts")
+const vaults = await import("./core/vaults.ts")
+const { answers, bequeath, claim, reclaim, servingKey } = await import("./core/serving.ts")
+const { attach, detach, inDesktop, LISTENING, onHost, onHostMessage } = await import("./core/desktopapp.ts")
+timing.mark("imports")
+void (await import("./core/running.ts")).startedOn().then(startup.runsCommit, () => {})
+
+const HOST = process.env.HOST || "127.0.0.1"
+const PORT = Number(process.env.PORT || 8793)
+process.env.PORT = String(PORT)
+
+const VAULT_AT = DESKTOP ? VAULT_PATH : vaults.current(VAULT_PATH)
+const { TEST_HEADER, REFUSED_FILE, inTestRun, isOwnVault, keepRefusal, refuseOwnVault } = await import("./core/testrun.ts")
+const { runtimeDir } = await import("./core/runtime.ts")
+const ownVault = refuseOwnVault(VAULT_AT, "a test's server")
+if (ownVault) { log.error(ownVault); process.exit(1) }
+let refusesTests = !inTestRun() && isOwnVault(VAULT_AT)
+await vaultThere(VAULT_AT)
+let servedBy = claim(VAULT_AT, PORT, DESKTOP)
+if (servedBy && process.platform === "win32" && !(await answers(servedBy.port))) servedBy = reclaim(VAULT_AT, PORT, DESKTOP)
+if (servedBy) {
+  log.error(`${VAULT_AT} is served on this machine already (pid ${servedBy.pid}, port ${servedBy.port}): one server per vault`)
+  process.exit(1)
+}
+let app: App, vault: Vault, live: LiveType
+const ready = open(VAULT_AT, { timing, watch: (v) => { live = new Live(v).start() }, read: readAhead }).then((a) => {
+  app = a
+  vault = a.vault
+  watch(live)
+  a.scheduler.start()
+  keepDownloaded(VAULT_AT, path.join(LOCAL, "icloud.json"))
+  for (const p of vault.problemList()) log.info(`${p.file}: ${p.problem}`)
+  log.info(`vault read, plugins: ${app.plugins.map((p) => p.id).join(", ")}`)
+  starting.end()
+  startup.ready()
+  setTimeout(() => void keepAssets(web.dist, KEPT_ASSETS).catch((e) => log.warn("couldn't keep the build's assets", e)), 5000).unref()
+  module.flushCompileCache?.() // Node writes the cache only on a normal exit, and a server ends by a signal
+}, (e) => {
+  log.error("couldn't open the vault", e)
+  process.exit(1)
+})
+onServerError((e) => app?.serverError(e))
+
+async function vaultThere(p: string) {
+  if (!process.env.VAULTITE_VAULT || fs.existsSync(p)) return
+  if (process.stdin.isTTY) {
+    const rl = (await import("node:readline/promises")).createInterface({ input: process.stdin, output: process.stdout })
+    const yes = /^y(es)?$/i.test((await rl.question(`There's no folder ${p}. Create a new vault there? [y/N] `)).trim())
+    rl.close()
+    if (yes) return
+  } else if (fs.existsSync(path.dirname(p))) return
+  else log.error(`there's no folder ${p} or the folder it would go in (a drive that isn't connected?)`)
+  process.exit(1)
+}
+
+function watch(l: LiveType) {
+  l.listen((c) => app.changed(c.paths))
+  app.ui = l.drive
+  app.presence = { list: () => l.present(), tell: (device, msg) => l.tell(device, msg) }
+  app.liveMark = () => l.mark()
+  return l
+}
+
+async function switchTo(p: string) {
+  const own = refuseOwnVault(p, "a test's server")
+  if (own) throw new HTTPError(403, own)
+  const other = claim(p, PORT, DESKTOP)
+  if (other) throw new HTTPError(409, `${p} is served on this machine already (port ${other.port})`)
+  await vault.lock(async () => {
+    await app.vaultPlugins.close()
+    app.scheduler.stop()
+    let next
+    try {
+      next = await open(p)
+    } catch (e) {
+      for (const plugin of app.app) plugin.vault = vault
+      LOADED.splice(0, LOADED.length, ...app.app)
+      await app.syncPlugins()
+      app.scheduler.start()
+      claim(vault.path, PORT, DESKTOP)
+      throw e
+    }
+    detach("the server now serves another vault")
+    live.close()
+    for (const plugin of LOADED) plugin.forget()
+    app = next
+    vault = next.vault
+    live = watch(new Live(vault).start())
+    app.scheduler.start()
+  })
+  refusesTests = !inTestRun() && isOwnVault(p)
+  keepDownloaded(p, path.join(LOCAL, "icloud.json"))
+  log.info(`now serving ${p}`)
+}
+
+const roots = (await import("./core/update/lease.ts")).rootsHeld(import.meta.filename, "server")
+void roots.take(web.dist)
+onHostMessage("adopt-web", (m) => {
+  if (DESKTOP && typeof m.dist === "string" && path.isAbsolute(m.dist) && fs.existsSync(path.join(m.dist, "index.html"))) { web.adopt(m.dist); void roots.take(m.dist) }
+})
+// signal-exit kills the process at once when it's the only listener left: listen the whole time
+let going = false
+const bye = (code: number) => {
+  if (going) process.exit(code)
+  going = true
+  flushKept()
+  void Promise.race([app?.vaultPlugins.close(), new Promise((r) => setTimeout(r, 1000))]).finally(() => process.exit(code))
+}
+const RELAUNCH_WAIT_MS = 30_000, SOCKET_WAIT_MS = 10_000
+let heir: { app: string; until: number } | null = null, lingering: ReturnType<typeof setTimeout> | null = null
+onHostMessage("desktop:relaunching", (m) => { if (DESKTOP && typeof m.app === "string") heir = { app: m.app, until: Date.now() + RELAUNCH_WAIT_MS } })
+if (DESKTOP) onHost(() => {
+  if (lingering) { clearTimeout(lingering); lingering = null }
+  if (heir) { heir = null; bequeath(null); log.info("its app is back: taken over") }
+}, (how) => {
+  if (inDesktop() || going) return
+  const relaunch = !!heir && Date.now() < heir.until
+  if (!relaunch && how === "ipc") return bye(0)
+  if (relaunch) { bequeath({ app: heir!.app, root: ROOT }); log.info("its app is relaunching: waiting for it") }
+  if (lingering) clearTimeout(lingering)
+  lingering = setTimeout(() => { if (!inDesktop()) { log.info("no app came back for it: stopping"); bye(0) } }, relaunch ? RELAUNCH_WAIT_MS : SOCKET_WAIT_MS)
+})
+process.on("SIGTERM", () => bye(143))
+process.on("SIGINT", () => bye(130))
+
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|manifest\+json|wasm)|image\/svg)/
+const brotli = (data: Buffer, quality: number) => zlib.brotliCompressSync(data, { params: {
+  [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } })
+
+function encodingFor(req: http.IncomingMessage | undefined, type: string, size: number) {
+  if (!req || size < 1024 || !COMPRESSIBLE.test(type) || !overNetwork(req)) return null
+  const accepts = String(req.headers["accept-encoding"] ?? "")
+  return /\bbr\b/.test(accepts) ? "br" : /\bgzip\b/.test(accepts) ? "gzip" : null
+}
+
+async function send(res: http.ServerResponse, status: number, body: string | Buffer, type: string, headers: Record<string, string> = {}) {
+  const req: http.IncomingMessage | undefined = res.req
+  let data = typeof body === "string" ? Buffer.from(body) : body
+  const out: Record<string, string> = { "Content-Type": type, ...headers }
+  if (req && req.method === "GET" && status === 200 && overNetwork(req) && (out["Cache-Control"] ?? "no-cache") === "no-cache") {
+    out.ETag = `"${crypto.hash("sha1", data, "base64url")}"`
+    out["Cache-Control"] = "no-cache"
+    if (String(req.headers["if-none-match"] ?? "").split(/\s*,\s*/).includes(out.ETag)) {
+      res.writeHead(304, { ETag: out.ETag, "Cache-Control": out["Cache-Control"] })
+      return res.end()
+    }
+  }
+  const enc = encodingFor(req, type, data.length)
+  if (enc) {
+    const lasting = /\bimmutable\b/.test(out["Cache-Control"] ?? "")
+    data = lasting ? await packLasting(data, enc) : data.length < BIG ? (enc === "br" ? brotli(data, 1) : zlib.gzipSync(data, { level: 1 })) : await packBig(data, enc, out.ETag)
+    out["Content-Encoding"] = enc
+    out.Vary = "Accept-Encoding"
+  }
+  res.writeHead(status, { ...out, "Content-Length": String(data.length) })
+  res.end(data)
+}
+
+const BIG = 64 << 10
+const bigPacked = new Map<string, Promise<Buffer>>()
+function packBig(data: Buffer, enc: "br" | "gzip", etag?: string) {
+  const key = etag ? `${etag}\0${enc}` : "", hit = key && bigPacked.get(key)
+  if (hit) { bigPacked.delete(key); bigPacked.set(key, hit); return hit }
+  const out = enc === "br"
+    ? compress.br(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } })
+    : compress.gzip(data, { level: 6 })
+  if (key) {
+    bigPacked.set(key, out)
+    out.catch(() => bigPacked.delete(key))
+    if (bigPacked.size > 16) bigPacked.delete(bigPacked.keys().next().value!)
+  }
+  return out
+}
+
+const lastingPacked = new Map<string, Promise<Buffer>>()
+function packLasting(data: Buffer, enc: "br" | "gzip") {
+  const key = `${crypto.hash("sha1", data, "base64url")}\0${enc}`, hit = lastingPacked.get(key)
+  if (hit) { lastingPacked.delete(key); lastingPacked.set(key, hit); return hit }
+  const out = enc === "br" ? compress.br(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } })
+    : compress.gzip(data, { level: 6 })
+  lastingPacked.set(key, out)
+  out.catch(() => lastingPacked.delete(key))
+  if (lastingPacked.size > 2000) lastingPacked.delete(lastingPacked.keys().next().value!)
+  if (enc === "br") { bettering.push([key, data]); void betterLasting() }
+  return out
+}
+const bettering: [string, Buffer][] = []
+let betterBusy = false
+async function betterLasting() {
+  if (betterBusy) return
+  betterBusy = true
+  for (let next; (next = bettering.shift());) {
+    const [key, data] = next
+    if (!lastingPacked.has(key)) continue
+    const best = await compress.br(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } }).catch(() => null)
+    if (best && lastingPacked.has(key)) lastingPacked.set(key, Promise.resolve(best))
+  }
+  betterBusy = false
+}
+
+const json = (res: http.ServerResponse, obj: unknown, status = 200) =>
+  send(res, status, JSON.stringify(obj ?? null), "application/json")
+
+const bodies = new WeakMap<http.IncomingMessage, unknown>()
+const failures = new WeakMap<http.IncomingMessage, string>()
+
+async function bodyOf(req: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  for await (const c of req) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c)))
+  let raw: string
+  try { raw = Buffer.concat(chunks).toString("utf8") } catch (e) {
+    if (!tooBig(e)) throw e
+    throw new HTTPError(413, "the request is too big for JSON: send a file's bytes as the body of POST /api/upload?path=, or of POST /api/ops/file.upload")
+  }
+  if (!raw) return {}
+  try {
+    const body = JSON.parse(raw)
+    bodies.set(req, body)
+    return body
+  } catch {
+    return undefined
+  }
+}
+
+function started(req: http.IncomingMessage, url: URL) {
+  const h = (k: string) => { const v = req.headers[k]; return typeof v === "string" && v ? v.slice(0, 200) : null }
+  const query: Record<string, string> = {}
+  for (const [k, v] of url.searchParams) if (!(k in query)) query[k] = v
+  return app.requestStarted({ t: Date.now(), method: req.method ?? "GET", route: url.pathname.split("/").filter(Boolean).slice(1).map(decode).join("/"),
+    query, client: h("x-vaultite-client"), agent: h("x-vaultite-agent"), command: h("x-vaultite-command"), ua: h("user-agent") ?? "",
+    remote: req.socket.remoteAddress ?? "", port: req.socket.remotePort ?? 0, forwarded: !!(req.headers["x-forwarded-for"] || req.headers["tailscale-user-login"]) })
+}
+
+/** iCloud may leave a file as a placeholder a read here can't materialize (errno 11, EDEADLK, under launchd): ask
+ *  iCloud for it and wait a while for it to come down. False if it hasn't by then. */
+async function downloaded(abs: string, wait = 30_000) {
+  for (const start = Date.now(); ;) {
+    try {
+      const fh = await fs.promises.open(abs)
+      try { await fh.read(Buffer.alloc(1), 0, 1, 0) } finally { await fh.close() }
+      return true
+    } catch (e) {
+      if (Math.abs(errnoOf(e) ?? 0) !== 11) return true
+      if (Date.now() - start > wait) return false
+      fetchFromICloud(abs, e)
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  }
+}
+
+async function raw(req: http.IncomingMessage, res: http.ServerResponse, query: Record<string, string>) {
+  let rel: string, abs: string, st: fs.Stats
+  try {
+    if (isOutside(query.path)) abs = rel = allowedPath(query.path)
+    else abs = vault.abs((rel = clean(query.path, true, vault)))
+    st = fs.statSync(abs)
+    if (!st.isFile()) throw new HTTPError(400, `'${rel}' is a folder`)
+  } catch (e) {
+    if (e instanceof HTTPError) return json(res, { error: e.message }, e.status)
+    return json(res, { error: "not found" }, 404)
+  }
+  let type = contentType(rel)
+  const thumb = query.thumb !== undefined
+  if (thumb) {
+    const px = Number(query.thumb)
+    if (!(px > 0)) return json(res, { error: "thumb is the longer side's most pixels" }, 400)
+    const made = await thumbOf(abs, st, px)
+    if (!made) return iCloud.on && iCloud.evicted(abs, st) ? json(res, { error: "this file isn't on this machine yet" }, 404) : json(res, { error: "no thumbnail for this file" }, 415)
+    abs = made
+    st = fs.statSync(made)
+    type = "image/png"
+  } else if (!(await downloaded(abs))) return json(res, { error: "iCloud hasn't brought this file down yet" }, 503)
+  if (!thumb && query.as === "jpeg" && isHeic(rel)) {
+    const jpeg = await jpegOf(abs, st)
+    if (!jpeg) return json(res, { error: "this machine can't convert HEIC photos" }, 415)
+    abs = jpeg
+    st = fs.statSync(jpeg)
+    type = "image/jpeg"
+  }
+  sendFile(req, res, abs, st, type, { thumb, name: path.basename(rel), download: !!query.download, pdf: path.extname(rel).toLowerCase() === ".pdf" })
+}
+
+function sendFile(req: http.IncomingMessage, res: http.ServerResponse, abs: string, st: fs.Stats, type: string, o: { thumb?: boolean; name: string; download?: boolean; pdf?: boolean }) {
+  const headers: Record<string, string> = {
+    "Content-Type": type, "Cache-Control": o.thumb ? "private, max-age=31536000, immutable" : "no-cache", "Accept-Ranges": "bytes",
+    "X-Content-Type-Options": "nosniff", "Last-Modified": st.mtime.toUTCString(),
+  }
+  // the browser's PDF viewer doesn't run in a sandboxed document
+  if (!o.pdf) headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+  headers["Content-Disposition"] = `${o.download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(o.name)}`
+  let start = 0, end = st.size - 1, status = 200
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""))
+  if (range && (range[1] || range[2])) {
+    if (range[1]) { start = Number(range[1]); if (range[2]) end = Math.min(Number(range[2]), end) }
+    else start = Math.max(0, st.size - Number(range[2]))
+    if (start > end || start >= st.size) {
+      res.writeHead(416, { "Content-Range": `bytes */${st.size}` })
+      return res.end()
+    }
+    status = 206
+    headers["Content-Range"] = `bytes ${start}-${end}/${st.size}`
+  }
+  headers["Content-Length"] = String(Math.max(0, end - start + 1))
+  res.writeHead(status, headers)
+  if (req.method === "HEAD" || st.size === 0) return res.end()
+  fs.createReadStream(abs, { start, end }).on("error", () => res.destroy()).pipe(res)
+}
+function sendAnswered(req: http.IncomingMessage, res: http.ServerResponse, f: Answered) {
+  let st: fs.Stats
+  try { st = fs.statSync(f.path) } catch { return json(res, { error: "not found" }, 404) }
+  if (!st.isFile()) return json(res, { error: "not found" }, 404)
+  sendFile(req, res, f.path, st, f.type, { name: path.basename(f.path) })
+}
+
+const EXTRA_HOSTS = (process.env.VAULTITE_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)
+
+async function foreign(req: http.IncomingMessage, origin = true) {
+  const h = req.headers
+  if ("tailscale-funnel-request" in h) return "this app doesn't answer the internet (Tailscale Funnel)"
+  const hosts = [h.host, h["x-forwarded-host"]].map((x) => String(x ?? "").toLowerCase())
+  if (origin && h.origin !== undefined && !hosts.includes(originHost(req) || "-")) return "the page asking isn't this app"
+  // (an image, script or frame sends no Origin: another site's, or an artifact's opaque frame's; a link opened in a tab may)
+  const site = h["sec-fetch-site"]
+  if (origin && site !== undefined && site !== "same-origin" && site !== "none" && !(h["sec-fetch-mode"] === "navigate" && h["sec-fetch-dest"] === "document")) return "the page asking isn't this app"
+  for (const host of hosts.filter(Boolean)) {
+    const name = hostName(host)
+    if (net.isIP(name) || name === "localhost" || name.endsWith(".localhost")) continue
+    const me = os.hostname().toLowerCase().replace(/\.local$/, "")
+    if (name === me || name === `${me}.local` || EXTRA_HOSTS.includes(name) || (await tailnetNames()).includes(name)) continue
+    return `this app doesn't answer for ${name}`
+  }
+  return ""
+}
+
+async function openHere(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!fromThisMachine(req)) return json(res, { error: "files only open in their app from this machine" }, 403)
+  if (process.platform !== "darwin" && process.platform !== "linux" && process.platform !== "win32") return json(res, { error: "opening files in their app needs macOS, Windows or Linux" }, 501)
+  if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && !inWsl())
+    return json(res, { error: "this server has no desktop to open files on (no DISPLAY or WAYLAND_DISPLAY)" }, 501)
+  const body = await bodyOf(req), given = isObj(body) ? body.path : undefined
+  let abs: string
+  if (given === ".vaultite/themes" || given === ".vaultite/snippets") fs.mkdirSync(vault.abs(given), { recursive: true })
+  try {
+    abs = isOutside(given) ? liveFolder(given) ?? allowedPath(given) : vault.abs(clean(given, true, vault, true))
+  } catch (e) {
+    return json(res, { error: messageOf(e) }, e instanceof HTTPError ? e.status : 400)
+  }
+  const done = (err: Error | null) => (err ? json(res, { error: String(err.message) }, 500) : json(res, { ok: true }))
+  let reveal = isObj(body) && !!body.reveal
+  reveal ||= runsCode(abs)
+  if (process.platform === "darwin") return void execFile("/usr/bin/open", reveal ? ["-R", abs] : [abs], { timeout: 10000 }, done)
+  if (process.platform === "win32") return void explorer(abs, reveal).then(() => done(null), done)
+  if (inWsl()) return void execFile("wslpath", ["-w", abs], { timeout: 10000 }, (e, win) => (e ? done(e) : explorer(win.trim(), reveal).then(() => done(null), done)))
+  openOnLinux(abs, reveal).then(() => done(null), done)
+}
+
+const inWsl = () => process.platform === "linux" && ["WSLInterop", "WSLInterop-late"].some((f) => fs.existsSync(`/proc/sys/fs/binfmt_misc/${f}`))
+
+/** Explorer parses its own command line (a path can't hold "; from WSL, interop quotes it), and exits 1 even when it
+ *  worked: only not starting fails. */
+function explorer(win: string, reveal: boolean) {
+  const q = process.platform === "win32" ? `"${win}"` : win
+  return new Promise<void>((ok, fail) => {
+    const p = spawn("explorer.exe", [reveal ? `/select,${q}` : q], { windowsVerbatimArguments: true, stdio: "ignore", detached: true })
+    p.on("error", fail)
+    p.on("spawn", () => { p.unref(); ok() })
+  })
+}
+
+function liveFolder(p: string) {
+  const on = enabled(vault, app.plugins)
+  return app.plugins.some((x) => on.has(x.id) && x.liveFolders().includes(p)) ? p : null
+}
+
+async function openOnLinux(abs: string, reveal: boolean) {
+  const run = (cmd: string, args: string[]) => new Promise<void>((ok, fail) =>
+    execFile(cmd, args, { timeout: 10000 }, (err) => (err ? fail(err) : ok())))
+  if (reveal) {
+    try {
+      return await run("dbus-send", ["--session", "--print-reply", "--dest=org.freedesktop.FileManager1", "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1.ShowItems", `array:string:${pathToFileURL(abs).href.replace(/,/g, "%2C")}`, "string:"])
+    } catch { abs = path.dirname(abs) }
+  }
+  try { return await run("gio", ["open", abs]) } catch (e) { if (codeOf(e) !== "ENOENT") throw e }
+  // xdg-open may wait for the app it starts: it's left to run.
+  const child = spawn("xdg-open", [abs], { detached: true, stdio: "ignore" })
+  await new Promise<void>((ok, fail) => { child.once("error", fail); child.once("spawn", () => ok()) })
+  child.unref()
+}
+
+async function served(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false
+  const raw = url.pathname.slice(1)
+  const slash = raw.indexOf("/")
+  if (slash < 1 || slash === raw.length - 1) return false
+  const prefix = decode(raw.slice(0, slash))
+  if (prefix === "api" || fs.existsSync(path.join(web.dist, prefix))) return false
+  // (sandboxed pages ask for these with Origin "null": only the Host is checked, so a rebound name can't read the vault)
+  const why = await foreign(req, false)
+  if (why) { void send(res, 403, why, "text/plain; charset=utf-8"); return true }
+  await ready
+  await app.syncPlugins()
+  const query = Object.fromEntries(url.searchParams)
+  const out = await app.serve(prefix, decode(raw.slice(slash + 1)), raw.slice(slash + 1) + url.search, query)
+  if (!out) return false
+  if (out.body instanceof Text) send(res, out.status, out.body.text, out.body.type, out.body.headers)
+  else send(res, out.status, jsonOf(out.body), "application/json")
+  return true
+}
+
+async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+  await ready
+  const method = req.method ?? "GET"
+  const parts = url.pathname.split("/").filter(Boolean).slice(1).map(decode)
+  const query = queryOf(url.searchParams)
+  // /api/raw/<file name>?path=...: the name is there for the browser's PDF viewer, which titles a PDF by its URL
+  if (parts[0] === "raw" && (method === "GET" || method === "HEAD")) return raw(req, res, query)
+  if (parts.join("/") === "file/open" && method === "POST") return openHere(req, res)
+  const body = app.streams(method, parts, String(req.headers["content-type"] ?? "")) ? {} : await bodyOf(req)
+  if (body === undefined) return json(res, { error: "the body isn't JSON" }, 400)
+  if (parts.join("/") === "ui") {
+    const b = isObj(body) ? body : {}
+    const why = method === "POST" && (b.action === "command" || (b.action === "open" && String(b.path).startsWith("view:terminal/")))
+      ? await app.ownerWhy(req, b.action === "command" ? "the app's commands" : "the terminal") : ""
+    if (why) return json(res, { error: why }, 403)
+    const [out, status] = live.handle(method, body)
+    return json(res, out, status)
+  }
+  if (parts.join("/") === "events/stream" && method === "GET") return events.stream(events.eventsOf(vault), req, res, query)
+  if (parts[0] === "vaults" && !DESKTOP) {
+    const why = await app.ownerWhy(req, "Managing vaults")
+    if (why) return json(res, { error: why }, 403)
+    try {
+      return json(res, await vaults.handle(method, parts, query, isObj(body) ? body : {}, vault.path, switchTo))
+    } catch (e) {
+      if (e instanceof HTTPError) return json(res, { error: e.message }, e.status)
+      throw e
+    }
+  }
+  if (!app.unsynced(method, parts)) await app.syncPlugins({ trusting: app.trusts(req) })
+  const out = await app.run(method, parts, query, body, req)
+  if (out.status >= 400) failures.set(req, String((isObj(out.body) ? out.body.error : undefined) ?? ""))
+  if (out.body instanceof Text) return send(res, out.status, out.body.text, out.body.type, out.body.headers)
+  if (out.body instanceof FileAnswer) return sendAnswered(req, res, out.body)
+  return send(res, out.status, jsonOf(out.body), "application/json")
+}
+
+const packed = new Map<string, [string, Promise<Buffer>]>()
+let packedBytes = 0
+const compress = { br: promisify(zlib.brotliCompress), gzip: promisify(zlib.gzip) }
+
+function pack(p: string, st: fs.Stats, enc: "br" | "gzip") {
+  const key = `${p}\0${enc}`, version = `${st.mtimeMs}:${st.size}`
+  const hit = packed.get(key)
+  if (hit && hit[0] === version) return hit[1]
+  if (packedBytes > 64 << 20) { packed.clear(); packedBytes = 0 }
+  const data = fs.readFileSync(p)
+  const out = enc === "br"
+    ? compress.br(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } })
+    : compress.gzip(data, { level: 6 })
+  out.then((b) => { packedBytes += b.length; if (data.length > 16 << 10) better.push([key, version, data, enc]); void improve() }, () => packed.delete(key))
+  packed.set(key, [version, out])
+  return out
+}
+const better: [string, string, Buffer, "br" | "gzip"][] = []
+let improving = false
+async function improve() {
+  if (improving) return
+  improving = true
+  for (let next; (next = better.shift());) {
+    const [key, version, data, enc] = next
+    if (packed.get(key)?.[0] !== version) continue
+    const best = await (enc === "br" ? compress.br(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } })
+      : compress.gzip(data, { level: 9 })).catch(() => null)
+    if (best && packed.get(key)?.[0] === version) packed.set(key, [version, Promise.resolve(best)])
+  }
+  improving = false
+}
+
+async function file(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+  const DIST = web.dist, ASSETS = path.join(DIST, "assets") // (Vite names every file in assets by its content's hash)
+  let p = path.normalize(path.join(DIST, decode(url.pathname)))
+  if (p !== DIST && !p.startsWith(DIST + path.sep)) return send(res, 403, "Forbidden", "text/plain")
+  let st: fs.Stats
+  try {
+    if (fs.statSync(p).isDirectory()) p = path.join(p, "index.html")
+    st = fs.statSync(p)
+  } catch {
+    const kept = path.dirname(p) === ASSETS ? keptAsset(KEPT_ASSETS, path.basename(p)) : null
+    if (!kept) {
+      process.stderr.write(`"${req.method} ${url.pathname} HTTP/${req.httpVersion}" 404 -\n`)
+      return send(res, 404, "File not found", "text/plain", { "Cache-Control": "no-cache" })
+    }
+    p = kept.file
+    st = kept.st
+  }
+  const type = contentType(p)
+  const modified = st.mtime.toUTCString()
+  const headers: Record<string, string> = p.startsWith(ASSETS + path.sep) || p.startsWith(KEPT_ASSETS + path.sep)
+    ? { "Cache-Control": "public, max-age=31536000, immutable" }
+    : { "Last-Modified": modified, "Cache-Control": type.startsWith("text/html") ? "no-cache" : "public, max-age=3600" }
+  if (COMPRESSIBLE.test(type)) headers.Vary = "Accept-Encoding"
+  if (type.startsWith("text/html")) Object.assign(headers, { "Content-Security-Policy": "frame-ancestors 'self'", "X-Frame-Options": "SAMEORIGIN",
+    "Document-Policy": "include-js-call-stacks-in-crash-reports" })
+  const since = req.headers["if-modified-since"]
+  if (since && Math.floor(st.mtimeMs / 1000) <= Math.floor(Date.parse(since) / 1000)) {
+    res.writeHead(304, headers)
+    return res.end()
+  }
+  const enc = encodingFor(req, type, st.size)
+  if (enc && p === path.join(DIST, "index.html")) { for (const f of web.read().eager) fs.stat(f, (e, s) => { if (!e) void pack(f, s, enc).catch(() => {}) }) }
+  try {
+    const data = enc ? await pack(p, st, enc) : fs.readFileSync(p)
+    res.writeHead(200, { ...headers, "Content-Type": type, "Content-Length": String(data.length), ...(enc ? { "Content-Encoding": enc } : {}) })
+    res.end(data)
+  } catch {
+    send(res, 404, "File not found", "text/plain", { "Cache-Control": "no-cache" })
+  }
+}
+
+let requests = 0
+const server = http.createServer(async (req, res) => {
+  // "//x" would parse as a host (and "//" throw): read the request line as a path only
+  const url = new URL((req.url ?? "/").replace(/^\/+/, "/"), "http://localhost")
+  try {
+    if (url.pathname.startsWith("/api/")) {
+      const why = await foreign(req)
+      if (why) return json(res, { error: why }, 403)
+      const run = req.headers[TEST_HEADER]
+      if (run && refusesTests) {
+        keepRefusal(path.join(runtimeDir(), REFUSED_FILE), { run: String(run).slice(0, 64), call: `${req.method} ${url.pathname}`.slice(0, 200) })
+        return json(res, { error: "a test run's call to the user's own vault: tests use a throwaway one (vau sandbox)" }, 403)
+      }
+      if (url.pathname === "/api/health" && req.method === "GET") return json(res, startup.health())
+      if (url.pathname === "/api/loading") {
+        const root = path.join(vault?.path ?? VAULT_AT, "/")
+        return json(res, { ready: !!vault, downloading: slowReads().filter((p) => p.startsWith(root)).map((p) => p.slice(root.length)) })
+      }
+      await ready
+      const t = performance.now(), end = started(req, url), id = (++requests).toString(36)
+      try { await errorContext.run(`#${id} ${req.method} ${url.pathname}`, () => api(req, res, url)) } finally { end({ status: res.statusCode, ms: performance.now() - t, body: bodies.get(req), error: failures.get(req) }) }
+      process.stderr.write(`#${id} "${req.method} ${req.url} HTTP/${req.httpVersion}" ${res.statusCode} ${Math.round(performance.now() - t)}ms\n`)
+    } else if (!(await served(req, res, url))) await file(req, res, url)
+  } catch (e) {
+    // (a client gone mid-request, its body cut off: ECONNRESET "aborted", not the server's error)
+    if (!(e instanceof HTTPError) && codeOf(e) !== "ECONNRESET") log.error("a request failed", e)
+    if (!res.headersSent) json(res, { error: messageOf(e) }, e instanceof HTTPError ? e.status : 500)
+    else res.end()
+  }
+})
+
+const sockets = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 })
+const deflating = new WebSocketServer({ noServer: true, maxPayload: 32 << 20,
+  perMessageDeflate: { threshold: 256, zlibDeflateOptions: { level: 6 } } })
+const socketsFor = (req: http.IncomingMessage) => (overNetwork(req) ? deflating : sockets)
+
+const fromApp = (req: http.IncomingMessage) => app.trusts(req) || req.headers.origin !== undefined
+
+function refuse(socket: Duplex, status: number, message: string) {
+  process.stderr.write(`WS refused: ${status} ${message}\n`)
+  const reason = http.STATUS_CODES[status] ?? "Error"
+  socket.end(`HTTP/1.1 ${status} ${reason}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(message)}\r\n` +
+    `Connection: close\r\n\r\n${message}`)
+}
+
+server.on("upgrade", async (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
+  // Like a request: "//api/events" (a page opened at "//") would parse as a host
+  const url = new URL((req.url ?? "/").replace(/^\/+/, "/"), "http://localhost")
+  socket.on("error", () => socket.destroy())
+  try {
+    if (!url.pathname.startsWith("/api/")) return refuse(socket, 404, "not found")
+    const why = await foreign(req)
+    if (why) return refuse(socket, 403, why)
+    await ready
+    if (url.pathname === "/api/desktop/host") {
+      const key = Buffer.from(String(req.headers["x-vaultite-host-key"] ?? "")), mine = Buffer.from(servingKey())
+      if (overNetwork(req) || req.headers.origin !== undefined || !mine.length || key.length !== mine.length || !crypto.timingSafeEqual(key, mine)) {
+        return refuse(socket, 403, "only this machine's desktop app attaches")
+      }
+      return sockets.handleUpgrade(req, socket, head, (ws) => { ws.on("error", () => ws.terminate()); attach(ws) })
+    }
+    if (url.pathname === "/api/events") {
+      return socketsFor(req).handleUpgrade(req, socket, head, (ws) => {
+        ws.on("error", () => ws.terminate())
+        live.client(ws, url.searchParams.get("at") ?? undefined, url.searchParams.get("device") ?? undefined)
+      })
+    }
+    const parts = url.pathname.split("/").filter(Boolean).slice(1).map(decode)
+    const trusting = fromApp(req)
+    await app.syncPlugins({ trusting })
+    await vault.synced({ trusting })
+    const hit = matchSocket(app.plugins, parts)
+    if (!hit) return refuse(socket, 404, "not found")
+    const [plugin, sock, wild] = hit
+    if (vault.switchedOff().has(plugin.id)) return refuse(socket, 404, `${plugin.manifest.name} is off`)
+    const query = queryOf(url.searchParams)
+    const params = { wild, query }
+    await sock.accept?.(req, params)
+    socketsFor(req).handleUpgrade(req, socket, head, (ws) => {
+      // A bad frame (one over maxPayload) closes this socket, not the server: unheard, ws's error event throws.
+      ws.on("error", (e) => { process.stderr.write(`WS ${url.pathname}: ${e.message}\n`); ws.terminate() })
+      process.stderr.write(`"WS ${url.pathname} HTTP/${req.httpVersion}" 101 -\n`)
+      errorContext.run(`WS ${url.pathname}`, () => Promise.resolve().then(() => sock.fn(ws, req, params))).catch((e) => { log.error(`WS ${url.pathname}`, e); try { ws.close(1011, "error") } catch { ws.terminate() } })
+    })
+  } catch (e) {
+    if (e instanceof HTTPError) return refuse(socket, e.status, e.message)
+    log.error("a socket's upgrade failed", e)
+    refuse(socket, 500, messageOf(e))
+  }
+})
+
+server.listen(PORT, HOST, () => {
+  starting.mark("listen")
+  console.log(`${LISTENING}${HOST}:${PORT}  vault=${VAULT_AT}`)
+  if (DESKTOP && process.connected) process.send!({ type: "desktop:listening" })
+})
+
+if (process.env.VAULTITE_UPDATES && !DESKTOP && fs.existsSync(path.join(ROOT, ".git"))) {
+  const { startUpdater } = await import("./core/update/updater.ts")
+  const follow = { branch: process.env.VAULTITE_UPDATES, stateFile: path.join(LOCAL, "selfupdate.json"),
+    // Windows' SIGTERM ends a process at once, its plugins never told; the delay lets vau update's answer go out
+    restart: () => setTimeout(() => bye(143), 200),
+    busy: async () => {
+      await ready
+      const r = await LOADED[0]?.desktop("agent:busy", "server").catch(() => null)
+      return isObj(r) && r.busy ? String(r.why || "the browser is busy") : null
+    } }
+  const store = process.env.VAULTITE_CODE_STORE, checkout = process.env.VAULTITE_SERVICE_CHECKOUT
+  if (store && checkout) {
+    void ready.then(async () => {
+      fs.rmSync(path.join(store, "service-start.json"), { force: true })
+      const [{ inStore }, { holdRoot }] = await Promise.all([import("./core/update/servicestore.ts"), import("./core/update/lease.ts")])
+      void holdRoot(ROOT, "server")
+      startUpdater(await inStore({ ...follow, checkout, store, root: ROOT, adoptWeb: (dist) => web.adopt(dist) }))
+    }).catch((e) => log.error("updates from the code store didn't start", e))
+  } else startUpdater((await import("./core/selfupdate.ts")).inPlace({ root: ROOT, ...follow }))
+}

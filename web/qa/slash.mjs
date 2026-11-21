@@ -1,0 +1,123 @@
+// The editor's slash menu (its icons and previews: editor/slashPreview.tsx, components/PreviewCard.tsx), [[Note# heading suggestions, and templates (new note from one, inserted into a note).
+// Writes to the vault: throwaway server only.
+//   node web/qa/slash.mjs <base url> <vault path> [out dir]
+import { existsSync, readFileSync } from "node:fs"
+import { SHOTS, palette, qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+const { args: [B, VAULT, OUT = SHOTS], browser, check, watch, noErrors, done } = await qa(import.meta.url)
+const read = (p) => readFileSync(`${VAULT}/${p}`, "utf8")
+const post = (path, body) => fetch(`${B}api/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+
+await fetch(`${B}api/file?path=${encodeURIComponent("Qa slash/Slash note.md")}`, { method: "DELETE" })
+// Templates from an empty folder of its own (a vault, like the sandbox, may have some already): the Templates plugin's
+// `folder` setting, put back at the end.
+const TPL = "Qa slash/Templates"
+await fetch(`${B}api/file?path=${encodeURIComponent(TPL)}`, { method: "DELETE" })
+const patchTemplates = (folder) => fetch(`${B}api/config/plugin/templates`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder }) })
+const tplBefore = (await (await fetch(`${B}api/config/plugin/templates`)).json()).folder ?? null
+await patchTemplates(TPL)
+await post("file", { path: "Qa slash/Slash note.md", text: "---\ntype: note\nkind: note\n---\n\nFirst line.\n" })
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 })
+const page = watch(await ctx.newPage()), ui = app(page)
+const menu = page.locator(".cm-tooltip-autocomplete")
+const ready = async (name) => { await menu.locator("li[aria-selected]", { hasText: name }).waitFor(); await ui.idle() }
+
+await page.goto(`${B}#file/${encodeURIComponent("Qa slash/Slash note.md")}`)
+// Editing: live preview (once the note is drawn in either view: Mod+E on a page still loading toggles the wrong way).
+await page.waitForSelector(".vau-editor .cm-content", { timeout: 30000 }); await ui.idle()
+if (!(await page.locator(".vau-editor .cm-content[contenteditable=true]").count())) { await page.keyboard.press("ControlOrMeta+e"); await ui.idle() }
+const toEnd = async () => { await page.locator(".vau-editor .cm-line", { hasText: "First line." }).first().click(); await page.keyboard.press("ControlOrMeta+End"); await page.keyboard.press("Enter") }
+await toEnd()
+await page.keyboard.type("/")
+check("/ at a line's start opens the menu", await until(() => menu.isVisible()))
+const all = await menu.locator("li").allInnerTexts()
+check(`it lists basics and blocks (${all.length} entries)`, all.some((t) => t.startsWith("Heading 1")) && all.some((t) => /People due/.test(t)))
+const preview = page.locator(".cm-completionInfo .slash-preview")
+check("every option has its icon", (await menu.locator("li .cm-slash-icon").count()) === (await menu.locator("li").count()))
+check("the highlighted option shows its preview: Heading 1 draws a heading", await until(async () => (await preview.locator("h1").count()) === 1))
+await page.screenshot({ path: `${OUT}slash-menu.png` })
+await page.keyboard.press("ArrowDown")
+check("the keys move the preview: Heading 2", await until(async () => (await preview.locator("h2").count()) === 1))
+const row = menu.locator("li", { hasText: /^Table/ }).first()
+await row.scrollIntoViewIfNeeded(); const box = await row.boundingBox()
+await page.mouse.move(box.x + 20, box.y + box.height / 2 - 3); await page.mouse.move(box.x + 30, box.y + box.height / 2)
+check("the pointer moves it too: Table draws a table", await until(async () => (await preview.locator("table").count()) === 1))
+const [m, p] = [await menu.boundingBox(), await preview.boundingBox()]
+check("the preview sits beside the list", p && m && p.x >= m.x + m.width)
+await page.screenshot({ path: `${OUT}slash-preview-table.png` })
+await page.keyboard.type("peopledue"); await ready("People due")
+check("a block's preview is the block drawn from a sample", await until(async () => (await preview.locator("[data-island], .note-prose, div").count()) > 3))
+await page.screenshot({ path: `${OUT}slash-preview-block.png` })
+for (let i = 0; i < 9; i++) await page.keyboard.press("Backspace")
+await page.keyboard.type("h2"); await ui.idle()
+check("typing narrows it (h2 -> Heading 2)", (await menu.locator("li[aria-selected]").innerText()).startsWith("Heading 2"))
+await page.keyboard.press("Enter"); await page.keyboard.type("Plans"); await page.keyboard.press("Enter"); await ui.idle()
+await page.keyboard.type("/people d"); await ui.idle()
+check("a space after the query closes it", !(await menu.isVisible()))
+for (let i = 0; i < 9; i++) await page.keyboard.press("Backspace")
+await page.keyboard.type("/peopledue"); await ready("People due")
+await page.keyboard.press("Enter"); await ui.idle()
+await page.keyboard.type("mid/word"); await ui.idle()
+check("no menu mid-word", !(await menu.isVisible()))
+// [[Note# suggests that note's headings, [[# this file's.
+await page.keyboard.press("Enter"); await page.keyboard.type("See [[Slash note#"); await ui.idle()
+check("[[Note# suggests its headings", (await menu.locator("li").allInnerTexts()).includes("Plans"))
+await page.keyboard.press("Enter"); await ui.saved()
+const text = read("Qa slash/Slash note.md")
+check("…and a pick goes in as a heading link, without the name in its own note (core/linkformat.ts)", text.includes("See [[#Plans]]"))
+check("the heading was typed as ## ", /## Plans/.test(text))
+check("the block went in as a fence", /```block-people-due\n```/.test(text), text)
+
+// Templates: none yet -> examples.
+await page.keyboard.press("Escape")
+await palette(page, "New note from template", 0); await ui.idle()
+await page.screenshot({ path: `${OUT}slash-templates-empty.png` })
+const empty = await page.getByRole("button", { name: "Add three examples" }).count()
+check("no templates: the picker offers examples", empty === 1)
+await page.screenshot({ path: `${OUT}slash-templates-empty.png` })
+await page.getByRole("button", { name: "Add three examples" }).click()
+check("examples written to the templates folder", await until(async () => existsSync(`${VAULT}/${TPL}/Person.md`) && existsSync(`${VAULT}/${TPL}/Journal.md`)))
+// (the picker opens again once the examples are made: typed before, the keys go nowhere and Enter picks Journal)
+await page.locator("[role=option]", { hasText: "Person" }).waitFor({ timeout: 15000 })
+await page.keyboard.type("Person")
+await page.locator("[role=option][aria-selected=true]", { hasText: "Person" }).waitFor()
+await page.screenshot({ path: `${OUT}slash-templates-pick.png` })
+await page.keyboard.press("Enter")
+const hashNow = async () => decodeURIComponent(await page.evaluate(() => location.hash))
+await until(async () => /People\//.test(await hashNow()), 10000); await ui.idle()
+const hash = await hashNow()
+check(`a person template makes a file in People (${hash})`, /People\/Untitled( \d+)?\.md/.test(hash))
+const made = hash.replace(/^#file\//, "")
+const today = new Date(); const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`
+if (existsSync(`${VAULT}/${made}`)) check("its {{date}} was filled in", read(made).includes(`- ${iso} · note · Met`) && /type: person/.test(read(made)))
+
+// Insert template into the note (command), then the slash menu's template.
+await page.goto(`${B}#file/${encodeURIComponent("Qa slash/Slash note.md")}`)
+await page.waitForSelector(".vau-editor .cm-content"); await ui.idle()
+await toEnd()
+await palette(page, "Insert template", 0); await ui.idle()
+await page.keyboard.type("Meeting"); await ui.idle(); await page.keyboard.press("Enter"); await ui.saved()
+let t = read("Qa slash/Slash note.md")
+check("Insert template: body at the cursor, new frontmatter keys added, own keys kept", /## Next steps/.test(t) && /tags: \[Meeting\]/.test(t) && /kind: note/.test(t) && !/kind: note\n[\s\S]*kind: note\n---/.test(t))
+await page.keyboard.press("ControlOrMeta+End"); await page.keyboard.press("Enter")
+await page.keyboard.type("/journ"); await ui.idle()
+check("the slash menu lists templates", (await menu.locator("li[aria-selected]").innerText()).startsWith("Journal"))
+await page.keyboard.press("Enter"); await ui.saved()
+t = read("Qa slash/Slash note.md")
+check("the slash menu's template went in", /## Grateful for/.test(t))
+check("the note's own kind stayed", !/kind: journal/.test(t))
+const phone = watch(await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })).newPage())
+await phone.goto(`${B}#file/${encodeURIComponent("Qa slash/Slash note.md")}`)
+await phone.waitForSelector(".vau-editor .cm-content", { timeout: 30000 }); await app(phone).idle()
+if (!(await phone.locator(".vau-editor .cm-content[contenteditable=true]").count())) { await palette(phone, "Switch to live preview"); await app(phone).idle() }
+await phone.locator(".vau-editor .cm-line", { hasText: "First line." }).first().click(); await phone.keyboard.press("End"); await phone.keyboard.press("Enter")
+await phone.keyboard.type("/call")
+const pp = phone.locator(".cm-completionInfo .slash-preview")
+check("phone: the callout's preview shows", await until(() => pp.isVisible()))
+const pb = await pp.boundingBox()
+check(`phone: it fits the screen (${Math.round(pb?.x)}..${Math.round(pb?.x + pb?.width)})`, pb && pb.x >= 0 && pb.x + pb.width <= 390 && pb.y >= 0)
+await phone.screenshot({ path: `${OUT}slash-preview-phone.png` })
+await phone.keyboard.press("Escape")
+noErrors()
+await patchTemplates(tplBefore)
+await done()

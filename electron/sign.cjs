@@ -1,0 +1,206 @@
+// electron-builder's afterPack. codesign one file at a time: @electron/osx-sign opens all ~26,000 at once (EMFILE). A
+// real identity, not ad hoc, keeps macOS' privacy grants (the vault) across builds; else ad hoc.
+const { execFileSync } = require("node:child_process")
+const fs = require("node:fs")
+const os = require("node:os")
+const path = require("node:path")
+
+const RELEASE = !!process.env.VAULTITE_RELEASE
+const NOTARY = "vaultite-notary"
+// That profile, in VAULTITE_NOTARY_KEYCHAIN when it isn't in the login keychain (CI's: .github/workflows/release.yml).
+const PROFILE = ["--keychain-profile", NOTARY, ...(process.env.VAULTITE_NOTARY_KEYCHAIN ? ["--keychain", process.env.VAULTITE_NOTARY_KEYCHAIN] : [])]
+const ENTITLEMENTS = path.join(__dirname, "entitlements.plist")
+const QL_ENTITLEMENTS = path.join(__dirname, "quicklook", "entitlements.plist")
+
+/** The identity to sign with, or null for ad hoc. */
+function identity() {
+  if (process.env.VAULTITE_SIGN_IDENTITY) return process.env.VAULTITE_SIGN_IDENTITY
+  let out = ""
+  try { out = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], { encoding: "utf8" }) } catch { return null }
+  const ids = [...out.matchAll(/^\s*\d+\)\s+([0-9A-F]{40})\s+"([^"]+)"/gm)].map((m) => ({ hash: m[1], name: m[2] }))
+  const dev = ids.find((x) => x.name.startsWith("Developer ID Application:"))
+  if (RELEASE) return dev ? dev.hash : null
+  const pick = dev ?? ids.find((x) => x.name.startsWith("Apple Development:")) ?? ids[0]
+  return pick ? pick.hash : null
+}
+
+/** Is this file a Mach-O binary (thin or fat; 0xcafebabe is also a Java class, whose next word is its version, >= 45). */
+function macho(file) {
+  const b = Buffer.alloc(8)
+  const fd = fs.openSync(file, "r")
+  try { if (fs.readSync(fd, b, 0, 8, 0) < 8) return false } finally { fs.closeSync(fd) }
+  const m = b.readUInt32BE(0)
+  return m === 0xfeedfacf || m === 0xcffaedfe || m === 0xfeedface || m === 0xcefaedfe || (m === 0xcafebabe && b.readUInt32BE(4) < 45)
+}
+
+/** The bundle's Mach-O files, then its nested bundles (.app, .appex, .framework), deepest first: codesign signs inside out. */
+function contents(app) {
+  const files = [], bundles = []
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(p)
+        if (/\.(app|appex|framework)$/.test(e.name)) bundles.push(p)
+      } else if (e.isFile() && macho(p)) files.push(p)
+    }
+  }
+  walk(app)
+  const depth = (p) => p.split(path.sep).length
+  return [...files.sort((a, b) => depth(b) - depth(a)), ...bundles.sort((a, b) => depth(b) - depth(a))]
+}
+
+function release(app, id) {
+  const args = ["--force", "--timestamp", "--options", "runtime", "--sign", id]
+  const all = [...contents(app), app]
+  console.log(`sign.cjs: signing ${all.length} binaries and bundles with the hardened runtime`)
+  for (const p of all) execFileSync("codesign", [...args, "--entitlements", p.endsWith(".appex") ? QL_ENTITLEMENTS : ENTITLEMENTS, p], { stdio: "pipe" })
+  execFileSync("codesign", ["--verify", "--deep", "--strict", app], { stdio: "inherit" })
+  notarize(app)
+}
+
+/** Notarize a .app (sent zipped) or a .dmg with the `vaultite-notary` profile, then staple its ticket to it. */
+function notarize(file) {
+  try {
+    execFileSync("xcrun", ["notarytool", "history", ...PROFILE], { stdio: "ignore" })
+  } catch {
+    console.warn(`sign.cjs: NOT NOTARIZED: no notarytool profile "${NOTARY}" in the keychain (xcrun notarytool store-credentials ${NOTARY} ...); macOS will refuse this app once downloaded`)
+    return
+  }
+  const zip = file.endsWith(".app") ? path.join(os.tmpdir(), `vaultite-notarize-${process.pid}.zip`) : null
+  try {
+    if (zip) execFileSync("ditto", ["-c", "-k", "--keepParent", file, zip])
+    console.log(`sign.cjs: notarizing ${path.basename(file)} (notarytool waits for Apple's answer)`)
+    const { id } = JSON.parse(execFileSync("xcrun", ["notarytool", "submit", zip ?? file, ...PROFILE, "--output-format", "json"], { encoding: "utf8" }))
+    notarized(id, path.basename(file))
+  } finally { if (zip) fs.rmSync(zip, { force: true }) }
+  staple(file)
+}
+
+// Waiting asks Apple again every few seconds, and one request timing out (NSURLErrorDomain -1001) ended a nightly's
+// wait while the submission went on: so the submission is asked after again, and only Apple's verdict decides.
+function notarized(id, name, tries = 5) {
+  for (let i = 1; ; i++) {
+    let status = null
+    try {
+      execFileSync("xcrun", ["notarytool", "wait", id, ...PROFILE], { stdio: "inherit" })
+    } catch { /* (the verdict, or why it can't be had, is info's) */ }
+    try {
+      status = JSON.parse(execFileSync("xcrun", ["notarytool", "info", id, ...PROFILE, "--output-format", "json"], { encoding: "utf8" })).status
+    } catch (e) { if (i >= tries) throw e }
+    if (status === "Accepted") return
+    if (status && status !== "In Progress") {
+      try { execFileSync("xcrun", ["notarytool", "log", id, ...PROFILE], { stdio: "inherit" }) } catch { /* (the status says enough) */ }
+      throw new Error(`sign.cjs: Apple didn't notarize ${name}: ${status} (submission ${id})`)
+    }
+    if (i >= tries) throw new Error(`sign.cjs: Apple's answer for ${name} never came (submission ${id}, still ${status ?? "unknown"})`)
+    console.warn(`sign.cjs: notarizing ${name}: no answer yet, asking again (${i}/${tries - 1})`)
+    execFileSync("sleep", [String(15 * i)])
+  }
+}
+
+// Stapling asks Apple's CloudKit, whose connection drops now and then (error 68): it failed two nightlies in a row.
+function staple(file, tries = 5) {
+  for (let i = 1; ; i++) {
+    try { return execFileSync("xcrun", ["stapler", "staple", file], { stdio: "inherit" }) } catch (e) {
+      if (i >= tries) throw e
+      console.warn(`sign.cjs: stapling ${path.basename(file)} failed, trying again (${i}/${tries - 1})`)
+      execFileSync("sleep", [String(15 * i)])
+    }
+  }
+}
+
+// The cookie encryption fuse (EnableCookieEncryption) flips before signing, as a change after breaks the signature. A
+// build without it drops every cookie: update.sh (it greps this file) never goes back to one; start.ts sets it.
+async function fuses(context, shell) {
+  const { FuseVersion, FuseV1Options } = require("@electron/fuses")
+  await context.packager.addElectronFuses(context, { version: FuseVersion.V1, [FuseV1Options.EnableCookieEncryption]: true,
+    // (NODE_OPTIONS and --inspect are ignored, by the servers and terminals run as Node too: nothing they start may use
+    // them; but Vaultite Dev's --inspect is on, so the desktop QA drives the packaged app as agents verify against it)
+    [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false, [FuseV1Options.EnableNodeCliInspectArguments]: shell.channel === "dev" })
+}
+
+/** The name and id it's packaged as, into the shell.json stamp.ts wrote (electron/identity.ts): its userData and, on
+ *  Windows, its AppUserModelID. */
+function stampShell(context) {
+  const { id, productFilename, productName } = context.packager.appInfo
+  const res = context.electronPlatformName === "darwin" ? path.join(context.appOutDir, `${productFilename}.app`, "Contents", "Resources", "app")
+    : path.join(context.appOutDir, "resources", "app")
+  const file = path.join(res, "electron", "shell.json")
+  let stamped = {}
+  try { stamped = JSON.parse(fs.readFileSync(file, "utf8")) } catch { /* not stamped: a name and id still */ }
+  const shell = { ...stamped, appId: id, productName }
+  fs.writeFileSync(file, JSON.stringify(shell, null, 2) + "\n")
+  return shell
+}
+
+function readOnly(p) {
+  if (!fs.existsSync(p)) return
+  if (fs.statSync(p).isDirectory()) for (const n of fs.readdirSync(p)) readOnly(path.join(p, n))
+  fs.chmodSync(p, fs.statSync(p).isDirectory() ? 0o555 : 0o444)
+}
+
+const installedReadOnlyAnyway = (platform) => platform === "linux"
+const squirrelInstallsIt = (platform) => platform === "darwin" && RELEASE
+
+function compileCache(context) {
+  const cache = path.join(context.packager.getResourcesDir(context.appOutDir), "app", ".compile-cache")
+  if (squirrelInstallsIt(context.electronPlatformName)) return fs.rmSync(cache, { recursive: true, force: true })
+  if (!installedReadOnlyAnyway(context.electronPlatformName)) readOnly(cache)
+}
+
+function allWritable(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    const p = path.join(e.parentPath, e.name)
+    if (!e.isSymbolicLink() && !(fs.statSync(p).mode & 0o200)) throw new Error(`sign.cjs: ${path.relative(dir, p)} is read-only: Squirrel.Mac, a Mac release's updater, gives up on a file whose quarantine flag it can't clear`)
+  }
+}
+
+exports.default = async function sign(context) {
+  compileCache(context)
+  await fuses(context, stampShell(context))
+  if (context.electronPlatformName === "win32") return require("./natives.cjs").windows(context)
+  if (context.electronPlatformName !== "darwin") return
+  await require("./natives.cjs").default(context)
+  const appex = require("./quicklook.cjs").default(context)
+  const app = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
+  const id = identity()
+  if (RELEASE) {
+    if (!id) throw new Error("sign.cjs: a release needs a \"Developer ID Application\" identity in the keychain (or VAULTITE_SIGN_IDENTITY)")
+    allWritable(app)
+    return release(app, id)
+  }
+  if (id) {
+    try {
+      // No timestamp: it asks Apple's server, and an app that's never notarized doesn't need one.
+      execFileSync("codesign", ["--force", "--deep", "--timestamp=none", "--sign", id, app], { stdio: "inherit" })
+      sealed(app, appex, ["--force", "--timestamp=none", "--sign", id])
+      return
+    } catch {
+      // The updater (update.sh) waits for the next check instead: an ad hoc build over this Mac's signed app would lose
+      // every permission granted to it, and the grants then made fail again once it's signed.
+      if (process.env.VAULTITE_UPDATING) throw new Error(`sign.cjs: couldn't sign with ${id} (a locked keychain?): not building an update signed ad hoc`)
+      console.warn(`sign.cjs: couldn't sign with ${id} (a locked keychain?): signing ad hoc, so macOS will ask for its permissions again`)
+    }
+  } else {
+    // An update signed ad hoc is a new app to macOS: its cookies' Keychain key (sign.cjs's cookie encryption) then asks
+    // for a password on a screen nobody may be at, and unanswered, every site signs out.
+    if (process.env.VAULTITE_UPDATING) throw new Error("sign.cjs: no code signing identity in the keychain: not building an update signed ad hoc (Setup: a self-signed code signing certificate will do)")
+    console.warn("sign.cjs: no code signing identity in the keychain: signing ad hoc, so macOS will ask for its permissions again after each build")
+  }
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "inherit" })
+  sealed(app, appex, ["--force", "--sign", "-"])
+}
+
+/** --deep signed the extension as the app (no sandbox, which macOS won't load): signed again as itself, then the app
+ *  over it. */
+function sealed(app, appex, args) {
+  if (!appex) return
+  require("./quicklook.cjs").sign(appex, args)
+  execFileSync("codesign", [...args, app], { stdio: "inherit" })
+}
+
+exports.identity = identity
+exports.stampShell = stampShell
+exports.macho = macho
+exports.notarize = notarize

@@ -10,38 +10,47 @@ on:
 jobs:
   build-ipa:
     name: Build iPadOS / iOS IPA Package
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter SDK
-        uses: subosito/flutter-action@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          channel: 'stable'
-          cache: true
-
-      - name: Verify Flutter & Xcode Environment
-        run: |
-          flutter doctor -v
-          xcodebuild -version
+          node-version: '22'
+          cache: 'npm'
 
       - name: Install Dependencies
         run: |
-          flutter pub get
-          cd ios
-          pod install --repo-update
-          cd ..
+          npm ci
 
-      - name: Build Flutter iOS Release (Unsigned)
+      - name: Build Web Application
         run: |
-          flutter build ios --release --no-codesign
+          npm run build
+
+      - name: Sync Capacitor iOS Project
+        run: |
+          npx cap sync ios
+
+      - name: Archive iOS Application
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
 
       - name: Package IPA
         run: |
           mkdir -p dist
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          cp -r ios/App/build/App.xcarchive/Products/Applications/App.app Payload/
           zip -r -9 dist/Atlas-iPad-Unsigned.ipa Payload
           echo "IPA Package generated at dist/Atlas-iPad-Unsigned.ipa"
           ls -lh dist/Atlas-iPad-Unsigned.ipa

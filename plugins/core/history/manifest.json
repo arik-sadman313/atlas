@@ -1,0 +1,14 @@
+{
+  "id": "history",
+  "icon": "rotate-ccw-clock",
+  "category": "system",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "name": "File history",
+  "description": "Every text file's earlier versions, like a shared document's: who changed it (you, an agent, another device) and when, what each version changed, marked in the note, and Restore this version. Kept on this machine, not in the vault: a version each time a file rests a minute between changes, at most one every few minutes while it keeps changing, and one before and after each agent's edit. Open it from a file's menu, or from the line at the top of a file an agent changed.",
+  "settings": {
+    "header": { "type": "boolean", "default": true, "label": "Agents' edits in files' headers", "description": "a line saying who and when; atop a file an agent changed last, in the past day, opening its version history" },
+    "interval_min": { "type": "number", "default": 5, "min": 0, "max": 1440, "label": "Minutes between versions", "description": "while a file keeps changing; at most one version of it in this many minutes" },
+    "keep_days": { "type": "number", "default": 7, "min": 1, "max": 365, "label": "Days to keep versions", "description": "earlier versions, kept on this machine" }
+  }
+}

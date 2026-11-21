@@ -1,0 +1,139 @@
+import { askText, get, isViewOpen, notify, notifyError, op, openView, pluginSettings, removals, scopedState, webPages,
+  type CloudAccount, type CloudSession, type CloudState } from "@vaultite"
+import { argOf, containerById, containerOfProfile, containers, profileIn } from "@plugins/web-viewer/containers"
+import { settings as browser, settingsRead } from "@plugins/web-viewer/state"
+
+export type Settings = {
+  read?: boolean
+  hidden?: string[]
+}
+export const settings = pluginSettings<Settings>("cloud-sessions")
+
+const NONE: CloudState = { signedIn: false, accounts: [], sessions: [] }
+let now = NONE
+const listeners = new Set<() => void>()
+const put = (s: CloudState) => { now = s; listeners.forEach((f) => f()) }
+const stateOf = (x: Partial<CloudState> & { sessions: CloudSession[] }): CloudState =>
+  ({ signedIn: x.signedIn ?? x.sessions.length > 0, accounts: x.accounts ?? [], sessions: x.sessions, base: x.base })
+
+const profiles = () => [profileIn(null), ...containers().map((c) => profileIn(c.id))]
+
+let asked = ""
+let unreachable = false
+function ask() {
+  const s = settings.get()
+  const want = { profiles: profiles(), read: s.read === true, hidden: s.hidden ?? [] }
+  const key = JSON.stringify(want)
+  if (key === asked) return
+  asked = key
+  void webPages!.cloud!(want).then((x) => { unreachable = false; put(stateOf(Array.isArray(x) ? { sessions: x } : x)) },
+    () => { asked = ""; unreachable = true; put({ ...now }) })
+}
+export const cloudUnreachable = () => unreachable
+export const askCloud = () => { if (unreachable) ask() }
+
+let started = false
+export function subscribeCloud(fn: () => void) {
+  listeners.add(fn)
+  if (!started && webPages?.cloud) {
+    started = true
+    webPages.on((m) => { if (m.type === "cloud") { unreachable = false; put(stateOf(m)) } })
+    void Promise.all([settings.ready(), settingsRead()]).then(() => {
+      ask()
+      settings.onChange(ask)
+      browser.onChange(ask)
+    })
+  }
+  return () => { listeners.delete(fn) }
+}
+export const getCloud = () => now
+export const hasCloud = () => !!webPages?.cloud
+
+export const shownAccounts = (s: CloudState, hidden: string[] | undefined) => s.accounts.filter((a) => !hidden?.includes(a.label))
+export const accountOf = (s: CloudState, c: CloudSession) => s.accounts.find((a) => a.id === c.account)
+
+export function setHidden(label: string, hide: boolean) {
+  const was = settings.get().hidden ?? []
+  return settings.set({ hidden: hide ? [...new Set([...was, label])] : was.filter((l) => l !== label) })
+}
+
+export const PICKED = "cloud-sessions:account"
+export const pickedNow = () => scopedState<string | null>(PICKED, null)
+export const pickedOf = (shown: CloudAccount[], id: string | null | undefined) => shown.find((a) => a.id === id)
+
+
+export const needsYou = (c: CloudSession) => c.state === "waiting" || (c.state === "idle" && c.outcome === "input" && Date.now() - c.updated < 3 * 86_400_000)
+export type Status = "needs" | "working" | "review" | "done"
+export const statusOf = (c: CloudSession): Status => (needsYou(c) ? "needs" : c.state === "running" ? "working"
+  : c.outcome === "review" && Date.now() - c.updated < 7 * 86_400_000 ? "review" : "done")
+export const STATUS: Record<Status, string> = { needs: "Needs you", working: "Working", review: "Ready for review", done: "Idle" }
+export const badgeOf = (c: CloudSession) => (c.state === "running" ? "working" as const : needsYou(c) ? "ask" as const : c.unread ? "unread" as const : undefined)
+
+export const cloudListed = (list: CloudSession[]) => {
+  const rank = { needs: 0, working: 1, review: 2, done: 2 }
+  const recent = (c: CloudSession) => statusOf(c) !== "done" || Date.now() - c.updated < 2 * 86_400_000
+  const sorted = [...list].sort((a, b) => Number(!recent(a)) - Number(!recent(b)) || rank[statusOf(a)] - rank[statusOf(b)] || b.updated - a.updated)
+  const n = Math.min(10, sorted.filter(recent).length)
+  return { listed: sorted.slice(0, n), older: sorted.slice(n) }
+}
+
+export const repoOf = (c: CloudSession) => c.repos?.find((r) => r.branch) ?? c.repos?.[0]
+export const repoName = (repo: string) => repo.split("/").pop() ?? repo
+export const github = (repo: string, rest = "") => `https://github.com/${repo}${rest}`
+export const diffUrl = (c: CloudSession) => {
+  const r = repoOf(c)
+  return c.pr?.url ?? (r?.branch ? github(r.repo, `/compare/${encodeURIComponent(r.branch).replace(/%2F/g, "/")}?expand=1`) : null)
+}
+
+
+export function openIn(url: string, among: string[], opts: { newTab?: boolean } = {}) {
+  const container = !among.length || among.includes(profileIn(null)) ? null : among.map(containerOfProfile).find((c) => !!containerById(c))
+  if (container === undefined) { notify("Couldn't find the logins that session is in"); return }
+  const to = `view:web/${argOf(url, container)}`
+  openView(to, { newTab: opts.newTab || !isViewOpen(to) })
+}
+
+export const openSession = (c: CloudSession, newTab?: boolean) => openIn(c.url, accountOf(now, c)?.profiles ?? [c.profile], { newTab })
+export const openGitHub = (url: string) => openIn(url, [], { newTab: true })
+
+/** claude.ai's new session page: `prompt` waits in its box for the user to send. */
+const newSessionUrl = (base: string, prompt?: string) => `${base}/code${prompt ? `?q=${encodeURIComponent(prompt)}` : ""}`
+export const newSession = (a: CloudAccount | undefined, prompt?: string) => openIn(newSessionUrl(now.base ?? "https://claude.ai", prompt), a?.profiles ?? [], { newTab: true })
+
+
+export const leaving = removals()
+export const canAct = () => !!webPages?.cloudAct
+
+export async function archive(c: CloudSession) {
+  const act = webPages?.cloudAct
+  if (!act) return
+  const ok = await leaving.remove(c.id, () => act("archive", c.id), "Couldn't archive it")
+  if (ok) notify(`Archived “${c.title}”`, { action: { label: "Undo", run: () => unarchive(c) } })
+}
+async function unarchive(c: CloudSession) {
+  leaving.back([c.id])
+  try { await webPages!.cloudAct!("unarchive", c.id, { account: c.account ?? "" }) } catch (e) { notifyError(e, "Couldn't bring it back") }
+}
+
+export function rename(c: CloudSession) {
+  const act = webPages?.cloudAct
+  if (!act) return
+  askText({ title: "Rename session", placeholder: "Its name", typed: c.title, hint: "Its name on claude.ai too",
+    label: (t) => `Rename to “${t}”`,
+    onText: (t) => { if (t !== c.title) void act("rename", c.id, t).catch((e) => notifyError(e, "Couldn't rename it")) } })
+}
+
+let orgs: { at: number; list: Promise<string[]> } | null = null
+export function teleportable(): Promise<string[]> {
+  if (!orgs || Date.now() - orgs.at > 60_000) {
+    orgs = { at: Date.now(), list: get<{ account: string; org: string }[]>("claude-code/organizations").then((l) => l.map((x) => x.org), () => []) }
+  }
+  return orgs.list
+}
+
+export async function teleport(c: CloudSession) {
+  const r = repoOf(c)
+  try {
+    await op("claude-code.teleport", { session: c.id, ...(c.account ? { org: c.account } : {}), ...(r ? { repo: r.repo } : {}), ...(r?.branch ? { branch: r.branch } : {}), title: c.title })
+  } catch (e) { notifyError(e, "Couldn't continue it here") }
+}

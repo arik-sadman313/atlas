@@ -1,0 +1,15 @@
+import { lazy, Suspense } from "react"
+import { FileText } from "lucide-react"
+import { definePlugin, Loading, type FileFormat } from "@vaultite"
+
+const Docx = lazy(() => import("./Docx"))
+
+const format: FileFormat = {
+  exts: ["docx"], icon: FileText, tint: "var(--blue)", binary: true, layout: "inline",
+  render: ({ url }) => <Suspense fallback={<Loading />}><Docx url={url!} /></Suspense>,
+  embed: ({ url }) => <Suspense fallback={<Loading />}><Docx url={url!} embed /></Suspense>,
+}
+
+export default definePlugin({
+  formats: { document: format },
+})

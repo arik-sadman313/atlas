@@ -1,0 +1,34 @@
+## MCP
+The vault's operations for AIs outside the app, as an MCP server (modelcontextprotocol.io): every operation marked for
+MCP is a tool, named in its docs (`vau docs api`), plus `ops` (list the operations, or explain one) and `call` (run any
+by its id). Plugins that are on add theirs. Each runs as the client, so what it writes follows the formats in these
+docs, and Activity names the client that did it. Its instructions (initialize's, `mcp.instructions`) are a short intro,
+the `forAgents` line of each plugin that's on, and how to use the tools. A session the app started already has those
+lines (`vau mcp` under VAULTITE_TOLD): it gets the intro and the tools' part only.
+- Over stdio: `vau mcp` (Claude Code: `claude mcp add vaultite -- vau mcp`). Over HTTP: `POST /api/mcp` on the
+  server (Streamable HTTP, a JSON answer per message), for this machine and its owner through Tailscale Serve only, like
+  Terminal (and the settings below).
+- On the internet, for apps that connect from their own servers (claude.ai and the Claude apps, ChatGPT, Grok Bot,
+  Muse): `<url>/mcp` on a listener of its own that a tunnel makes public, set in this machine's `data/config.json`
+  (`mcp.public`: `url`, `port`). Sign-in has no accounts: the app's sign-in page shows a code, typed in
+  view:connections, where connections are also renamed, ended or made read only (it then gets only the tools that read;
+  `call` refuses the rest). Over Vaultite Connect (owner tools off) they are only listed and ended: the rest
+  is done on the Mac. The same tools, `ops` and `call` too, without what only this machine's owner may run
+  (terminals, the screen). What can run code on this machine or change what does (turning a plugin on or allowing it,
+  writing under `.vaultite/`, bundles, settings, palette commands, clipping a local address) waits for the owner's yes:
+  Approve and Deny in the Inbox and on the phone. Writing a vault plugin's code doesn't (`plugin.new` too): it runs only
+  once the owner allows it as it is, and that yes says what it discloses and which files changed. Waiting past ~45
+  seconds, the tool says so: call it again with the same arguments once approved.
+  `mcp.public.withhold` (plugin or op ids, e.g. `web-viewer`: the agents' browser, signed in to the owner's accounts) are
+  never theirs, and `mcp.public.tools` lists the only tools they get: neither is listed, in `ops` or run by `call`.
+  Vaultite Cloud's address follows the same `mcp.public`.
+- **Vaultite Cloud** gives that listener an address without a tunnel of one's own: `https://<handle>.vaultite.app/mcp`.
+  Signing in: the user gets a one-time code at https://cloud.vaultite.com/connect and types it in Connections or
+  `vau cloud sign-in <code>` (ops `mcp.cloud-sign-in`, `mcp.cloud-status`, `mcp.cloud-sign-out`); never use a code from
+  someone else. The machine then keeps a tunnel to the relay, which reaches only the public listener. When the
+  account changes its handle (on cloud.vaultite.com), the relay tells the machine over the tunnel; it keeps the new
+  address and says so, and AI apps must add the new MCP address again. Its shared
+  folders' guests (Sharing) come to `https://share-<handle>.vaultite.app`, marked by the relay as theirs: the listener
+  sends them to Sharing's gateway only. MCP gives Sharing its guests' address (`mcp:guest-urls`: that one while signed
+  in, then an own tunnel's `mcp.public.url`).
+- Nothing is stored in the vault: sessions are in memory, and the vault is changed only by the operations the tools run.

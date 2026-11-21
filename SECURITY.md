@@ -1,0 +1,43 @@
+# Security
+
+Vaultite has **no accounts and no login**: whoever can reach the server can read and write the vault.
+
+- It listens on `127.0.0.1` by default. To use it from your phone, put it on a private network you control, such as a
+  Tailscale tailnet with `tailscale serve`. Don't expose it to the internet.
+- Terminal tabs run a real shell on the server's machine. The terminal socket only accepts this machine (loopback, no
+  proxy headers) or, through Tailscale Serve, the machine owner's Tailscale login and logins listed in its
+  settings on that machine (`allowUsers`, kept on the machine for every plugin, never in the vault). Other origins are always refused. Another machine's shell
+  (Machines) is checked on the machine you asked, then again on the one that runs it.
+- The MCP server (`POST /api/mcp`) reads and writes the whole vault, so it answers like the terminal: this machine,
+  or the owner's tailnet login through Tailscale Serve (and its `allowUsers`), never
+  another site's page. `vau mcp` reaches the server like any `vau` command. The Inbox's events (which become toasts
+  and notifications) are posted the same way: this machine or its owner only. The Web clipper fetches only public
+  addresses (never this machine, the local network or the tailnet), checked again on every redirect and DNS answer;
+  so do Canvas's link previews.
+- AI apps that connect from their own servers (claude.ai, ChatGPT) reach the vault's tools on a separate MCP listener,
+  made public by a tunnel of your own (`mcp.public` in `data/config.json`) or by Vaultite Cloud's relay, which reaches
+  only that listener, never the app's port. Each connection signs in with a code you type in Connections, where you can
+  make it read only or end it. It never gets what only the owner may run (terminals, the screen), and what can run code
+  on the machine (turning on or allowing a plugin, writing a hidden file or folder: `.vaultite/`, an agent's `.claude/`;
+  settings) waits for your yes in the Inbox. In the desktop app's browser, its pages never open this machine, the local
+  network or the tailnet.
+- Vaultite Connect shows the app to its owner, signed in to Vaultite Cloud, at their handle's address. Without owner
+  tools (Connections) it refuses what runs code: terminals, plugins, settings, palette commands, and writing
+  `plugins.json` or `.vaultite/AGENTS.md`.
+- A `vaultite://command/<id>` link, in a note or from another app, asks before running a command that does more than
+  open something: whoever wrote the link may not be you.
+- The desktop app's Browser shows pages in a session of their own (their logins kept apart from the app's, and by
+  default each workspace's apart from the others'), with no preload, no Node and context isolation: a page can't reach
+  the app, its bridge or the machine. Pages go only to http and https addresses (mailto: opens the mail app, any other
+  scheme is refused), their permission requests are refused (but writing the clipboard and notifications, which come
+  to the app's Inbox), and downloads go to the Downloads folder.
+- HTML artifacts (the core plugin HTML pages) run in a sandboxed frame (opaque origin, no network, no access to the
+  API) and read the vault only through a small bridge. With the plugin off, an .html file is only its text: it's never
+  served to run.
+- Vault plugins run code on the server with the app's access. They're off until you turn them on in the Plugins
+  page; anyone who can write your vault's hidden files could add one, so treat write access to the vault as access to
+  the machine.
+
+## Reporting a problem
+
+Open a private security advisory on GitHub (Security > Report a vulnerability) rather than an issue.

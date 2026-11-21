@@ -1,0 +1,51 @@
+{
+  "disabled": [],
+  "enabled": [
+    "ai-import",
+    "audio-recorder",
+    "books",
+    "calendar",
+    "health",
+    "learning",
+    "lessons",
+    "logs",
+    "notes",
+    "people",
+    "people-map",
+    "projects",
+    "today",
+    "web-viewer"
+  ],
+  "install": {
+    "books": {
+      "name": "Books",
+      "source": "Vaultite/plugins/books",
+      "tag": "books/v1.0.0"
+    },
+    "health": {
+      "name": "Health",
+      "source": "Vaultite/plugins/health",
+      "tag": "health/v1.0.0"
+    },
+    "learning": {
+      "name": "Learning",
+      "source": "Vaultite/plugins/learning",
+      "tag": "learning/v1.0.0"
+    },
+    "lessons": {
+      "name": "Lessons",
+      "source": "Vaultite/plugins/lessons",
+      "tag": "lessons/v1.0.0"
+    },
+    "projects": {
+      "name": "Projects",
+      "source": "Vaultite/plugins/projects",
+      "tag": "projects/v1.0.0"
+    },
+    "today": {
+      "name": "Today",
+      "source": "Vaultite/plugins/today",
+      "tag": "today/v1.0.0"
+    }
+  }
+}

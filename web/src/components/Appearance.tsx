@@ -1,0 +1,395 @@
+import { useRef, useState, type ReactNode } from "react"
+import { refuse } from "@/core/animation"
+import { Check, FolderOpen, Minus, Palette, Plus, Type } from "lucide-react"
+import { canTranslucent, getTranslucency, onlyMode, previewLook, SNIPPETS_FOLDER, THEMES_FOLDER, useVaultAppearance } from "@/core/appearance"
+import { openFile } from "@/core/files"
+import { openDetail } from "@/core/nav"
+import { opensChoices, setOpens } from "@/core/launcher"
+import { getPrefs, setPrefs, usePrefs, type Animation, type Density, type FileBarFade, type Theme } from "@/core/prefs"
+import { ANIMATIONS, BAR_FADES, barFadeOf, coreChoice, DENSITIES, THEMES } from "@/core/choices"
+import { SCHEMES } from "@/themes/schemes"
+import { schemeName } from "@/components/SchemeChooser"
+import { stepTextSize, textSizeKinds, textSizeText, useTextSize } from "@/core/textsize"
+import { nextTextSize } from "@/core/textsteps"
+import { INTERFACE_MAX, INTERFACE_MIN, stepInterfaceSize, useInterfaceSize } from "@/core/zoom"
+import { coreSwitch, useSwitches } from "@/core/switches"
+import { SwitchRow } from "@/components/SwitchRow"
+import { cn, isDark } from "@/lib/utils"
+import { useDesktop } from "@/core/platform"
+import { canOpenHere, openOnComputer } from "@/components/FileActions"
+import { post } from "@/core/http"
+import { FontPicker } from "@/components/FontPicker"
+import { FONTS, fontPicker, type FontKey } from "@/components/FontChooser"
+import { Group, OnThisMac, ResetButton, Section, Segmented, SettingRow, SheetHead, Slider } from "@/components/kit"
+import { Switch } from "@/components/Switch"
+import { LayoutPicker } from "@/components/LayoutPicker"
+import { useOverConnect } from "@/core/here"
+import { PictureChoice, SystemPicture, WindowPicture, type Scene } from "@/components/ChoicePictures"
+import { animationPreview, barFadePreview } from "@/components/SettingPictures"
+import { errorText } from "@/core/notify"
+import { available, commandList, useCommandList } from "@/core/commands"
+import { choose } from "@/components/Chooser"
+import { DEFAULT_PULL, PULL_SLOTS, pullActions, pullLabel } from "@/components/PullActions"
+
+
+export function Swatches({ id, mode, className }: { id: string; mode?: "light" | "dark"; className?: string }) {
+  const only = onlyMode(id)
+  const dark = only ? only === "dark" : mode ? mode === "dark" : isDark()
+  return (
+    <div data-scheme={id === "default" ? undefined : id} aria-hidden
+      className={cn("scheme-preview flex h-10 items-center gap-1.5 overflow-hidden rounded-[7px] border-[0.5px] border-border bg-background px-2 text-foreground", dark && "dark", className)}>
+      <span className="shrink-0 text-[14px] leading-none font-semibold">Aa</span>
+      <span className="flex min-w-0 flex-1 justify-end-safe gap-[3px] overflow-hidden">
+        {["primary", "red", "yellow", "green", "blue"].map((c) => <span key={c} className="size-2 shrink-0 rounded-full" style={{ background: `var(--${c})` }} />)}
+      </span>
+    </div>
+  )
+}
+
+function Tile({ id, name, tip, on, onClick }: { id: string; name: string; tip?: string; on: boolean; onClick: () => void }) {
+  return (
+    <button type="button" role="radio" aria-checked={on} aria-label={name} onClick={onClick} data-tip={tip}
+      className={cn("flex min-w-0 cursor-pointer flex-col rounded-[10px] p-1 text-left ring-2 transition-shadow", on ? "ring-primary" : "ring-transparent hover:ring-border")}>
+      <Swatches id={id} />
+      <span className="flex h-6 items-center gap-1 px-0.5 text-[13px] font-medium">
+        <span className="truncate">{name}</span>{on && <Check className="size-3.5 shrink-0 text-primary" strokeWidth={2.5} />}
+      </span>
+    </button>
+  )
+}
+
+const modeTip = (only?: string) => only ? `${only === "dark" ? "Dark" : "Light"} only` : undefined
+
+function SchemeGrid() {
+  const { scheme } = usePrefs()
+  const { themes } = useVaultAppearance()
+  const pick = (id: string) => setPrefs({ scheme: id })
+  return (
+    <div className="@container">
+      <div role="radiogroup" aria-label="Colour scheme" className="grid grid-cols-2 gap-1.5 @xs:grid-cols-3 @md:grid-cols-4 @2xl:grid-cols-5">
+        {SCHEMES.map((s) => <Tile key={s.id} id={s.id} name={s.name} tip={modeTip(s.only) ?? s.note} on={scheme === s.id} onClick={() => pick(s.id)} />)}
+        {themes.map((t) => {
+          const id = `theme:${t.name}`
+          return t.problem
+            ? (
+              <div key={t.name} data-tip={t.problem} className="flex min-w-0 flex-col p-1">
+                <div className="flex h-10 items-center rounded-[7px] border-[0.5px] border-dashed border-border px-2 text-[12px] text-muted-foreground">Can't read it</div>
+                <span className="flex h-6 items-center truncate px-0.5 text-[13px] font-medium text-muted-foreground">{t.name}</span>
+              </div>
+            )
+            : <Tile key={t.name} id={id} name={t.name} on={scheme === id} onClick={() => pick(id)}
+                tip={[t.author && `By ${t.author}`, modeTip(t.modes.length === 1 ? t.modes[0] : undefined), "a theme from your vault"].filter(Boolean).join(" · ")} />
+        })}
+      </div>
+      {canOpenHere() && <FolderButton folder={THEMES_FOLDER} label="Open themes folder" className="mt-2 -ml-2 h-7 text-[13px]" />}
+    </div>
+  )
+}
+
+function SchemeStrip() {
+  const { scheme } = usePrefs()
+  const { themes } = useVaultAppearance()
+  const options = [
+    ...SCHEMES.map((s) => ({ value: s.id, label: s.name, tip: modeTip(s.only) ?? s.note })),
+    ...themes.filter((t) => !t.problem).map((t) => ({ value: `theme:${t.name}`, label: t.name, tip: [t.author && `By ${t.author}`, "a theme from your vault"].filter(Boolean).join(" · ") })),
+  ].map((o) => ({ ...o, picture: <WindowPicture scene="note" scheme={o.value} /> }))
+  return <PictureChoice<string> scroll label="Colour scheme" value={scheme} onChange={(id) => setPrefs({ scheme: id })} options={options} />
+}
+
+export function SchemeGallery() {
+  return (
+    <>
+      <SheetHead icon={Palette} tint="var(--primary)" kicker="Appearance" title="Colour schemes" />
+      <SchemeGrid />
+    </>
+  )
+}
+
+function FolderButton({ folder, label, className }: { folder: string; label: string; className?: string }) {
+  return (
+    <button type="button" onClick={() => openOnComputer(folder)} className={cn("mt-3 flex h-8 cursor-pointer items-center gap-1.5 rounded-[7px] px-2 text-[14px] text-primary hover:bg-foreground/[0.05]", className)}>
+      <FolderOpen className="size-4" strokeWidth={2} />{label}
+    </button>
+  )
+}
+
+
+function WithReset({ on, onReset, label, children }: { on: boolean; onReset: () => void; label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-full min-w-0 items-center gap-1 sm:w-auto sm:shrink-0">
+      <div className="shrink-0 max-sm:order-last"><ResetButton on={on} onClick={onReset} label={label} /></div>
+      {children}
+    </div>
+  )
+}
+
+function FontRow({ k }: { k: FontKey }) {
+  const raw = usePrefs()[k]
+  const value = typeof raw === "string" ? raw.trim() : ""
+  const f = FONTS[k]
+  return (
+    <SettingRow stack label={f.label} sub={f.sub}>
+      <WithReset on={!!value} onReset={() => setPrefs({ [k]: "" })} label={`Reset ${f.label.toLowerCase()}`}>
+        <FontPicker {...fontPicker(k, value)} className="min-w-0 flex-1 sm:w-[220px] sm:flex-none" />
+      </WithReset>
+    </SettingRow>
+  )
+}
+
+function Fonts() {
+  const prefs = usePrefs()
+  const names = [...new Set(Object.keys(FONTS).filter((k): k is FontKey => Object.hasOwn(FONTS, k)).map((k) => (typeof prefs[k] === "string" ? prefs[k].trim() : "")).filter(Boolean))]
+  return (
+    <SettingRow label="Fonts" value={<span data-tip={names.join(", ") || undefined} data-tip-trunc>{names.length ? names.join(", ") : "Default"}</span>}
+      onClick={() => openDetail("fonts")} data-fonts-open />
+  )
+}
+
+export function FontsSheet() {
+  return (
+    <>
+      <SheetHead icon={Type} tint="var(--primary)" kicker="Appearance" title="Fonts" sub="Interface, text, code and terminals" />
+      <div className="hairline">
+        <FontRow k="interfaceFont" />
+        <FontRow k="textFont" />
+        <FontRow k="monoFont" />
+      </div>
+    </>
+  )
+}
+
+function SizeRow({ id, name, sub, text, actual, step, canStep, mark }: { id: string; name: string; sub?: string; text: string; actual: boolean
+  step: (step: -1 | 0 | 1) => unknown; canStep: (step: -1 | 1) => boolean; mark: Record<`data-${string}`, string> }) {
+  const btn = "flex size-8 cursor-pointer items-center justify-center rounded-[7px] text-foreground/80 hover:bg-card disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+  return (
+    <SettingRow label={name} sub={sub} data-settings-row={id}>
+      <div className="flex shrink-0 items-center gap-1">
+        <ResetButton on={!actual} onClick={() => step(0)} label={`Reset ${name.toLowerCase()}`} />
+        <div role="group" aria-label={name} className="flex shrink-0 items-center rounded-[9px] bg-muted p-[2px]" {...mark}>
+          <button type="button" className={btn} aria-label={`Decrease ${name.toLowerCase()}`} disabled={!canStep(-1)} onClick={() => step(-1)}>
+            <Minus className="size-3.5" strokeWidth={2.5} />
+          </button>
+          <span className="min-w-14 text-center text-[13px] font-medium tabular-nums">{text}</span>
+          <button type="button" className={btn} aria-label={`Increase ${name.toLowerCase()}`} disabled={!canStep(1)} onClick={() => step(1)}>
+            <Plus className="size-3.5" strokeWidth={2.5} />
+          </button>
+        </div>
+      </div>
+    </SettingRow>
+  )
+}
+
+function TextSizeRow({ kind, label, points, sub }: { kind: string; label: string; points?: number; sub?: string }) {
+  const size = useTextSize(kind)
+  return <SizeRow id={`text-size-${kind}`} name={`${label} text size`} sub={sub} text={textSizeText(kind, size)} actual={size === 100}
+    step={(step) => stepTextSize(kind, step)} canStep={(step) => nextTextSize(size, step, points) !== undefined} mark={{ "data-text-size-row": kind }} />
+}
+
+function InterfaceSizeRow() {
+  const size = useInterfaceSize()
+  if (size === null) return null
+  return <SizeRow id="interface-size" name="Interface size" sub="Every window, on this computer" text={`${Math.round(size * 100)}%`}
+    actual={Math.abs(size - 1) < 0.001} step={(step) => void stepInterfaceSize(step)} canStep={(step) => (step > 0 ? size < INTERFACE_MAX : size > INTERFACE_MIN)} mark={{ "data-interface-size": "" }} />
+}
+
+const themePicture = (t: Theme, scene: Scene = "note") => t === "system" ? <SystemPicture scene={scene} /> : <WindowPicture scene={scene} mode={t} />
+
+export function AppearancePanel() {
+  const prefs = usePrefs()
+  const only = onlyMode(prefs.scheme)
+  const desktop = useDesktop()
+  const over = useOverConnect()
+  const row = (k: string) => <SwitchRow key={k} s={coreSwitch(`setting:${k}`)} />
+  return (
+    <div className="flex flex-col gap-6">
+      <Section title="Layout">
+        {over ? <OnThisMac className="px-1">Layouts are picked on this Mac.</OnThisMac> : <Group><div className="py-3"><LayoutPicker describe="start" /></div></Group>}
+      </Section>
+      <Section title="Colours">
+        <Group>
+          <div className="flex flex-wrap gap-x-10 gap-y-3 py-2">
+            <SettingRow below data-settings-row="theme" className="min-h-0 w-auto py-0" label={<>Theme{only && <span className="ml-2 text-[13px] leading-none text-muted-foreground">{schemeName(prefs.scheme)} is {only} only</span>}</>}>
+              <PictureChoice<Theme> label="Theme" value={prefs.theme} onChange={(theme) => setPrefs({ theme })}
+                options={THEMES.map((t) => ({ ...t, picture: themePicture(t.value) }))} />
+            </SettingRow>
+            <SettingRow below data-settings-row="translucent" className="min-h-0 w-auto py-0" label="Style">
+              <PictureChoice<"solid" | "glass"> label="Style" value={prefs.translucent ? "glass" : "solid"} onChange={(v) => setPrefs({ translucent: v === "glass" })}
+                options={[{ value: "solid", label: "Solid", picture: <WindowPicture scene="note" /> },
+                  { value: "glass", label: "Glass", picture: <WindowPicture scene="note" glass={prefs.translucentPages ? "pages" : "window"} /> }]} />
+            </SettingRow>
+          </div>
+          <Fold open={prefs.translucent}><GlassRows /></Fold>
+          <SettingRow below data-settings-row="scheme" label={
+            <span className="flex items-center justify-between gap-3">Colour scheme
+              <button type="button" onClick={() => openDetail("schemes")} data-schemes-all
+                className="relative -my-1 -mr-1.5 h-7 cursor-pointer rounded-[7px] px-1.5 text-[13px] text-primary hover:bg-foreground/[0.05] max-md:text-[15px] max-md:after:absolute max-md:after:-inset-2">Show all</button>
+            </span>}>
+            <SchemeStrip />
+          </SettingRow>
+        </Group>
+      </Section>
+      <Section title="Window">
+        <Group>
+          <SettingRow below label="Density" data-settings-row="density">
+            <PictureChoice<Density> label="Density" value={prefs.density === "comfortable" ? "comfortable" : "compact"} onChange={(density) => setPrefs({ density })}
+              options={DENSITIES.map((d) => ({ ...d, picture: <WindowPicture scene={d.value} /> }))} />
+          </SettingRow>
+          <InterfaceSizeRow />
+          <SettingRow stack label="Animations" data-settings-row="animation" preview={animationPreview(prefs.animation)}>
+            <Segmented<Animation> label="Animations" value={prefs.animation} onChange={(animation) => setPrefs({ animation })} className="w-full shrink-0 sm:w-[220px]"
+              options={ANIMATIONS} />
+          </SettingRow>
+          <SettingRow label="Sidebars" sub={prefs.rails ? "Hidden, they fold to icon rails" : "Hidden, they slide in from the window's edge"}
+            onClick={() => openDetail("sidebars")} data-settings-row="sidebars" />
+          {row("file-icons")}
+          {desktop && <BarFadeRow />}
+          {["pane-cards", "dim-panes"].map(row)}
+        </Group>
+      </Section>
+      <Section title="Tabs">
+        <Group>
+          <NewTabsRow />
+          {["tab-bar", "pane-tab-bars"].map(row)}
+        </Group>
+      </Section>
+      <Section title="Text">
+        <Group>
+          <Fonts />
+          {textSizeKinds(prefs.disabled).map(([kind, k]) => (
+            <TextSizeRow key={kind} kind={kind} label={k.label} points={k.points} sub="This device only" />
+          ))}
+          {["quick-text-size", "line-numbers"].map(row)}
+        </Group>
+      </Section>
+      <PullRows />
+      <Snippets />
+    </div>
+  )
+}
+
+function Fold({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div inert={!open} className={cn("grid transition-[grid-template-rows,opacity] duration-[var(--motion)] ease-[var(--ease-out)]", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
+      <div className="hairline min-h-0 overflow-hidden">{children}</div>
+    </div>
+  )
+}
+
+function BarFadeRow() {
+  const value = barFadeOf(usePrefs().fileBarFade), c = coreChoice("setting:file-bar-fade")
+  return (
+    <SettingRow stack label={c.name} sub={c.sub?.() || undefined} data-settings-row="file-bar-fade" preview={barFadePreview(value, BAR_FADES)}>
+      <Segmented<FileBarFade> label={c.name} value={value} onChange={(fileBarFade) => setPrefs({ fileBarFade })} className="w-full shrink-0 sm:w-[260px]"
+        options={BAR_FADES} />
+    </SettingRow>
+  )
+}
+
+function GlassRows() {
+  useSwitches()
+  const prefs = usePrefs()
+  const { why } = getTranslucency()
+  return (
+    <>
+      {(!canTranslucent || why) && <p className="py-2.5 text-[13px] leading-[18px] text-muted-foreground" data-glass-why>{coreSwitch("setting:translucent").sub?.()}</p>}
+      <GlassSlider k="translucency" label="Window transparency" sub="The sidebars and bars" />
+      <SwitchRow s={coreSwitch("setting:translucent-pages")} />
+      <Fold open={prefs.translucentPages}><GlassSlider k="pageTranslucency" label="Page transparency" sub="Notes, terminals and the app's pages" /></Fold>
+    </>
+  )
+}
+
+function GlassSlider({ k, label, sub }: { k: "translucency" | "pageTranslucency"; label: string; sub: string }) {
+  const raw = usePrefs()[k], value = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 50
+  return (
+    <SettingRow stack label={label} sub={sub} data-settings-row={k === "translucency" ? "translucency" : "page-translucency"}>
+      <WithReset on={value !== 50} onReset={() => setPrefs({ [k]: 50 })} label={`Reset ${label.toLowerCase()}`}>
+        <Slider label={label} value={value} onInput={(v) => previewLook({ [k]: v })}
+          onChange={(v) => { void setPrefs({ [k]: v }); previewLook(null) }} className="min-w-0 flex-1 sm:w-[200px] sm:flex-none" />
+      </WithReset>
+    </SettingRow>
+  )
+}
+
+function NewTabsRow() {
+  const { newTab } = usePrefs()
+  const choices = opensChoices()
+  const value = choices.some((c) => c.value === newTab.opens) ? newTab.opens ?? "" : ""
+  return (
+    <SettingRow below label="New tabs open" data-settings-row="new-tabs">
+      <PictureChoice<string> label="New tabs open" value={value} onChange={(v) => void setOpens(v || null)}
+        options={choices.map((c) => ({ value: c.value ?? "", label: c.label, picture: <WindowPicture scene={!c.value ? "page" : c.value === "switcher" ? "switcher" : "view"} /> }))} />
+    </SettingRow>
+  )
+}
+
+function PullRows() {
+  const prefs = usePrefs()
+  const desktop = useDesktop()
+  const byId = new Map(useCommandList().map((c) => [c.id, c]))
+  const ids = pullActions(prefs)
+  const pick = (i: number) => choose({
+    title: PULL_SLOTS[i], placeholder: "A command to run…", current: ids[i],
+    items: available(commandList()).sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ id: c.id, label: c.name })),
+    onPick: (it) => {
+      const next = pullActions(getPrefs())
+      next[i] = it.id
+      void setPrefs({ pullActions: next.join() === DEFAULT_PULL.join() ? null : next })
+    },
+  })
+  if (desktop) return null
+  return (
+    <Section title="Pull-down actions">
+      <Group>
+        {PULL_SLOTS.map((label, i) => {
+          const c = byId.get(ids[i])
+          return <SettingRow key={label} label={label} value={c ? pullLabel(c) : ids[i]}
+            onClick={() => pick(i)} data-settings-row={`pull-${i}`} />
+        })}
+      </Group>
+    </Section>
+  )
+}
+
+function Snippets() {
+  const { snippets: on } = usePrefs()
+  const { snippets } = useVaultAppearance()
+  const [name, setName] = useState("")
+  const [error, setError] = useState("")
+  const nameField = useRef<HTMLInputElement>(null)
+  const enabled = Array.isArray(on) ? on : []
+  const toggle = (n: string, v: boolean) => setPrefs({ snippets: v ? [...enabled.filter((x) => x !== n), n] : enabled.filter((x) => x !== n) })
+  const create = async () => {
+    const n = name.trim()
+    if (!n) return
+    let out: { name: string; path: string }
+    try { out = await post("snippets", { name: n }) } catch (e) { refuse(nameField.current); return setError(errorText(e)) }
+    setName(""); setError("")
+    await setPrefs({ snippets: [...getPrefs().snippets.filter((x) => x !== out.name), out.name] })
+    openFile(out.path)
+  }
+  return (
+    <section aria-label="CSS snippets">
+      <Section title="CSS snippets">
+        <Group>
+          {snippets.map((s) => (
+            <SettingRow key={s.name} label={s.path.startsWith(`${SNIPPETS_FOLDER}/`)
+              ? <button type="button" onClick={() => openFile(s.path)} data-tip="Edit" className="max-w-full cursor-pointer truncate text-left hover:text-primary">{s.name}</button>
+              : <span className="truncate">{s.name} <span className="text-muted-foreground">· Obsidian</span></span>}>
+              <Switch on={enabled.includes(s.name)} onChange={(v) => toggle(s.name, v)} label={`${s.name} snippet`} />
+            </SettingRow>
+          ))}
+          <form className="flex min-h-10 items-center gap-2 py-1.5" onSubmit={(e) => { e.preventDefault(); create() }}>
+            <input ref={nameField} value={name} onChange={(e) => { setName(e.target.value); setError("") }} placeholder={snippets.length ? "New snippet name" : "No snippets yet: name a new one"} aria-label="New snippet name" spellCheck={false}
+              className="h-8 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground md:text-[13px]" />
+            <button type="submit" disabled={!name.trim()} className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-[7px] px-2 text-[13px] text-primary hover:bg-foreground/[0.05] disabled:cursor-default disabled:opacity-40">
+              <Plus className="size-4" strokeWidth={2} />New snippet
+            </button>
+          </form>
+        </Group>
+      </Section>
+      {error && <p className="mt-1 px-1 text-[13px] text-ink-(--red)">{error}</p>}
+      {canOpenHere() && <FolderButton folder={SNIPPETS_FOLDER} label="Open snippets folder" className="mt-1 h-7 text-[13px]" />}
+    </section>
+  )
+}

@@ -1,0 +1,459 @@
+import { createContext, useContext, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react"
+import { editCount, edited, onKeptChange, onVaultChange, settled, startLive, type Paths } from "@/core/live"
+import { get, send } from "@/core/http"
+import { hydratePrefs } from "@/core/prefs"
+import { notifyError } from "@/core/notify"
+import { span } from "@/core/spans"
+import { pluginsStarting } from "@/core/firstscreen"
+import { trackSoon } from "@/core/unsaved"
+import { askAgain, failedOf, liveShown, mockedLive, useAskAgain, type Failed, type Live } from "@/core/liveread"
+import { setHere } from "@/core/here"
+import { usePane } from "@/core/pane"
+import { setVaultAppearance, type VaultAppearance } from "@/core/appearance"
+import { hydrateHotkeys } from "@/core/commands"
+import { hydratePalette, type PaletteFile } from "@/core/palettepins"
+import type { FileTree } from "@/core/files"
+import type { Grant } from "@/core/grants"
+import { applyPatch, type Patch } from "../../../core/statepatch.ts"
+import { assemble, chunksOf, type Manifest } from "../../../core/statechunks.ts"
+import type { BlockDecls, SettingDecls } from "../../../core/blocks.ts"
+import type { PropTypes } from "../../../core/proptypes.ts"
+import type { Disclosures } from "../../../core/pluginmeta.ts"
+import type { Home } from "../../../core/fileprops.ts"
+import type { LinkStyle } from "../../../core/linkformat.ts"
+import type { PluginState } from "@/api"
+import { isObj, isText } from "../../../core/values.ts"
+import { keptEntries } from "@/core/keptEntries"
+
+/** GET /api/state: what each plugin's plugin.ts puts in it (`PluginState`, which plugins extend: see api.ts), plus the
+ *  core's own keys. */
+export type State = PluginState & {
+  vault: { path: string; problems: { file: string; problem: string }[]
+    name?: string
+    nickname?: string
+    /** Files the server is still reading (iCloud downloading them): not in the store until they arrive. */
+    downloading?: string[]
+    /** A sandbox (core/sandbox.ts): made up, made afresh each time it opens. */
+    sandbox?: boolean }
+  files: FileTree
+  config: { appearance: Record<string, unknown>; plugins: Record<string, unknown>; hotkeys?: Record<string, unknown>; palette?: PaletteFile }
+  /** The vault's own plugins (.vaultite/plugins/<id>/), on or off: core/vaultPlugins.ts loads them. */
+  vaultPlugins: VaultPluginInfo[]
+  /** Obsidian themes and CSS snippets in the vault's .vaultite/ (core/appearance.ts). */
+  appearance?: VaultAppearance
+  /** The plugins (ids) with a settings file, .vaultite/plugins/<id>/data.json: Settings lists them. */
+  pluginSettings?: string[]
+  /** Where plugins write outside .vaultite/ on their own, and the user's answers (core/grants.ts). */
+  writeGrants?: Grant[]
+  /** Bundles (core/bundles.ts): the setup the last one applied replaced (to restore), the one being tried, the one applied
+   *  last (without what), and whether a new vault is still being offered them. */
+  bundles?: { previous: { bundle: string; name: string; at: string } | null; onboarding: boolean
+    trial: { id: string; name: string; at: string } | null; applied: { id: string; name: string; at: string; skip: string[] } | null }
+  /** Defaults another app's settings give the vault's settings files ("files", "plugins/<id>/data"): what applies while
+   *  a key is unset there, never written (core/plugins.ts settingDefaults). */
+  settingDefaults?: Record<string, Record<string, unknown>>
+  /** Where things go (core/filing.ts): the attachment folder, the excluded files, each kind's folder. */
+  filing?: { attachments: string; excluded: string[]; samples?: string[]; homes: Home[]; links?: LinkStyle }
+  /** Property types (core/proptypes.ts): every declared one (Obsidian's too), and the keys .vaultite/types.json has. */
+  propertyTypes?: { types: PropTypes; own: string[] }
+  /** What the app draws or keeps itself in a kind's files, by collection: `## ` sections its view draws (a person's
+   *  Timeline) and the times it keeps (a note's created). */
+  kinds?: Record<string, KindInfo>
+  /** The times the app keeps in plain notes, no kind's (a plugin's plugin.state: Note dates' created, updated). */
+  noteStamps?: string[]
+}
+type KindInfo = { sections: string[]; stamps: string[] }
+/** A vault plugin as the server lists it (core/vaultplugins.ts on the server). */
+export type VaultPluginInfo = {
+  id: string; name: string; description: string; requires: string[]; enhances: string[]; runsOnServer: boolean; desktopApp?: boolean; ai?: boolean; tint?: string; category?: string
+  /** Its Plugins page row's group ("coding-agents": core/categories.ts GROUPS). */
+  group?: string
+  /** Its manifest's icon: a name, or its SVG file as a data address (core/pluginmeta.ts iconOf). */
+  icon?: string
+  /** Other apps' plugins it stands in for (its manifest's `replaces`). */
+  replaces?: Record<string, string[]>
+  /** Frontmatter keys that type a file without `type:` (its manifest's `marks`). */
+  marks?: Record<string, string>
+  folder: string; on: boolean; loaded: boolean; problems: string[]
+  /** What it should fix but runs anyway (a block without its declaration or its text side). */
+  warnings: string[]
+  blocks: BlockDecls
+  /** Blocks other plugins declare that it draws (its manifest's `draws`). */
+  draws?: string[]
+  /** Its settings as its manifest declares them (core/blocks.ts SettingDecl). */
+  settings?: SettingDecls
+  /** Its bundle's version, when it's on and built (else null). */
+  bundle: string | null
+  /** The plugin API it was written for (its manifest's), checked against this window's own. */
+  apiVersion?: number | null
+  pages: { name: string; text: string }[]
+} & VaultMeta
+import type { Update } from "../../../core/updates.ts"
+/** What a vault plugin says about itself and where it came from, and whether this machine lets it run (core/trust.ts). */
+export type VaultMeta = {
+  version: string | null; author: string | null; repo: string | null; fundingUrl: string | null; disclosures: Disclosures
+  /** Where it was installed from (.vaultite/plugins-lock.json), null for one made here. */
+  source: { source: string; repo: string | null; tag: string | null; commit: string | null; version: string; installed: string
+    /** Its updates, oldest first (core/installs.ts Update); a version rolled back from; whether it's Vaultite's own. */
+    history?: Update[]; skip?: string; official: boolean } | null
+  /** On, waiting for this machine's yes: new here, changed since (`changed`: its files that did), moved out of the app
+   *  to Vaultite's plugins, or `updating` (updated elsewhere, being checked against its source). */
+  approval: { state: "new" | "changed" | "moved" | "updating"; since: string | null; changed: string[] } | null
+  changedOff?: { since: string | null; changed: string[] } | null
+  /** Why the plugin directory blocks this version, or null. */
+  blocked: string | null
+  /** Its files' hash: allowing it is refused if they changed since it was shown. */
+  hash: string
+  /** Its later edits run without asking on this machine (a plugin its owner is writing here). */
+  edits: boolean
+}
+/** The store every block, detail and panel gets: the state without the settings, which the app applies itself. */
+export type Store = Omit<State, "config" | "vaultPlugins" | "appearance">
+
+/** A number that goes up every `ms` while the page is shown (and `on`): redraws relative times, or asks again. */
+export function useTick(ms = 30_000, on = true) {
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    if (!on) return
+    const id = setInterval(() => { if (!document.hidden) setN((x) => x + 1) }, ms)
+    return () => clearInterval(id)
+  }, [ms, on])
+  return n
+}
+
+export const PreviewLive = createContext<Record<string, unknown> | null>(null)
+/** Drawn in a plugin's preview (made-up data, nothing fetched or written). */
+export const usePreview = () => useContext(PreviewLive) !== null
+
+const inflight = new Map<string, { at: number; n: number; p: Promise<unknown> }>()
+let changes = 0
+function fetchLive<T>(path: string, key = path, fresh = 10_000, since = 0): Promise<T> {
+  const hit = inflight.get(key)
+  if (hit && hit.n >= since && Date.now() - hit.at < fresh) return hit.p as Promise<T>
+  const p = send<T>("GET", path, undefined, "no-cache")
+  inflight.set(key, { at: Date.now(), n: changes, p })
+  p.catch(() => inflight.delete(key))
+  return p
+}
+
+function liveData(paths: Paths, route: string) {
+  if (paths === null) return true
+  const id = route.split(/[/?]/)[0]
+  return paths.some((p) => p === ".vaultite" || p === ".vaultite/plugins" || p === `.vaultite/plugins/${id}` || p.startsWith(`.vaultite/plugins/${id}/`))
+}
+const keptData = (names: string[] | null, route: string) => names === null || names.some((n) => n.slice(0, n.indexOf("/")) === route.split(/[/?]/)[0])
+onVaultChange((paths) => { changes++; for (const k of [...inflight.keys()]) if (liveData(paths, k)) inflight.delete(k) })
+onKeptChange((names) => { changes++; for (const k of [...inflight.keys()]) if (keptData(names, k)) inflight.delete(k) })
+
+const answers = new Map<string, { data: unknown; json: string }>()
+const KEPT = "vaultite.live"
+let answersVault: string | null = null
+function recall(path: string) {
+  const vault = loaded.store?.vault.path ?? ""
+  if (answersVault !== vault) {
+    answersVault = vault
+    answers.clear()
+    try {
+      const kept = JSON.parse(localStorage.getItem(KEPT) ?? "null")
+      if (isObj(kept) && kept.vault === vault) for (const [k, json] of keptEntries(kept.answers, isText)) answers.set(k, { data: JSON.parse(json), json })
+    } catch { /* private mode, or not JSON */ }
+  }
+  return answers.get(path)
+}
+let keeping: ReturnType<typeof setTimeout> | null = null
+function remember(path: string, data: unknown, json: string) {
+  const same = answers.get(path)?.json === json
+  answers.delete(path)
+  answers.set(path, { data, json })
+  if (answers.size > 200) answers.delete(answers.keys().next().value!)
+  if (same) return
+  keeping ??= setTimeout(() => {
+    keeping = null
+    const recent = [...answers].filter(([, a]) => a.json.length <= 16_384).slice(-20).map(([k, a]) => [k, a.json])
+    try { localStorage.setItem(KEPT, JSON.stringify({ vault: answersVault, answers: recent })) } catch { /* private mode, full */ }
+  }, 1000)
+}
+
+const pollers = new Map<string, { every: number; subs: Set<() => void>; id: ReturnType<typeof setInterval> | null }>()
+const tick = (p: { subs: Set<() => void> }) => { for (const fn of [...p.subs]) fn() }
+const startPoller = (p: { every: number; subs: Set<() => void>; id: ReturnType<typeof setInterval> | null }) => { p.id ??= setInterval(() => tick(p), p.every) }
+if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
+  for (const p of pollers.values()) {
+    if (document.hidden) { if (p.id !== null) { clearInterval(p.id); p.id = null } }
+    else { tick(p); startPoller(p) }
+  }
+})
+function pollEvery(path: string, every: number, fn: () => void) {
+  const key = `${every}\0${path}`
+  let p = pollers.get(key)
+  if (!p) pollers.set(key, p = { every, subs: new Set(), id: null })
+  p.subs.add(fn)
+  if (!document.hidden) startPoller(p)
+  return () => {
+    p.subs.delete(fn)
+    if (p.subs.size) return
+    if (p.id !== null) clearInterval(p.id)
+    pollers.delete(key)
+  }
+}
+
+/** Live data from a plugin's route per mount (the last answer meanwhile), again when its cache or settings change, on a
+ *  reconnect, `version`, vault files (`files`: any, or by path) and every `every` ms while shown. */
+export function useLive<T>(path: string | null, version?: string | number, files?: boolean | ((path: string) => boolean), every?: number): Live<T> {
+  const follow = useRef(files)
+  follow.current = files
+  const mock = useContext(PreviewLive)
+  const [got, setGot] = useState<{ path: string | null; data: T | null }>(() => ({ path, data: path ? (recall(path)?.data as T | undefined) ?? null : null }))
+  const [error, setError] = useState<Failed | null>(null)
+  const [tries, retry] = useReducer((n: number) => n + 1, 0)
+  const shownJson = useRef<string | null>(null)
+  shownJson.current ??= path ? recall(path)?.json ?? "" : ""
+  const ask = path && version !== undefined ? `${path}\0${version}` : path
+  const hidden = !!usePane().hidden, behind = useRef(hidden)
+  behind.current = hidden
+  const again = useRef<((fresh: number) => void) | null>(null)
+  useEffect(() => {
+    if (!path || !ask || mock) return
+    let on = true
+    const load = (fresh?: number, since?: number) => fetchLive<T>(path, ask, fresh, since).then((d) => {
+      if (!on) return
+      const json = JSON.stringify(d)
+      remember(path, d, json)
+      if (json !== shownJson.current) { shownJson.current = json; setGot({ path, data: d }) } else setGot((g) => (g.path === path ? g : { path, data: d }))
+      setError(null)
+    }).catch((e) => on && setError(failedOf(e)))
+    load()
+    const offFiles = onVaultChange((paths) => {
+      const f = follow.current
+      if (liveData(paths, path)) return load()
+      if (f && (paths === null || paths.some((p) => !p.split("/").some((s) => s.startsWith(".")) && (f === true || f(p))))) load(undefined, changes)
+    })
+    const offKept = onKeptChange((names) => { if (keptData(names, path)) load() })
+    const off = () => { offFiles(); offKept() }
+    if (!every) return () => { on = false; off() }
+    const poll = () => { if (!behind.current) void load(every / 2) }
+    again.current = (fresh) => void load(fresh)
+    const stop = pollEvery(path, every, poll)
+    return () => { on = false; again.current = null; off(); stop() }
+  }, [path, ask, mock, every, tries])
+  const shown = !hidden
+  useEffect(() => { if (shown && every) again.current?.(every / 2) }, [shown, every])
+  useAskAgain(error !== null, retry, hidden)
+  if (mock) return mockedLive<T>(mock, path)
+  return liveShown(path, got, error, retry)
+}
+
+/** useLive for an answer the server keeps frozen (the graph), asked again on `version` and its plugin's changes as a
+ *  patch of the one it has (?patch=<v>, core/app.ts patched): only what changed comes, the rest keeps its objects. */
+export function usePatched<T>(path: string | null, version?: string | number): Live<T> {
+  const mock = useContext(PreviewLive)
+  const [got, setGot] = useState<{ path: string; v: string; data: T } | null>(null)
+  const [error, setError] = useState<Failed | null>(null)
+  const had = useRef(got)
+  const [again, retry] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    if (!path) return
+    const offFiles = onVaultChange((paths) => { if (liveData(paths, path)) retry() })
+    const offKept = onKeptChange((names) => { if (keptData(names, path)) retry() })
+    return () => { offFiles(); offKept() }
+  }, [path])
+  useEffect(() => {
+    if (!path || mock) return
+    let on = true
+    type Answer = { v: string; whole: T } | { v: string; since: string; patch: Patch | null }
+    const ask = (was: typeof got): Promise<void> => send<Answer>("GET", `${path}${path.includes("?") ? "&" : "?"}patch=${encodeURIComponent(was?.v || "0")}`, undefined, "no-cache").then((a): Promise<void> | void => {
+      if (!on) return
+      if (!("whole" in a) && (!was || a.since !== was.v)) return ask(null)
+      let data: T
+      try { data = "whole" in a ? a.whole : a.patch ? applyPatch(was!.data, a.patch) as T : was!.data } catch { return ask(null) }
+      had.current = { path, v: a.v, data }
+      setGot(had.current)
+      setError(null)
+    }).catch((e) => { if (on) setError(failedOf(e)) })
+    void ask(had.current?.path === path ? had.current : null)
+    return () => { on = false }
+  }, [path, version, again, mock])
+  useAskAgain(error !== null, retry, !!usePane().hidden)
+  if (mock) return mockedLive<T>(mock, path)
+  return liveShown(path, { path, data: got?.path === path ? got.data : null }, error, retry)
+}
+
+type Loaded = { store: Store | null; error: unknown }
+let loaded: Loaded = { store: null, error: undefined }
+const listeners = new Set<() => void>()
+let stopAsking: (() => void) | null = null
+const publish = (next: Partial<Loaded>) => {
+  loaded = { ...loaded, ...next }
+  if (loaded.error === undefined) { stopAsking?.(); stopAsking = null }
+  else stopAsking ??= askAgain(() => void load())
+  listeners.forEach((f) => f())
+}
+/** The store as it is now (for code outside React). */
+export const getStore = () => loaded.store
+export const vaultFolder = (s: Store) => s.vault.path.split(/[\\/]/).filter(Boolean).pop() ?? "Vault"
+export const vaultName = (s: Store | null | undefined) => (s ? (s.vault.sandbox ? "Playground" : s.vault.name || vaultFolder(s)) : "Vault")
+export const onStore = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } }
+/** Change the store optimistically, after a write: f returns a new store, with new objects where it changed (never
+ *  one changed in place: the store's objects are also the server's last state, which the next refresh patches). */
+export const mutate = (f: (s: Store) => Store) => { edited(); if (loaded.store) publish({ store: f(loaded.store) }) }
+/** A tap answered at once: change the store now, then write; a failed write brings the server's back and says so. The
+ *  write's promise (handled: callers may ignore it). */
+export function optimistic<T>(change: (s: Store) => Store, write: () => Promise<T>, failed: string): Promise<T> {
+  mutate(change)
+  const p = write()
+  p.catch((e) => { if (server) publish({ store: server.store }); void reload(); notifyError(e, failed) })
+  return p
+}
+let beforeState: ((s: State) => Promise<void>) | null = null
+export const onState = (fn: (s: State) => Promise<void>) => { beforeState = fn }
+
+let server: { v: string; state: State; store: Store } | null = null
+type Answer = ({ v: string; state: State } | { v: string; since: string; patch: Patch | null }) & { live?: unknown; here?: string }
+
+function stateOf(a: Answer): State | null {
+  if ("state" in a) return a.state
+  if (!server || a.since !== server.v) return null
+  try { return a.patch ? applyPatch(server.state, a.patch) as State : server.state } catch (e) { console.error(e); return null }
+}
+
+async function assembled(m: Manifest | Answer): Promise<Answer> {
+  if (!("tree" in m)) return m
+  const names = [...new Set(chunksOf(m.tree))]
+  const values = new Map(await Promise.all(names.map(async (c) => [c, await get<unknown>(`state/chunk/${c}`)] as const)))
+  return { v: m.v, state: assemble(m.tree, (c) => values.get(c)) as State, live: m.live, here: m.here }
+}
+
+async function fromChunks(): Promise<Answer | null> {
+  try {
+    const m = await get<Manifest | Answer>("state/manifest")
+    await window.__vauEarlyChunks
+    return await assembled(m)
+  } catch (e) {
+    console.warn("the state's chunks", e)
+    return null
+  }
+}
+
+let busy: Promise<void> | null = null
+let again = false
+let loading: ReturnType<typeof span> | null = span("app.load", {}, 0)
+function load(): Promise<void> {
+  if (busy) { again = true; return busy }
+  const run = async () => {
+    do {
+      again = false
+      await settled()
+      const gen = editCount()
+      try {
+        const answer = (server ? null : await fromChunks()) ?? await assembled(await get<Manifest | Answer>(`state?since=${encodeURIComponent(server?.v ?? "0")}`))
+        loading?.mark("state")
+        pluginsStarting()
+        startLive(isObj(answer.live) ? answer.live : undefined)
+        setHere(answer.here === "connect" ? "connect" : "mac")
+        if (editCount() !== gen) { again = true; continue }
+        const all = stateOf(answer)
+        if (!all) { server = null; again = true; continue }
+        if (all === server?.state) {
+          if (loaded.store !== server.store || loaded.error !== undefined) publish({ store: server.store, error: undefined })
+          continue
+        }
+        hydratePrefs(all.config, all.settingDefaults)
+        setVaultAppearance(all.appearance)
+        hydrateHotkeys(all.config.hotkeys, all.settingDefaults?.hotkeys)
+        hydratePalette(all.config.palette, all.settingDefaults)
+        await beforeState?.(all)
+        loading?.mark("vault plugins")
+        const { config: _config, vaultPlugins: _plugins, appearance: _appearance, ...store } = all
+        server = { v: answer.v, state: all, store }
+        publish({ store, error: undefined })
+        if (loading) { const l = loading; loading = null; requestAnimationFrame(() => { l.mark("draw"); l.end() }) }
+      } catch (e) {
+        publish({ error: e })
+        startLive()
+      }
+    } while (again)
+  }
+  busy = run().finally(() => { busy = null })
+  return busy
+}
+export const reload = () => load()
+
+const MIN_RELOAD_GAP = 1000
+let lastLoad = 0
+let soon: ReturnType<typeof setTimeout> | null = null
+trackSoon("store reload", () => soon !== null)
+function loadSoon() {
+  if (soon) return
+  const wait = lastLoad + MIN_RELOAD_GAP - Date.now()
+  const go = () => { soon = null; lastLoad = Date.now(); load() }
+  if (wait <= 0) go()
+  else soon = setTimeout(go, wait)
+}
+
+let started = false
+export function startStore() {
+  if (started) return
+  started = true
+  loading?.mark("scripts")
+  load()
+  onVaultChange(() => loadSoon())
+  onKeptChange((_names, state) => { if (state) loadSoon() })
+}
+
+/** The store and the last error loading it, redrawn when either changes. */
+export function useStore() {
+  return useSyncExternalStore(onStore, () => loaded)
+}
+/** What `pick` reads of the store (null till it loads), redrawn only when that changes: a slice the store didn't
+ *  change keeps its object, so pick one (or a value), never a new array or object made per call. */
+export function useStoreWith<T>(pick: (s: Store | null) => T): T {
+  return useSyncExternalStore(onStore, () => pick(loaded.store))
+}
+
+export const pad = (n: number) => String(n).padStart(2, "0")
+export const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+export const parse = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d) }
+export const today = () => iso(new Date())
+export const addDays = (s: string, n: number) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d) }
+export const dow = (s: string) => (parse(s).getDay() + 6) % 7
+export const weekStart = (s: string) => addDays(s, -dow(s))
+export const range = (from: string, n: number) => Array.from({ length: n }, (_, i) => addDays(from, i))
+
+// toLocaleDateString(undefined, options) makes a new formatter per call (about 0.1 ms): keep one per set of options.
+const dateFormats = new Map<string, Intl.DateTimeFormat>()
+const byOptions = new WeakMap<Intl.DateTimeFormatOptions, Intl.DateTimeFormat>()
+/** A date (or a time in ms) as text: `dateText(d, { day: "numeric", month: "short" })` is d.toLocaleString(undefined,
+ *  { day: "numeric", month: "short" }), with the formatter kept. */
+export function dateText(d: Date | number, options: Intl.DateTimeFormatOptions) {
+  let f = byOptions.get(options)
+  if (!f) {
+    const key = JSON.stringify(options)
+    f = dateFormats.get(key)
+    if (!f) dateFormats.set(key, (f = new Intl.DateTimeFormat(undefined, options)))
+    byOptions.set(options, f)
+  }
+  return f.format(d)
+}
+const WEEKDAY = { weekday: "long" } as const, DAY = { day: "numeric", month: "short" } as const
+const DAY_YEAR = { ...DAY, year: "numeric" } as const, TIME = { hour: "numeric", minute: "2-digit" } as const
+const numbers = new Intl.NumberFormat()
+/** A number as text (1,234.5): n.toLocaleString(), with the formatter kept. */
+export const numberText = (n: number) => numbers.format(n)
+
+export function fmtDay(s: string) {
+  const diff = Math.round((parse(today()).getTime() - parse(s).getTime()) / 864e5)
+  if (diff === 0) return "Today"
+  if (diff === 1) return "Yesterday"
+  if (diff > 0 && diff < 7) return dateText(parse(s), WEEKDAY)
+  return dateText(parse(s), diff > 300 ? DAY_YEAR : DAY)
+}
+export const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}` : `${Math.round(m || 0)}m`)
+export { fmtAgo, stampMs } from "../../../core/dates.ts"
+export const fmtTime = (isoStr: string) => dateText(new Date(isoStr), TIME)
+const STAMP = { weekday: "short", month: "short", day: "numeric", ...TIME } as const
+/** A moment in full, for a tooltip: "Sat, Oct 10, 4:05 PM" (`seconds`: 4:05:09 PM). */
+export const fmtStamp = (t: number, seconds = false) => dateText(new Date(t), seconds ? { ...STAMP, second: "2-digit" } : STAMP)
+export const fmtLongDay = (d: string) => dateText(parse(d), { weekday: "long", day: "numeric", month: "long" })
+
+/** Imported titles (Hevy etc.) carry emojis; the app shows plain text. */
+export const plain = (s: string) => s.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "").replace(/\s+/g, " ").trim()

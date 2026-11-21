@@ -1,0 +1,434 @@
+import { distance } from "./spelling.ts"
+import { actionProblems } from "./actions.ts"
+import type { OpAction, OpEntry, OpKind, Schema } from "./contracts/ops.ts"
+import type { Readable } from "node:stream"
+import { KNOWN_AGENTS } from "./terminalids.ts"
+import { isHiddenPath, isOutside } from "./fileprops.ts"
+import type { Item, Vault } from "./vault.ts"
+import { logger } from "./log.ts"
+import { isObj } from "./values.ts"
+
+const log = logger("ops")
+
+export type Param = Omit<Schema, "required"> & { required?: boolean }
+
+export type Who = { client: string | null; agent: string | null; label: string; source: string }
+
+/** No answer from the server itself: none (it's restarting), or its proxy's (Tailscale Serve's 502 to 504, no error of
+ *  the server's in it). A long call (a wait) is sent again; anything else is the server's answer. */
+export const restarting = (status: number | null, body: unknown) => status === null || (status >= 502 && status <= 504 && !(body && typeof body === "object" && "error" in body))
+
+export type OpCtx = {
+  vault: Vault
+  who: Who
+  /** Run another op (its parameters checked like a request's; `input`: the bytes for one that takes them); throws its
+   *  OpError. */
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the caller parses what it reads: ops answer what they like
+  op: (id: string, params?: Item, input?: Readable) => Promise<unknown>
+  /** A route of the HTTP API, in-process: its body; a 4xx or 5xx throws an OpError with its message. */
+  // oxlint-disable-next-line anti-slop/no-unknown-returns, anti-slop/no-unknown-parameters -- the caller parses what it reads: routes answer what they like; a body is JSON
+  api: (method: string, route: string, body?: unknown) => Promise<unknown>
+  /** Drive the user's open window (POST /api/ui's message: open, command, notify; null: which windows are open): its
+   *  answer. */
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the user's window answers: another process
+  ui: (message: Item | null) => Promise<unknown>
+  /** The plugin it belongs to (null: the core's). */
+  plugin: string | null
+  /** Why the caller isn't this machine's owner for `what` (core/owner.ts), or "": for an op that's the owner's only in part
+   *  (turning a vault plugin on approves it here). "" without a request (in-process, an approved MCP call). */
+  refusal?: (what: string) => Promise<string>
+  /** The bytes it was given besides its parameters (an op with `input`): a raw request body, or an in-process caller's. */
+  input?: Readable
+}
+
+export type Params = Record<string, Param>
+
+export type Infer<S> = S extends { format: "json" } ? unknown
+  : S extends { enum: readonly (infer E)[] } ? E
+  : S extends { type: "string" } ? string
+  : S extends { type: "number" | "integer" } ? number
+  : S extends { type: "boolean" } ? boolean
+  : S extends { type: "array"; items: infer I } ? Infer<I>[]
+  : S extends { type: "array" } ? unknown[]
+  : S extends { type: "object"; properties: infer P } ? ObjectOf<P, S extends { required: readonly (infer R)[] } ? R : never>
+  : S extends { type: "object" } ? Item
+  : unknown
+type Flat<T> = { -readonly [K in keyof T]: T[K] } & {}
+type ObjectOf<P, R> = Flat<{ [K in keyof P as K extends R ? K : never]: Infer<P[K]> } & { [K in keyof P as K extends R ? never : K]?: Infer<Exclude<P[K], undefined>> }>
+type Given<P> = P extends { required: true } ? true : P extends { default: infer D } ? ([D] extends [undefined] ? false : true) : false
+export type ParamsOf<P> = Flat<{ [K in keyof P as Given<P[K]> extends true ? K : never]: Infer<P[K]> } & { [K in keyof P as Given<P[K]> extends true ? never : K]?: Infer<Exclude<P[K], undefined>> }>
+
+export type OpDef<P = Params, R = unknown> = {
+  id: string
+  /** One line: what it does. */
+  summary: string
+  /** More: when to use it, what it answers, examples (`vau <id> --help`, the tool's description). */
+  help?: string
+  kind: OpKind
+  params?: P
+  /** An object parameter that keeps parameters it doesn't name (log.create's `data`), text read as JSON when it is one.
+   *  Without it, an unknown parameter is an error. */
+  rest?: string
+  /** The parameters given by position (CLI: `vau note.create "Title"`), in order; the last may be an array (the rest). */
+  args?: string[]
+  /** Its name in the CLI (`note`: `vau note "Title"`), one or more words (`inbox add`: `vau inbox add ...`; `vau inbox`
+   *  then lists the ops under it). */
+  cli?: string
+  /** An MCP tool: true (named after the id: `note_create`), or the tool's name. */
+  mcp?: boolean | string
+  /** What it answers, for the docs. */
+  result?: Schema
+  lock?: boolean
+  /** Only this machine's owner may run it (what it is, for the refusal: "the terminal"): a shell, the screen. Over HTTP
+   *  anyone else gets a 403 (core/owner.ts; the plugin's allowUsers / allowRemote apply). */
+  owner?: string
+  /** It acts on a kind of file, which fills one of its params: one of that file's actions (core/actions.ts). */
+  action?: OpAction
+  run(params: ParamsOf<P>, ctx: OpCtx): Promise<R> | R
+  /** The result as Markdown, for an agent or a terminal (else JSON). `who` asked: an answer may read differently for an
+   *  MCP client (`who.client` "mcp": a file's path before its text) than for vau, which prints a file exactly. */
+  text?(result: Awaited<R>, params: ParamsOf<P>, who?: Who): string
+  /** What a call did, for Activity ("Left "Idea" in the inbox"), from its checked params; without it Activity says "Ran
+   *  <id> (what it was about)". */
+  did?(params: ParamsOf<P>): OpDid
+  /** Its text is printed as is when piped, no newline added (a secret going into another command). */
+  exact?: boolean
+  /** A picture the answer is (a screenshot), base64: sent beside its text to a client that shows pictures (MCP). */
+  image?(result: Awaited<R>): OpImage | null
+  /** It also takes bytes of any size (what they are: "the file"), as `ctx.input`: the raw body of POST /api/ops/<id>
+   *  (any type but JSON; the parameters then in the query), or an in-process caller's (call's `input`). */
+  input?: string
+  /** It reaches the user (a knock, an inbox ask, a report): from a job's worker on another machine, vau runs it on the
+   *  job's home server (VAULTITE_HOME, core/cli.ts' homeEnv), where the user and the job are. */
+  home?: boolean
+}
+
+export type Op = Omit<OpDef, "run" | "text" | "did" | "image"> & {
+  run(params: Item, ctx: OpCtx): unknown
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the catalog's ops, their own result types erased
+  text?(result: unknown, params: Item, who?: Who): string
+  did?(params: Item): OpDid
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the catalog's ops, their own result types erased
+  image?(result: unknown): OpImage | null
+}
+
+/** An op with its parameters' and result's types inferred: `params` written in place, or constants that
+ *  `satisfies Param`. */
+export const defineOp = <const P extends Params = {}, R = unknown>(def: OpDef<P, R>): Op => def
+
+export type OpImage = { data: string; mimeType: string }
+
+export type OpDid = { action?: "create" | "edit" | "save" | "delete" | "move" | "run" | "ui" | "settings"; text: string; paths?: string[]; by?: string }
+
+export function didOf(op: Op, given: unknown): OpDid | null {
+  if (!op.did) return null
+  let params: Item
+  try { params = checkParams(op, given) } catch { return null }
+  try {
+    const d = op.did(params)
+    return d && typeof d.text === "string" && d.text ? d : null
+  } catch (e) {
+    log.error(`${op.id}'s did failed`, e)
+    return null
+  }
+}
+
+/** Text in quotes on one line, cut at `n` characters: a description's way to cite what a call was given. */
+export function quoted(v: unknown, n = 80) {
+  const t = (typeof v === "string" ? v : "").trim().replace(/\s+/g, " ")
+  return t.length > n ? `"${t.slice(0, n)}…"` : `"${t}"`
+}
+
+/** What an op can't do, with what to do instead: a 400 over HTTP (`status`), the tool's error over MCP. */
+export class OpError extends Error {
+  status: number
+  problems: string[]
+  constructor(message: string, status = 400, problems: string[] = []) {
+    super(message)
+    this.status = status
+    this.problems = problems
+  }
+}
+
+export const ID = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/
+
+export function opProblems(op: Op): string[] {
+  const out: string[] = []
+  if (!ID.test(op.id)) out.push(`op id '${op.id}' should be area.verb, lowercase (note.create)`)
+  if (!op.summary?.trim()) out.push(`${op.id}: a summary is missing`)
+  if (!["read", "write", "destructive"].includes(op.kind)) out.push(`${op.id}: kind is read, write or destructive`)
+  for (const a of op.args ?? []) if (!op.params?.[a]) out.push(`${op.id}: arg '${a}' isn't one of its params`)
+  if (op.rest && op.params?.[op.rest]?.type !== "object") out.push(`${op.id}: rest '${op.rest}' should be one of its params, an object`)
+  for (const [k, p] of Object.entries(op.params ?? {})) {
+    if (!/^[a-z][a-zA-Z0-9_]*$/.test(k)) out.push(`${op.id}: param '${k}' should be a plain name (camelCase or snake_case)`)
+    if (!p.description?.trim()) out.push(`${op.id}: param '${k}' has no description`)
+  }
+  if (op.cli !== undefined && !/^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)*$/.test(op.cli)) out.push(`${op.id}: cli name '${op.cli}' should be lowercase words`)
+  if (typeof op.mcp === "string" && !/^[a-z][a-z0-9_]{0,63}$/.test(op.mcp)) out.push(`${op.id}: MCP tool name '${op.mcp}' should be snake_case`)
+  if (op.action) out.push(...actionProblems(op.id, op.action, Object.keys(op.params ?? {})))
+  return out
+}
+
+const schemas = new WeakMap<Op, Schema>()
+export function paramsSchema(op: Op): Schema {
+  let hit = schemas.get(op)
+  if (!hit) schemas.set(op, hit = schemaOf(op))
+  return hit
+}
+function schemaOf(op: Op): Schema {
+  const properties: Record<string, Schema> = {}
+  const required: string[] = []
+  for (const [k, p] of Object.entries(op.params ?? {})) {
+    const { required: req, ...s } = p
+    properties[k] = s
+    if (req) required.push(k)
+  }
+  return { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: !!op.rest }
+}
+
+export const toolName = (op: Op): string | null => (op.mcp ? (typeof op.mcp === "string" ? op.mcp : op.id.replace(/[.-]/g, "_")) : null)
+
+export function entryOf(op: Op, plugin: string | null): OpEntry {
+  return { id: op.id, plugin, summary: op.summary, help: op.help ?? "", kind: op.kind, params: paramsSchema(op), args: op.args ?? [],
+    cli: op.cli ?? null, mcp: toolName(op), result: op.result ?? null, owner: op.owner ?? null, action: op.action ?? null, ...(op.exact ? { exact: true } : {}),
+    ...(op.input ? { input: op.input } : {}), ...(op.image ? { image: true as const } : {}), ...(op.home ? { home: true as const } : {}) }
+}
+
+const typeName = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "a list" : typeof v === "object" ? "an object" : `a ${typeof v}`)
+const DATE = /^\d{4}-\d\d-\d\d$/
+/** A YYYY-MM-DD that's a day of the calendar (not 2026-02-30, which Date reads as March 2nd). */
+const isDay = (t: string) => { const ms = DATE.test(t) ? Date.parse(`${t}T00:00:00Z`) : NaN; return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === t }
+
+const secondsAsMs = (x: number, s: Schema) =>
+  /\bseconds\b/.test(s.description ?? "") && x >= 1000 && x / 1000 <= (s.maximum ?? 0) ? `: it's in seconds, not milliseconds (${x / 1000})` : ""
+
+function convert(name: string, v: unknown, s: Schema): { ok: true; v: unknown } | { ok: false; why: string } {
+  const bad = (what: string) => ({ ok: false as const, why: `${name}: ${what}` })
+  if (s.format === "json" || !s.type) return { ok: true, v }
+  let x = v
+  switch (s.type) {
+    case "string":
+      if (typeof x === "number" || typeof x === "boolean") x = String(x)
+      if (typeof x !== "string") return bad(`should be text, not ${typeName(x)}`)
+      if (s.format === "date" && !isDay(x.trim())) return bad(`should be a date, YYYY-MM-DD (got '${x}')`)
+      break
+    case "number":
+    case "integer":
+      if (typeof x === "string" && x.trim() && Number.isFinite(Number(x))) x = Number(x)
+      if (typeof x !== "number" || !Number.isFinite(x)) return bad(`should be a number, not ${typeName(x)}${typeof x === "string" ? ` ('${x}')` : ""}`)
+      if (s.type === "integer" && !Number.isInteger(x)) return bad(`should be a whole number (got ${x})`)
+      if (s.minimum !== undefined && x < s.minimum) return bad(`should be at least ${s.minimum} (got ${x})`)
+      if (s.maximum !== undefined && x > s.maximum) return bad(`should be at most ${s.maximum} (got ${x})${secondsAsMs(x, s)}`)
+      break
+    case "boolean":
+      if (x === "true" || x === "yes" || x === "1" || x === "on") x = true
+      else if (x === "false" || x === "no" || x === "0" || x === "off") x = false
+      if (typeof x !== "boolean") return bad(`should be true or false, not ${typeName(x)}`)
+      break
+    case "array": {
+      if (typeof x === "string") {
+        const t = x.trim()
+        if (t.startsWith("[")) { try { x = JSON.parse(t) } catch { return bad("isn't a valid JSON list") } }
+        else x = !t ? [] : s.commas === false ? [t] : t.split(",").map((e) => e.trim()).filter(Boolean)
+      }
+      const list: unknown[] = Array.isArray(x) ? x : [x]
+      const items: unknown[] = []
+      for (const [i, e] of list.entries()) {
+        const r = s.items ? convert(`${name}[${i}]`, e, s.items) : { ok: true as const, v: e }
+        if (!r.ok) return r
+        items.push(r.v)
+      }
+      x = items
+      break
+    }
+    case "object":
+      if (typeof x === "string") { try { x = JSON.parse(x) } catch { return bad("isn't a valid JSON object") } }
+      if (!x || typeof x !== "object" || Array.isArray(x)) return bad(`should be an object, not ${typeName(x)}`)
+      if (s.properties) {
+        const o: Item = { ...x }
+        for (const [k, ps] of Object.entries(s.properties)) {
+          if (o[k] === undefined) continue
+          const r = convert(`${name}.${k}`, o[k], ps)
+          if (!r.ok) return r
+          o[k] = r.v
+        }
+        for (const k of s.required ?? []) if (o[k] === undefined) return bad(`${k} is missing`)
+        x = o
+      }
+      break
+  }
+  if (s.enum && !s.enum.includes(x)) {
+    const names = s.enum.map((e) => (typeof e === "string" && /^[\w:-]+$/.test(e) ? e : JSON.stringify(e)))
+    return bad(`should be ${names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : names[0]} (got ${JSON.stringify(x)})`)
+  }
+  return { ok: true, v: x }
+}
+
+export function checkParams(op: Op, given: unknown): Item {
+  const asked = given ?? {}
+  if (!isObj<Item>(asked)) throw new OpError(`${op.id} takes an object of its parameters, not ${typeName(given)}`)
+  const params = op.params ?? {}
+  const out: Item = {}
+  const problems: string[] = []
+  const extra: Item = {}
+  for (const [k, v] of Object.entries(asked)) {
+    if (v === undefined) continue
+    const p = params[k]
+    if (!p && op.rest) {
+      extra[k] = typeof v === "string" && /^(-?\d|true$|false$|null$|\[|\{)/.test(v.trim()) ? (() => { try { return JSON.parse(v) } catch { return v } })() : v
+      continue
+    }
+    if (!p) {
+      const near = nearest(k, Object.keys(params))
+      problems.push(`${k}: ${op.id} has no such parameter${near ? ` (did you mean ${near}?)` : ""}`)
+      continue
+    }
+    if (v === null && !p.required) continue
+    const { required: _req, ...schema } = p
+    const r = convert(k, v, schema)
+    if (r.ok) out[k] = r.v
+    else problems.push(r.why)
+  }
+  if (op.rest && Object.keys(extra).length) out[op.rest] = { ...(out[op.rest] ?? {}), ...extra }
+  for (const [k, p] of Object.entries(params)) {
+    if (out[k] !== undefined || problems.some((x) => x.startsWith(`${k}:`) || x.startsWith(`${k} `))) continue
+    if (p.default !== undefined) out[k] = structuredClone(p.default)
+    else if (p.required) problems.push(`${k} is missing (${p.description ?? "required"})`)
+  }
+  if (problems.length) throw new OpError(`${op.id}: ${problems.join("; ")}. ${usage(entryOf(op, null))}`, 400, problems)
+  return out
+}
+
+export const kebab = (k: string) => k.replace(/[A-Z]/g, (x) => `-${x.toLowerCase()}`)
+export const camel = (k: string) => k.replace(/-([a-z])/g, (_, x: string) => x.toUpperCase())
+export const flagOf = (k: string) => `--${kebab(k)}`
+
+export function usage(e: OpEntry): string {
+  const props = e.params.properties ?? {}, required = e.params.required ?? []
+  const pos = e.args.map((a) => (required.includes(a) ? `<${a}>` : `[${a}]`))
+  const flags = Object.entries(props).filter(([k]) => !e.args.includes(k)).map(([k, s]) => {
+    const f = `${flagOf(k)}${s.type === "boolean" ? "" : ` <${s.type === "array" ? "a,b" : s.enum ? s.enum.join("|") : flagOf(k).slice(2)}>`}`
+    return required.includes(k) ? f : `[${f}]`
+  })
+  if (e.params.additionalProperties === true) flags.push("[--<other> <value>...]")
+  return `Usage: vau ${[e.cli ?? e.id, ...pos, ...flags].join(" ")}`
+}
+
+export function nearest(s: string, names: string[]): string | null {
+  let best: string | null = null, bestD = Infinity
+  for (const n of names) {
+    const d = distance(s.toLowerCase(), n.toLowerCase())
+    if (d < bestD) { best = n; bestD = d }
+  }
+  return best !== null && bestD <= Math.max(2, Math.floor(s.length / 3)) ? best : null
+}
+
+/** Who asked, from the request's X-Vaultite-Client and -Agent (or an MCP client's own name, given as the agent). */
+export function whoOf(client: string | null, agent: string | null): Who {
+  const n = (agent ?? "").trim()
+  const hit = KNOWN_AGENTS.find((a) => a.said.test(n))
+  if (hit) return { client, agent: hit.id, label: hit.name, source: hit.source ?? hit.id }
+  const slug = n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40)
+  if (slug) return { client, agent: slug, label: n.slice(0, 60), source: slug }
+  if (client === "mcp") return { client, agent: null, label: "An MCP client", source: "mcp" }
+  if (client === "cli") return { client, agent: null, label: "vau", source: "cli" }
+  return { client, agent: null, label: client ?? "the API", source: client ?? "api" }
+}
+
+/** Who may answer for the user (approve or deny a permission: a gate, a terminal's question): the app, their phone's and
+ *  watch's notifications, or a machine passing one on; never vau, since a person's shell looks like an agent's. */
+export const userSurface = (w: { client: string | null; agent: string | null }) => !w.agent && !!w.client
+  && (w.client.startsWith("app/") || w.client.startsWith("machine/") || w.client === "iphone" || w.client === "watch")
+/** Why a caller may not answer for the user, as its refusal says. */
+export const NOT_THE_USER = "only you answer what waits on you (approve, deny, pick), in the app or on your phone: never an agent, nor vau"
+
+/** The user's own hand: the app (`app/<device>`) or vau typed by hand (`cli` naming no coding agent). Anyone else is an
+ *  agent or a script: what it opens never takes the user's focus. */
+export const byUser = (w: { client: string | null; agent: string | null }) => !!w.client?.startsWith("app/") || (w.client === "cli" && !w.agent)
+
+function paramLine(k: string, s: Schema, required: boolean, positional: boolean) {
+  const t = s.enum ? s.enum.map((e) => JSON.stringify(e)).join(" | ") : s.type === "array" ? `list of ${s.items?.type ?? "values"}` : s.format ?? s.type ?? "any"
+  const bits = [t, required ? "required" : null, positional ? "positional" : null].filter(Boolean).join(", ")
+  const def = s.default !== undefined ? ` Default: ${JSON.stringify(s.default)}.` : ""
+  return `- \`${k}\` (${bits}): ${s.description ?? ""}${def}`
+}
+
+export const jsonBlock = (r: unknown) => "```json\n" + JSON.stringify(r, null, 2) + "\n```"
+
+export function opDoc(e: OpEntry, heading = "###"): string {
+  const props = e.params.properties ?? {}
+  const req = e.params.required ?? []
+  const names = [e.cli ? `\`vau ${e.cli}\`` : null, e.mcp ? `MCP \`${e.mcp}\`` : null].filter(Boolean).join(", ")
+  return [
+    `${heading} ${e.id}`,
+    `${e.summary}${e.kind === "read" ? "" : e.kind === "write" ? " (writes)" : " (destructive)"}${names ? ` Also ${names}.` : ""}`,
+    e.help ? e.help.trim() : null,
+    Object.keys(props).length ? Object.entries(props).map(([k, s]) => paramLine(k, s, req.includes(k), e.args.includes(k))).join("\n") : "No parameters.",
+    usage(e),
+  ].filter(Boolean).join("\n\n")
+}
+
+export function opsDoc(entries: OpEntry[]): string {
+  const areas = new Map<string, OpEntry[]>()
+  for (const e of entries) {
+    const a = e.id.split(".")[0]
+    if (!areas.has(a)) areas.set(a, [])
+    areas.get(a)!.push(e)
+  }
+  return [
+    "## Operations (the API)",
+    "Everything an agent, a script or a plugin can do with the vault and the app is an operation: an id (`note.create`), its " +
+      "parameters (checked, with defaults), and its answer. The same catalog is the HTTP API, the CLI and the MCP tools, so " +
+      "use whichever reaches you:",
+    "- CLI: `vau <id> [args] [--param value]` (`vau <id> --help`; `--json` for JSON, `--count`/`--paths` for a list's size or files; `vau ops` lists them). Lists take `a,b`.\n" +
+      "- HTTP: `POST /api/ops/<id>` with the parameters as a JSON object (`?as=text`: the answer as Markdown); `GET /api/ops` is the catalog, with a JSON Schema per op.\n" +
+      "- MCP: the tools named in each op below.",
+    "Plugins add their own (`plugin.op`, `vau docs vault-plugins`), only while they're on, so this list is this vault's.",
+    ...[...areas].map(([a, es]) => [`### ${a}`, ...es.map((e) => opDoc(e, "####"))].join("\n\n")),
+  ].join("\n\n")
+}
+
+export function pluginOpsDoc(entries: OpEntry[]): string {
+  if (!entries.length) return ""
+  return ["## Operations", "Run with `vau <id>`, `POST /api/ops/<id>` or MCP (`vau docs api`: how).", ...entries.map((e) => opDoc(e, "###"))].join("\n\n")
+}
+
+type TreeFile = { path: string; type?: unknown }
+
+type Tree = { files?: TreeFile[]; others?: TreeFile[]; folders?: string[] }
+
+/** A path as the user says it ("Today", "notes/idea") made a vault path: exact, with .md, any case, a file's name, or (not
+ *  `exact`, a write's) one from before a folder moved; a web address is its web tab. Views, folders and misses come back as given ("Logs/Work" never picks Work.md). */
+export function pathAsSaid(tree: Tree, raw: string, at?: { root?: string; outside?: boolean; exact?: boolean }): string {
+  if (at?.root !== undefined && isOutside(raw.trim())) return absoluteAsSaid(tree, raw.trim(), at.root, !!at.outside, !!at.exact)
+  if (/^https?:\/\//i.test(raw.trim())) return `view:web/${raw.trim()}`
+  if (raw.trim().startsWith("view:")) return raw.trim()
+  const p = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "")
+  if (!p) return p
+  const folder = (tree.folders ?? []).find((d) => d === p) ?? (tree.folders ?? []).find((d) => d.toLowerCase() === p.toLowerCase())
+  if (folder) return folder
+  const pages = new Set((tree.files ?? []).map((f) => f.path))
+  const types = new Map((tree.files ?? []).map((f) => [f.path, f.type]))
+  const all = [...(tree.files ?? []), ...(tree.others ?? [])].map((f) => f.path)
+  const low = p.toLowerCase()
+  const stem = (x: string) => { const n = x.split("/").pop()!; return (pages.has(x) ? n.replace(/\.[^.]+$/, "") : n).toLowerCase() }
+  const named = all.filter((x) => !isHiddenPath(x))
+  const by = (ok: (x: string) => boolean, among = all) => {
+    const hits = among.filter(ok), dash = hits.filter((x) => types.get(x) === "dashboard")
+    return hits.length === 1 ? hits[0] : dash.length === 1 ? dash[0] : null
+  }
+  const tail = low.split("/").pop()!.replace(/\.md$/, "")
+  const hidden = p.split("/").some((s) => s.startsWith("."))
+  return all.find((x) => x === p) ?? by((x) => x === `${p}.md`) ?? by((x) => x.toLowerCase() === low || x.toLowerCase() === `${low}.md`) ??
+    by((x) => stem(x) === low, named) ?? (low.includes("/") && !hidden && !at?.exact ? by((x) => stem(x) === tail, named) : null) ?? p
+}
+
+function absoluteAsSaid(tree: Tree, abs: string, root: string, outside: boolean, exact: boolean) {
+  const slashed = (s: string) => s.replace(/\\/g, "/").replace(/\/+$/, "")
+  const p = slashed(abs), r = slashed(root)
+  // (Windows' paths and a Mac's disk ignore case)
+  if (p.toLowerCase().startsWith(`${r.toLowerCase()}/`)) return pathAsSaid(tree, p.slice(r.length + 1), { exact })
+  const inVault = pathAsSaid(tree, p, { exact })
+  const known = (tree.folders ?? []).includes(inVault) || [...(tree.files ?? []), ...(tree.others ?? [])].some((f) => f.path === inVault)
+  return known || !outside ? inVault : abs
+}

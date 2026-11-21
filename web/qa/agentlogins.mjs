@@ -1,0 +1,343 @@
+// Agents log in with the user's passwords for agents (a made-up site and agents.kdbx), and nothing they read has one.
+// WRITES: the throwaway vault only.
+//   node web/qa/agentlogins.mjs <vault copy>
+// electron/browser/logins.ts
+import { _electron } from "playwright-core"
+import crypto from "node:crypto"
+import fs from "node:fs"
+import http from "node:http"
+import os from "node:os"
+import path from "node:path"
+import { ROOT, pageNotLastScreen, qa, until, wait } from "./lib/qa.mjs"
+import { encode } from "../../electron/browser/cbor.ts"
+import { totp, otpOf } from "../../electron/browser/keepass.ts"
+
+const { args: [VAULT], check, errs, watch, done } = await qa(import.meta.url, { chrome: false })
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "vau-logins-"))
+
+const { Credentials, Kdbx, ProtectedValue } = await import("../../electron/browser/kdbx/index.ts")
+const DB_PASSWORD = "made-up database password"
+const SECRET = "Q7-lantern!pw word", ADMIN = "Harbor-admin-pw-42", HARBOR = "Harbor-pw-31"
+const SEED = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+const db = Kdbx.create(new Credentials(ProtectedValue.fromString(DB_PASSWORD)), "Agents")
+const add = (title, user, pw, url, tags = [], more = {}) => {
+  const e = db.createEntry(db.getDefaultGroup())
+  e.fields.set("Title", title); e.fields.set("UserName", user); e.fields.set("Password", ProtectedValue.fromString(pw)); e.fields.set("URL", url)
+  for (const [k, v] of Object.entries(more)) e.fields.set(k, ProtectedValue.fromString(v))
+  e.tags = tags
+}
+
+const saw = []
+const page = (title, body) => `<!doctype html><title>${title}</title>${body}`
+const handler = (req, res) => {
+  const u = new URL(req.url ?? "/", "http://x")
+  let body = ""
+  req.on("data", (c) => { body += c })
+  req.on("end", () => {
+    const form = new URLSearchParams(body)
+    res.setHeader("Content-Type", "text/html; charset=utf-8")
+    if (u.pathname === "/login") return res.end(page("Sign in", `<h1>Sign in</h1><form method="post" action="/session">
+<label>Username <input name="username" autocomplete="username"></label><label>Password <input id="pw" name="password" type="password" autocomplete="current-password"></label>
+<button type="button" id="show">Show password</button><button>Sign in</button></form><p id="echo"></p>
+<script>show.onclick = () => { pw.type = pw.type === "password" ? "text" : "password"; document.title = "Sign in " + pw.value; echo.textContent = "You typed " + pw.value }</script>`))
+    if (u.pathname === "/session") {
+      saw.push({ user: form.get("username"), password: form.get("password") })
+      if (form.get("password") !== SECRET) { res.statusCode = 401; return res.end(page("Wrong", "<h1>Wrong password</h1>")) }
+      res.statusCode = 303; res.setHeader("Location", "/otp"); return res.end()
+    }
+    if (u.pathname === "/otp") return res.end(page("Code", `<h1>Two-step</h1><form method="post" action="/verify"><label>Code <input name="code" autocomplete="one-time-code" inputmode="numeric"></label><button>Verify</button></form><script>document.forms[0].addEventListener("submit", (e) => { e.preventDefault(); setTimeout(() => e.target.submit(), 600) })</script>`))
+    if (u.pathname === "/split") return res.end(page("Code", `<h1>Enter the code</h1><form method="post" action="/verify">${[0, 1, 2, 3, 4, 5].map((i) => `<input name="d${i}" maxlength="1" aria-label="Digit ${i + 1}">`).join("")}<button>Verify</button></form>`))
+    if (u.pathname === "/verify") {
+      const code = form.get("code") ?? [0, 1, 2, 3, 4, 5].map((i) => form.get(`d${i}`) ?? "").join("")
+      saw.push({ code })
+      return res.end(page("Home", code === totp(otpOf({ otp: `otpauth://totp/x?secret=${SEED}` }), Date.now()) ? "<h1>Welcome alice</h1>" : "<h1>Wrong code</h1>"))
+    }
+    if (u.pathname === "/login-get") return res.end(page("Sign in", `<form method="get" action="/after"><input name="user" autocomplete="username"><input name="pw" type="password"><button>Go</button></form>`))
+    if (u.pathname === "/after") return res.end(page("Signed in", "<h1>Signed in</h1>"))
+    if (u.pathname === "/other") return res.end(page("Other", "<h1>Another page</h1>"))
+    if (u.pathname === "/first") return res.end(page("Sign in", `<form><label>Email or username <input name="text" autocomplete="username"></label>
+<input type="password" name="password" aria-hidden="true" tabindex="-1" style="position:absolute;left:0;top:0;width:20px;height:20px;opacity:0">
+<input type="password" name="password2" style="visibility:hidden;width:20px;height:20px"><button>Next</button></form>`))
+    res.end(page("Lighthouse", "<h1>Lighthouse</h1>"))
+  })
+}
+const listen = async () => { const s = http.createServer(handler); await new Promise((ok) => s.listen(0, "127.0.0.1", ok)); return s }
+const site = await listen(), elsewhere = await listen()
+const PORT = site.address().port
+const SITE = `http://127.0.0.1:${PORT}`, LOCAL = `http://localhost:${PORT}`, NONE = `http://127.0.0.1:${elsewhere.address().port}`
+
+add("Lighthouse", "alice", SECRET, SITE, ["agent-free"], { otp: `otpauth://totp/Lighthouse:alice?secret=${SEED}` })
+add("Harbor", "alice@example.com", HARBOR, LOCAL)
+add("Harbor admin", "admin", ADMIN, LOCAL)
+const DB = path.join(TMP, "agents.kdbx")
+fs.writeFileSync(DB, Buffer.from(await db.save()))
+
+const plugins = path.join(VAULT, ".vaultite/plugins.json")
+const on = fs.existsSync(plugins) ? JSON.parse(fs.readFileSync(plugins, "utf8")) : { enabled: [], disabled: [] }
+fs.writeFileSync(plugins, JSON.stringify({ ...on, enabled: [...new Set([...(on.enabled ?? []), "web-viewer", "inbox"])], disabled: (on.disabled ?? []).filter((x) => x !== "inbox") }))
+const USER_DATA = path.join(TMP, "userData"), LOCAL_DIR = path.join(TMP, "local")
+const launch = () => _electron.launch({
+  executablePath: path.join(ROOT, "node_modules/.bin/electron"), args: [ROOT, "--vault", VAULT],
+  env: { ...process.env, VAULTITE_QUIET: process.env.SHOW ? "" : "1", VAULTITE_USER_DATA: USER_DATA, VAULTITE_LOCAL: LOCAL_DIR, VAULTITE_TEST_TOUCHID: "yes" },
+})
+const app = await launch()
+let output = ""
+app.process().stdout?.on("data", (d) => { output += d })
+app.process().stderr?.on("data", (d) => { output += d })
+const win = await app.firstWindow()
+watch(win, { console: true, fail: false })
+await win.waitForSelector("[role=tree]", { timeout: 60000 })
+const origin = new URL(win.url()).origin
+await app.evaluate(({ BaseWindow }) => { const w = BaseWindow.getAllWindows()[0]; w.setBounds({ x: 40, y: 40, width: 1400, height: 860 }) })
+const op = async (id, params) => {
+  const r = await fetch(`${origin}/api/ops/web-viewer.${id}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Vaultite-Client": "mcp", "X-Vaultite-Agent": "claude-code" }, body: JSON.stringify(params ?? {}) })
+  const j = await r.json().catch(() => ({}))
+  return r.ok ? (j.result ?? j) : { error: j.error ?? r.status, status: r.status }
+}
+const engine = (name, ...args) => win.evaluate(([n, a]) => window.vaultite.web.engine(n, ...a), [name, args])
+await wait(2000)
+
+check("no passwords for agents yet", (await engine("logins:status")) === null)
+const early = await op("open", { url: `${SITE}/login` })
+const unset = await op("login", { tab: early.tab })
+check("a login before it's set up says how", /no passwords for agents on this (Mac|computer)/.test(String(unset.error)), unset)
+const wrongPw = await engine("logins:set", DB, "not it")
+check("a wrong password for the file is said, plainly", /password doesn't open it/.test(wrongPw?.error ?? "") && (await engine("logins:status")) === null, wrongPw)
+const set = await engine("logins:set", DB, DB_PASSWORD)
+check("the file and its password are set: its entries counted", set?.entries === 3 && set?.free === 1, set)
+const status = await engine("logins:status")
+check("its status: the file, its entries", status?.file === DB && status?.entries === 3, status)
+const kept = fs.readFileSync(path.join(USER_DATA, "agent-logins.json"), "utf8")
+check("the file's password is kept encrypted, never as is", !kept.includes(DB_PASSWORD) && JSON.parse(kept).file === DB, kept.slice(0, 80))
+// (a Mac's Keychain, Linux's keyring; a Linux with none, as CI's: held only till the app quits)
+const keyring = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable())
+check(keyring ? "… with the keyring's key" : "… or, with no keyring here, not kept at all: held till the app quits", keyring
+  ? typeof JSON.parse(kept).key === "string" && !set?.held && !status?.held : JSON.parse(kept).key === null && set?.held === true && status?.held === true, [keyring, set, status])
+
+const t = early.tab
+const filled = await op("login", { tab: t })
+check("login fills the username and password, answering no value", filled?.status === "filled" && filled.filled?.join() === "username,password" && !JSON.stringify(filled).includes(SECRET), filled)
+check("… from the agent-free entry, with no ask", /free/.test(filled?.approved ?? ""), filled?.approved)
+
+const FORMS = [SECRET, encodeURIComponent(SECRET), new URLSearchParams([["pw", SECRET]]).toString().slice(3), SECRET.slice(0, 8)]
+const has = (x) => { const s = JSON.stringify(x ?? null); return FORMS.some((f) => s.includes(f) || s.includes(JSON.stringify(f).slice(1, -1))) }
+const snap = await op("snapshot", { tab: t })
+check("snapshot: the password field shows no value, nor its length", !has(snap) && /textbox "Password" \[ref=e\d+\](: •••)?( \||$)/m.test(snap?.snapshot ?? ""), snap?.snapshot)
+check("snapshot: the username the app filled shows (not a secret)", /textbox "Username" \[ref=e\d+\]: alice/.test(snap?.snapshot ?? ""), snap?.snapshot)
+check("read: nothing of it", !has(await op("read", { tab: t })), null)
+const ev = await op("evaluate", { tab: t, expression: "[...document.querySelectorAll('input')].map((i) => i.value)" })
+check("evaluate: refused while the page holds it", !!ev.error && /evaluate is off/.test(String(ev.error)) && !has(ev), ev)
+const ev2 = await op("evaluate", { tab: t, expression: "document.title" })
+check("evaluate: refused for any expression there", !!ev2.error, ev2)
+const pwRef = /textbox "Password" \[ref=(e\d+)\]/.exec(snap?.snapshot ?? "")?.[1], showRef = /button "Show password" \[ref=(e\d+)\]/.exec(snap?.snapshot ?? "")?.[1]
+const copy = await op("act", { tab: t, action: "press", ref: pwRef, key: "Meta+c" })
+check("copying out of the page: refused", /never copy, cut or paste/.test(String(copy.error)), copy)
+const cut = await op("act", { tab: t, action: "press", ref: pwRef, key: "Control+x" })
+check("… cutting too", /never copy, cut or paste/.test(String(cut.error)), cut)
+const shown = await op("act", { tab: t, action: "click", ref: showRef })
+check("revealing the field (the page's Show password): act's diff has nothing of it", !shown.error && !has(shown), shown)
+check("… nor a snapshot", !has(await op("snapshot", { tab: t })), null)
+check("… nor read", !has(await op("read", { tab: t })), null)
+const run = await op("run", { tab: t, script: `const s = await snapshot(); const r = await read(); let w = "found"; try { await wait({ text: ${JSON.stringify(SECRET.slice(0, 6))}, timeout: 1 }) } catch (e) { w = e.message }
+  return { s, r, w, ref: await ref(${JSON.stringify(SECRET)}) }` })
+check("… nor a script's snapshot, read, wait and ref (run)", !run.error && !has(run) && !/^found$/.test(JSON.parse(run.value ?? "{}").w ?? "found") && JSON.parse(run.value ?? "{}").ref === null, run)
+const tabs = await op("tabs")
+check("… nor the tabs' titles (the page put it in its own)", Array.isArray(tabs) && tabs.some((x) => x.tab === t && /Sign in •••/.test(x.title)) && !has(tabs), tabs)
+const shot = await op("screenshot", { tab: t })
+check("… a screenshot is refused while the page shows it", /no picture of it now/.test(String(shot.error)), shot)
+const pdf = await op("pdf", { tab: t })
+check("… a PDF too", /no picture of it now/.test(String(pdf.error)), pdf)
+const oracle = await op("wait", { tab: t, text: SECRET.slice(0, 8), timeout: 1 })
+check("… wait --text is no oracle for it", !!oracle.error, oracle)
+const copy2 = await op("act", { tab: t, action: "press", ref: pwRef, key: "Meta+c" })
+check("… copying it, shown, refused", /never copy, cut or paste/.test(String(copy2.error)), copy2)
+await op("act", { tab: t, action: "click", ref: showRef })
+
+const sent = await op("act", { tab: t, action: "press", ref: pwRef, key: "Enter" })
+check("submitted: the site got the username and password", sent?.url?.endsWith("/otp") && saw.at(-1)?.user === "alice" && saw.at(-1)?.password === SECRET, [sent, saw.length])
+const code = await op("login", { tab: t, submit: true })
+check("on the page asking for a code (its submit starting late): the app fills the one-time code, submits and waits for it", code?.status === "filled" && code.filled?.join() === "one-time code" && code.submitted
+  && /Welcome alice/.test((await op("read", { tab: t }))?.text ?? ""), [code, saw.at(-1)])
+check("… the code isn't in what it answered", !JSON.stringify(code).includes(saw.at(-1)?.code ?? "none"), code)
+const ok = await op("evaluate", { tab: t, expression: "document.title" })
+check("a new page, nothing filled in it: evaluate works again", ok?.value === '"Home"', ok)
+
+await op("navigate", { tab: t, to: `${SITE}/first` })
+const first = await op("login", { tab: t })
+check("a username-first page with hidden password fields: only the username fills", first?.status === "filled" && first.filled?.join() === "username", first)
+
+const split = await op("navigate", { tab: t, to: `${SITE}/split` })
+const boxes = await op("login", { tab: t })
+const digits = await op("snapshot", { tab: t })
+check("a code split in a box per digit: no box shows its digit", boxes?.status === "filled" && (digits?.snapshot ?? "").match(/textbox "Digit \d" \[ref=e\d+\]: •••/g)?.length === 6, digits?.snapshot)
+check("… nor a picture of them", /no picture of it now/.test(String((await op("screenshot", { tab: t })).error)), null)
+await op("act", { tab: t, action: "press", key: "Enter" })
+await op("wait", { tab: t, text: "Welcome alice", timeout: 10 })
+check("… and the site got each digit", /Welcome alice/.test((await op("read", { tab: t }))?.text ?? ""), [split, boxes, saw.at(-1)])
+
+await fetch(`${origin}/api/config/plugin/web-viewer`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ containers: [{ id: "agents", name: "Agents", color: "purple", agents: "act" }, { id: "work", name: "Work", color: "orange", agents: "act" }] }) })
+const w = await until(async () => { const o = await op("open", { url: `${SITE}/login-get`, container: "work" }); return o.tab ? o : null }, 15000)
+const got = await op("login", { tab: w?.tab, submit: true })
+check("a GET form: filled and sent", got?.status === "filled" && got.url?.includes("/after?"), got)
+check("… its address has the password in it, scrubbed in the answer", !has(got) && /pw=•••/.test(got?.url ?? ""), got?.url)
+check("… and in tabs, read and wait --url", !has(await op("tabs")) && !has(await op("read", { tab: w?.tab })) && !!(await op("wait", { tab: w?.tab, url: encodeURIComponent(SECRET).slice(0, 10), timeout: 1 })).error, null)
+const evGet = await op("evaluate", { tab: w?.tab, expression: "location.href" })
+check("… evaluate refused there: its address holds it", /its address has a secret/.test(String(evGet.error)), evGet)
+
+await op("navigate", { tab: t, to: `${SITE}/login` })
+const ran = await op("evaluate", { tab: t, expression: "(document.addEventListener('input', (e) => { window.caught = e.target.value }, true), 1)" })
+check("an agent's script listening in the sign-in page", ran?.value === "1", ran)
+const refused = await op("login", { tab: t })
+check("… the app won't fill there till it loads again", /this page since it loaded/.test(String(refused.error)), refused)
+const caught = await op("evaluate", { tab: t, expression: "window.caught ?? null" })
+check("… so its listener caught nothing", caught?.value === "null", caught)
+await op("navigate", { tab: t, to: "reload" })
+const other = (await op("open", { url: `${SITE}/other`, task: "reader" })).tab
+await op("evaluate", { tab: other, expression: "1" })
+const byOther = await op("login", { tab: t })
+check("… nor while a script ran in another tab of the site, which it names", new RegExp(`ran in tab ${other},`).test(String(byOther.error)), byOther)
+await op("close", { tab: other })
+check("reloaded, the other tab closed: the login fills", (await op("login", { tab: t }))?.status === "filled", null)
+// (a page restored from Chromium's back/forward cache would bring an agent's listener back: Electron has none)
+await op("navigate", { tab: t, to: `${SITE}/other` })
+await op("evaluate", { tab: t, expression: "(window.mark = 1)" })
+await op("navigate", { tab: t, to: `${SITE}/` })
+await op("navigate", { tab: t, to: "back" })
+const restored = await op("evaluate", { tab: t, expression: "typeof window.mark" })
+check("going back loads the page anew (no back/forward cache): a script's state is gone", restored?.value === '"undefined"', restored)
+
+const h = (await op("open", { url: `${LOCAL}/login`, task: "harbor" })).tab
+const many = await op("login", { tab: h })
+check("a site with two entries: their titles and usernames, to pick", many?.status === "choose" && many.entries?.map((e) => e.title).sort().join() === "Harbor,Harbor admin" && !has(many) && !JSON.stringify(many).includes(HARBOR), many)
+const inbox = () => fetch(`${origin}/api/inbox/events?local=1`).then((r) => r.json()).then((j) => j.events ?? [])
+const noKey = await op("login", { tab: h, entry: "alice@example.com", task: "harbor" })
+check("an entry not tagged agent-free, and no passkey set up: refused, saying how", /none is set up/.test(String(noKey.error)), noKey)
+
+const RP = "vault.example.ts.net", ORIGIN = `https://${RP}:8447`
+const sha = (b) => crypto.createHash("sha256").update(b).digest()
+const b64u = (b) => Buffer.from(b).toString("base64url")
+const device = () => {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
+  const j = publicKey.export({ format: "jwk" })
+  return { privateKey, id: crypto.randomBytes(16), cose: encode(new Map([[1, 2], [3, -7], [-1, 1], [-2, Buffer.from(j.x, "base64url")], [-3, Buffer.from(j.y, "base64url")]])) }
+}
+const authData = (flags, d) => {
+  const parts = [sha(RP), Buffer.from([flags]), Buffer.alloc(4)]
+  if (d) { const n = Buffer.alloc(2); n.writeUInt16BE(d.id.length); parts.push(Buffer.alloc(16), n, d.id, d.cose) }
+  return Buffer.concat(parts)
+}
+const clientData = (type, challenge) => Buffer.from(JSON.stringify({ type, challenge, origin: ORIGIN }))
+const route = async (method, p, body) => {
+  const r = await fetch(`${origin}/api/web-viewer/${p}`, { method, headers: { "Content-Type": "application/json", Origin: origin, "X-Vaultite-Client": "app/approvals" }, body: body && JSON.stringify(body) })
+  const j = await r.json().catch(() => ({}))
+  return r.ok ? j : { error: j.error ?? r.status }
+}
+const created = (d, challenge) => ({ clientDataJSON: b64u(clientData("webauthn.create", challenge)),
+  attestationObject: b64u(encode(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", authData(0x45, d)]]))) })
+const signed = (d, challenge, key = d.privateKey) => {
+  const ad = authData(0x05), cd = clientData("webauthn.get", challenge)
+  return { id: b64u(d.id), clientDataJSON: b64u(cd), authenticatorData: b64u(ad), signature: b64u(crypto.sign("sha256", Buffer.concat([ad, sha(cd)]), { key, dsaEncoding: "der" })) }
+}
+const phone = device()
+const forgedAdd = await route("POST", "passkey", { token: "made-up", name: "Agent", ...created(device(), b64u(crypto.randomBytes(32))) })
+check("adding a passkey without the app's code: refused", /expired/.test(String(forgedAdd.error)), forgedAdd)
+const { token } = await engine("logins:passkey-start")
+const addOpts = await route("GET", `passkey/options?token=${token}`)
+const added = await route("POST", "passkey", { token, name: "iPhone", ...created(phone, addOpts.challenge) })
+check("the phone's passkey added, from the app's code (Touch ID confirms it on a real Mac)", added?.name === "iPhone" && added.site === RP, added)
+const reAdd = await route("POST", "passkey", { token, name: "Agent", ...created(device(), addOpts.challenge) })
+check("… its code works once", /expired/.test(String(reAdd.error)), reAdd)
+check("… the app lists it", (await engine("logins:passkeys"))?.map((k) => k.name).join() === "iPhone", null)
+
+const asking = op("login", { tab: h, entry: "alice@example.com", task: "harbor" })
+const ask = await until(async () => (await inbox()).find((e) => e.source === "browser" && e.kind === "waiting" && /log in to localhost/.test(e.title)), 15000)
+const grant = /[?&]grant=([\w-]+)/.exec(ask?.link ?? "")?.[1]
+check("an entry not tagged agent-free: the user is told in the Inbox, with the page to approve it at, no secret", !!ask && !!grant && ask.link.startsWith(`${ORIGIN}/api/web-viewer/approve?grant=`)
+  && /Harbor \(alice@example.com\)/.test(ask.body) && !JSON.stringify(ask).includes(HARBOR), ask)
+const asAgent = await fetch(`${origin}/api/ops/inbox.answer`, { method: "POST", headers: { "Content-Type": "application/json", "X-Vaultite-Client": "mcp", "X-Vaultite-Agent": "claude-code" },
+  body: JSON.stringify({ id: ask?.id, answer: "approve" }) }).then((r) => r.status)
+const asApp = await fetch(`${origin}/api/inbox/events/${encodeURIComponent(ask?.id)}/answer`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin, "X-Vaultite-Client": "app/qa" },
+  body: JSON.stringify({ answer: "approve" }) }).then((r) => r.status)
+const opts1 = await route("GET", `approve/options?grant=${grant}`)
+const forged = await route("POST", "approve", { grant, ...signed(phone, opts1.challenge, device().privateKey) })
+const stranger = device()
+const opts2 = await route("GET", `approve/options?grant=${grant}`)
+const unknown = await route("POST", "approve", { grant, ...signed(stranger, opts2.challenge) })
+const pending = await Promise.race([asking.then(() => "answered"), wait(1500).then(() => "waiting")])
+check("no yes but the passkey's: an agent answering the Inbox, a forged signature, an unknown passkey: the login still waits", asAgent >= 400 && asApp >= 400
+  && /signature/.test(String(forged.error)) && /isn't a passkey set up/.test(String(unknown.error)) && pending === "waiting", [asAgent, asApp, forged, unknown, pending])
+const facts = await app.evaluate(async ({ BrowserWindow }, url) => {
+  const w = new BrowserWindow({ show: false })
+  await w.loadURL(url)
+  for (let i = 0; i < 50; i++) {
+    const t = await w.webContents.executeJavaScript("document.getElementById('facts').innerText + '|' + document.getElementById('yes').textContent")
+    if (t.length > 1) { w.destroy(); return t }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  w.destroy()
+  return ""
+}, `${origin}/api/web-viewer/approve?grant=${grant}`)
+check("the approval page shows the site, the entry (title and username), the agent and its task before the passkey's prompt", ["Site", `localhost:${PORT}`, "Entry", "Harbor", "Username", "alice@example.com", "Agent", "Claude Code", "Task", "harbor"].every((x) => facts.includes(x))
+  && facts.endsWith("|Approve with your passkey"), facts)
+const opts3 = await route("GET", `approve/options?grant=${grant}`)
+check("… from what the desktop app says of the login", opts3.site === `localhost:${PORT}` && opts3.entry?.title === "Harbor"
+  && opts3.entry?.username === "alice@example.com" && opts3.agent === "Claude Code" && opts3.task === "harbor" && opts3.allow?.length === 1, opts3)
+const yes = signed(phone, opts3.challenge)
+const passed = await route("POST", "approve", { grant, ...yes })
+const approved = await asking
+check("the passkey's yes: it fills", passed?.state === "approved" && approved?.status === "filled" && /passkey \(iPhone\)/.test(approved.approved ?? ""), [passed, approved])
+check("… and the ask leaves the Inbox", !(await inbox()).some((e) => e.id === ask?.id), null)
+const replayed = await route("POST", "approve", { grant, ...yes })
+check("the same yes again: refused", !!replayed.error, replayed)
+await op("navigate", { tab: h, to: "reload" })
+const again = await op("login", { tab: h, entry: "Harbor", task: "harbor" })
+check("their yes lasts: the same entry fills again without asking", again?.status === "filled", again)
+const denying = op("login", { tab: h, entry: "admin", task: "harbor" })
+const ask2 = await until(async () => (await inbox()).find((e) => e.source === "browser" && e.kind === "waiting" && /Harbor admin/.test(e.body ?? "")), 15000)
+const grant2 = /[?&]grant=([\w-]+)/.exec(ask2?.link ?? "")?.[1]
+await route("GET", `approve/options?grant=${grant2}`)
+const replayedElsewhere = await route("POST", "approve", { grant: grant2, ...yes })
+check("a yes given for another login: refused there", /another request/.test(String(replayedElsewhere.error)), replayedElsewhere)
+await route("POST", "approve", { grant: grant2, deny: true })
+const denied = await denying
+check("their no: refused, nothing filled", /said no/.test(String(denied.error)), denied)
+const none = await op("open", { url: `${NONE}/login` })
+const noEntry = await op("login", { tab: none.tab })
+check("a site with no entry (another port: another site) says so", /no login for 127\.0\.0\.1:\d+/.test(String(noEntry.error)), noEntry)
+
+const files = (dir) => { try { return fs.readdirSync(dir, { recursive: true }).map((f) => path.join(dir, String(f))).filter((f) => { try { return fs.statSync(f).isFile() } catch { return false } }) } catch { return [] } }
+const leaks = (dir) => files(dir).filter((f) => { const b = fs.readFileSync(f); return [...FORMS.slice(0, 3), HARBOR, ADMIN].some((s) => b.includes(s)) })
+const runs = path.join(USER_DATA, "agent-runs")
+const steps = files(runs).filter((f) => f.endsWith("steps.jsonl")).map((f) => fs.readFileSync(f, "utf8")).join("")
+check("each login is kept with the agent's steps: site, entry, result and who approved", /"action":"login"[^\n]*"site":"127\.0\.0\.1:\d+"[^\n]*"result":"filled the username and password"[^\n]*"approved":"free/.test(steps)
+  && /"result":"denied on the approval page"/.test(steps) && /"approved":"the user's passkey \(iPhone\)"/.test(steps), steps.split("\n").filter((l) => l.includes("login")).slice(0, 4))
+check("no secret in the agents' runs (steps and pictures)", files(runs).length > 2 && !leaks(runs).length, leaks(runs))
+const visits = await engine("history:list", { limit: 500 }).catch(() => null)
+const hist = files(USER_DATA).filter((f) => /web-history\.sqlite/.test(f))
+check("nor the browser's history (the GET form's address isn't kept, nor a title showing it)", JSON.stringify(visits ?? "").includes("/login-get") && !has(visits)
+  && hist.length > 0 && !leaks(USER_DATA).some((f) => hist.includes(f)), [hist, JSON.stringify(visits ?? "").slice(0, 300)])
+check("no secret in the vault, nor the server's own files", files(VAULT).length > 10 && files(LOCAL_DIR).length > 0 && !leaks(VAULT).length && !leaks(LOCAL_DIR).length, [...leaks(VAULT), ...leaks(LOCAL_DIR)])
+check("no secret in the app's or the server's output", ![SECRET, HARBOR, ADMIN, DB_PASSWORD].some((s) => output.includes(s)), output.slice(-500))
+
+await app.close()
+const app2 = await launch()
+const win2 = await pageNotLastScreen(app2)
+await win2.waitForSelector("[role=tree]", { timeout: 60000 })
+const after = await win2.evaluate(() => window.vaultite.web.engine("logins:status"))
+check(keyring ? "restarted: still set, from the keyring" : "restarted: locked, saying to type its password again", keyring
+  ? after?.file === DB && after.entries === 3 : after?.file === DB && after.locked === true && /type its password again/.test(after.error ?? ""), after)
+if (!keyring) {
+  const url = new URL(win2.url()).origin
+  const opened = await fetch(`${url}/api/ops/web-viewer.open`, { method: "POST", headers: { "Content-Type": "application/json", "X-Vaultite-Client": "mcp", "X-Vaultite-Agent": "claude-code" }, body: JSON.stringify({ url: `${SITE}/login` }) }).then((r) => r.json())
+  const locked = await fetch(`${url}/api/ops/web-viewer.login`, { method: "POST", headers: { "Content-Type": "application/json", "X-Vaultite-Client": "mcp", "X-Vaultite-Agent": "claude-code" }, body: JSON.stringify({ tab: (opened.result ?? opened).tab }) }).then((r) => r.json())
+  check("… and a login says it's locked", /locked since the app started/.test(String(locked.error)), locked)
+  const unlocked = await win2.evaluate(([f, p]) => window.vaultite.web.engine("logins:set", f, p), [DB, DB_PASSWORD])
+  check("… typed again, it's set till the app quits", unlocked?.entries === 3 && unlocked.held === true, unlocked)
+}
+await app2.close()
+console.log(errs.length ? `page errors:\n${errs.slice(0, 5).join("\n")}` : "no page errors")
+site.close()
+elsewhere.close()
+fs.rmSync(TMP, { recursive: true, force: true })
+await done()

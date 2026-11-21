@@ -1,0 +1,32 @@
+{
+  "id": "daily-notes",
+  "icon": "calendar-days",
+  "category": "writing",
+  "essential": true,
+  "name": "Daily notes",
+  "description": "A note for each day, named by its date, in its folder, made from a template: open today's or tomorrow's from the command palette, or edit one on a dashboard or in a sidebar panel.",
+  "settings": {
+    "format": {
+      "type": "string",
+      "default": "YYYY-MM-DD",
+      "label": "Date format",
+      "description": "how daily notes are named (YYYY-MM-DD, YYYY/MM/YYYY-MM-DD for a folder each month...)"
+    },
+    "template": {
+      "type": "string",
+      "default": "",
+      "unset": "None",
+      "label": "Template",
+      "description": "a note new daily notes start from; its path without .md (Templates/Daily), and none: they start empty"
+    }
+  },
+  "blocks": {
+    "day": {
+      "description": "a day's daily note, edited in place; steps to other days, opens the note, starts a missing one from the template",
+      "options": {
+        "section": { "type": "string", "description": "a heading (Plan): only its section; left out: the whole note" },
+        "date": { "type": "string", "description": "the day (YYYY-MM-DD); left out: today" }
+      }
+    }
+  }
+}

@@ -1,0 +1,231 @@
+// Markdown's extras (code fences, callouts, custom ones too, footnotes, inline ones too, math, mermaid, <details>) in reading, live preview and source,
+// what's inside code left alone, and a phone. WRITES a "Qa markdown" folder: throwaway only.
+//   node web/qa/markdown.mjs <base url> [out dir]
+import { SHOTS, apiAt, command, qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+import { pagePath } from "./subjects.mjs"
+const { args: [B, OUT = SHOTS], browser, check, watch, done } = await qa(import.meta.url)
+const PATH = "Qa markdown/Rich.md"
+const TEXT = `Intro with a note[^1] and a second one[^b].
+
+\`\`\`ts
+const greet = (name: string) => \`Hello, \${name}\` // says hi
+\`\`\`
+
+> [!tip] A callout with **bold**
+> Body with $x^2$ inline.
+
+> [!warning]- Folded
+> Hidden text
+
+Math $E = mc^2$ and money: $5 and $10.
+
+$$
+\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}
+$$
+
+\`\`\`mermaid
+flowchart LR
+  Idea --> Note --> Project
+\`\`\`
+
+<details>
+<summary>A toggle</summary>
+
+Inside **it**.
+
+</details>
+
+Last line.
+
+[^1]: The note text.
+[^b]: Another.
+`
+await fetch(`${B}api/file?path=${encodeURIComponent(PATH)}`, { method: "DELETE" })
+await fetch(`${B}api/file`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: PATH, text: TEXT }) })
+
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
+await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(B).origin })
+const page = watch(await ctx.newPage()), ui = app(page)
+const ed = page.locator(".vau-editor")
+const editorOf = (p) => page.locator(`article.file-view[data-path="${p}"]:visible .vau-editor .cm-content`)
+const VIEWS = { "Switch to reading view": /reading/i, "Switch to live preview": /live preview/i, "Switch to source mode": /source/i }
+const switchTo = async (name) => {
+  await command(page, name, 0)
+  await until(async () => VIEWS[name].test(await page.locator("[role=status] button[aria-label^='Current view']").getAttribute("aria-label")))
+  await ui.idle()
+}
+const mermaid = ed.locator(".cm-block-mermaid svg")
+
+await page.goto(`${B}#file/${encodeURIComponent(PATH)}`); await editorOf(PATH).waitFor(); await ui.idle()
+await switchTo("Switch to reading view")
+await mermaid.waitFor({ timeout: 10_000 }).catch(() => {}); await ui.idle()
+check("reading: a fence shows its language", await ed.locator(".cm-fence-head .cm-fence-lang", { hasText: "ts" }).count() === 1)
+// The language's parser is its own chunk: give it a moment.
+await until(async () => (await ed.locator(".cm-codeblock span[class]").count()) > 3)
+check("reading: the code in it is highlighted", await ed.locator(".cm-codeblock span[class]").count() > 3)
+check("reading: no ``` lines", !(await ed.locator(".cm-line", { hasText: "```" }).count()))
+check("reading: a tip callout", await ed.locator('.callout[data-callout="tip"]').count() === 1)
+check("reading: a folded warning callout", await ed.locator('details.callout[data-callout="warning"]:not([open])').count() === 1)
+check("reading: inline math drawn (in the text and in the callout)", await ed.locator(".math-inline .katex").count() >= 2)
+check("reading: display math drawn", await ed.locator(".math-display .katex-display, .cm-block-math .katex").count() >= 1)
+check("reading: $5 and $10 stays text", await ed.locator(".cm-line", { hasText: "$5 and $10" }).count() === 1)
+check("reading: the mermaid diagram is drawn", await ed.locator(".cm-block-mermaid svg").count() === 1)
+check("reading: footnote references are numbered", (await ed.locator(".cm-footnote-ref").allInnerTexts()).join(",") === "1,2")
+check("reading: a definition shows its number", await ed.locator(".cm-footnote-label", { hasText: "1." }).count() === 1)
+check("reading: <details> is a toggle", await ed.locator(".cm-block-details details summary", { hasText: "A toggle" }).count() === 1)
+await page.screenshot({ path: `${OUT}markdown-reading.png`, fullPage: true })
+
+// Folding a callout, opening <details>.
+await ed.locator("details.callout summary").click(); await ui.idle()
+check("clicking a folded callout's title opens it", await ed.locator("details.callout[open]").count() === 1)
+await ed.locator(".cm-block-details summary").click(); await ui.idle()
+check("clicking the toggle opens it", await ed.locator(".cm-block-details details[open]").count() === 1)
+// A change elsewhere in the vault (the store reloads) doesn't redraw them shut.
+await ui.sees("Qa markdown/Elsewhere.md", () => fetch(`${B}api/file`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: "Qa markdown/Elsewhere.md", text: "Hi.\n" }) }))
+check("a change elsewhere in the vault leaves them open", await ed.locator("details.callout[open]").count() === 1 && await ed.locator(".cm-block-details details[open]").count() === 1)
+
+// Copy.
+await ed.locator(".cm-codeblock").first().hover(); await ui.idle()
+const copy = ed.locator(".cm-fence-copy").first()
+check("hovering the code shows its copy button", await copy.evaluate((b) => getComputedStyle(b).opacity === "1"))
+await copy.click(); await ui.idle()
+const clip = await page.evaluate(() => navigator.clipboard.readText())
+check(`copy copies the code (${JSON.stringify(clip)})`, clip === "const greet = (name: string) => `Hello, ${name}` // says hi")
+
+// Footnote click scrolls to its definition.
+await ed.locator(".cm-footnote-ref").first().click(); await ui.idle()
+check("clicking a footnote shows its definition", await ed.locator(".cm-footnote-def").first().isVisible())
+
+// Live preview: click into a callout and its Markdown shows.
+await switchTo("Switch to live preview")
+check("live: callouts drawn off the cursor", await ed.locator(".callout").count() === 2)
+await ed.locator('.callout[data-callout="tip"] .callout-content').click(); await ui.idle()
+check("live: clicking a callout shows its Markdown", await ed.locator(".cm-line", { hasText: "[!tip] A callout" }).count() === 1)
+await ed.locator(".cm-block-mermaid").click(); await ui.idle()
+check("live: clicking the diagram shows its source, the callout is drawn again", await ed.locator(".cm-line", { hasText: "```mermaid" }).count() === 1 && await ed.locator(".callout").count() === 2)
+await ed.locator(".cm-line", { hasText: "Last line." }).click(); await mermaid.waitFor({ timeout: 5000 }).catch(() => {}); await ui.idle()
+check("live: leaving it draws it again", await ed.locator(".cm-block-mermaid svg").count() === 1)
+// (its drawn part: KaTeX's hidden MathML is a 1px box at the top, which a click would land above the line)
+await ed.locator(".cm-line", { hasText: "money" }).locator(".katex-html").click(); await ui.idle()
+check("live: math under the cursor shows its TeX", await ed.locator(".cm-line", { hasText: "$E = mc^2$" }).count() === 1)
+await page.screenshot({ path: `${OUT}markdown-live.png`, fullPage: true })
+
+// Source: only highlighting.
+await switchTo("Switch to source mode")
+check("source: nothing drawn", !(await ed.locator(".callout, .katex, .cm-fence-head").count()))
+check("source: code still highlighted", await ed.locator(".cm-codeblock span[class]").count() > 3)
+await switchTo("Switch to reading view")
+await mermaid.waitFor({ timeout: 10_000 }).catch(() => {}); await ui.idle()
+
+// Dark mode: the diagram takes dark colours (Pele's are the scheme's tokens, so its painted fill is what changes).
+const fill = () => ed.locator(".cm-block-mermaid svg").evaluate((s) => { const r = s.querySelector(".node rect, rect") ?? s; return getComputedStyle(r).fill + ":" + getComputedStyle(r).stroke })
+const before = await fill()
+await page.evaluate(() => document.documentElement.classList.add("dark")); await until(async () => await fill() !== before); await ui.idle()
+check("the diagram redraws for dark mode", await fill() !== before, { before, now: await fill() })
+await page.screenshot({ path: `${OUT}markdown-dark.png`, fullPage: true })
+await page.evaluate(() => document.documentElement.classList.remove("dark")); await until(async () => await fill() === before); await ui.idle()
+
+// The Design page, read as a dashboard (core/markdown.ts + hydrate).
+await page.goto(`${B}#file/${encodeURIComponent(await pagePath(B, "Design"))}`)
+const dash = page.locator(".dash-prose")
+await dash.locator(".mermaid-diagram svg").waitFor({ timeout: 10_000 }).catch(() => {}); await ui.idle()
+check("Design: code block with its label", await dash.locator(".md-code .md-code-lang", { hasText: "ts" }).count() === 1)
+check("Design: callouts", await dash.locator('.callout[data-callout="tip"]').count() === 1 && await dash.locator("details.callout").count() === 1)
+check("Design: math", await dash.locator(".katex").count() >= 2)
+check("Design: mermaid", await dash.locator(".mermaid-diagram svg").count() === 1)
+check("Design: footnotes, an inline one too, and their list", await dash.locator(".footnote-ref").count() === 2 && await dash.locator("section.footnotes li").count() === 2)
+check("Design: <details>", await dash.locator("details:not(.callout) summary", { hasText: "A toggle" }).count() === 1)
+const tsCode = dash.locator(".md-code", { has: page.locator(".md-code-lang", { hasText: "ts" }) })
+await tsCode.hover()
+await tsCode.locator(".md-copy").click(); await ui.idle()
+check("Design: copy copies", (await page.evaluate(() => navigator.clipboard.readText())).includes("const greet"))
+await tsCode.screenshot({ path: `${OUT}markdown-design-code.png` })
+await page.locator(".dash-prose").first().screenshot({ path: `${OUT}markdown-design.png` })
+
+// Live preview from the keyboard, and Markdown inside code. The files are made as the app makes them (one an agent makes
+// through the API gets `origin: ai`).
+const put = (path, text) => fetch(`${B}api/file`, { method: "POST", headers: { "Content-Type": "application/json", "X-Vaultite-Client": "app/qa" }, body: JSON.stringify({ path, text }) })
+await put("Qa markdown/Keys.md", "Top line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n![[Rich]]\n```\n\n````md\n```block-books\n```\n````\n\n$$\nx^2\n$$\n\nBottom line\n")
+await page.goto(`${B}#file/${encodeURIComponent("Qa markdown/Keys.md")}`); await editorOf("Qa markdown/Keys.md").waitFor(); await ui.idle()
+await switchTo("Switch to live preview")
+check("live: an embed or a block inside a code fence stays code", !(await ed.locator(".cm-block-embed, .cm-block-block").count()))
+check("live: $$ after a ```` fence holding a ``` one is still drawn", await ed.locator(".cm-block-math").count() === 1)
+await ed.locator(".cm-line", { hasText: "Top line" }).click(); await page.keyboard.press("End")
+await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown"); await ui.idle()
+check("live: ↓ goes into a table, its first cell open", await ed.locator(".cm-block-table .cm-cell-input").count() === 1)
+for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown")
+await ui.idle()
+check("live: and out of it, drawn again", await ed.locator(".cm-block-table").count() === 1)
+for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowUp")
+await ui.idle()
+check("live: ↑ goes back into it", await ed.locator(".cm-block-table .cm-cell-input").count() === 1)
+await put("Qa markdown/Only frontmatter.md", "---\ntype: note\n---")
+await page.goto(`${B}#file/${encodeURIComponent("Qa markdown/Only frontmatter.md")}`); await editorOf("Qa markdown/Only frontmatter.md").waitFor(); await ui.idle()
+const fmFile = async () => (await fetch(`${B}api/file?path=${encodeURIComponent("Qa markdown/Only frontmatter.md")}`)).json()
+await ed.locator(".cm-content").click(); await page.keyboard.type("Typed."); await until(async () => (await fmFile()).text.endsWith("Typed.")); await ui.idle()
+const fmOnly = await fmFile()
+// The Notes kind fills a note's id and dates into its frontmatter: what matters is that it's still one block, closed,
+// with the typing after it.
+check(`typing after a closing --- keeps the frontmatter (${JSON.stringify(fmOnly.text)})`,
+  /^---\ntype: note\n(?:[^\n]*\n)*?---\nTyped\.$/.test(fmOnly.text) && fmOnly.text.split("\n").filter((l) => l === "---").length === 2)
+// Checkboxes drawn as HTML (a callout, <details>, an embedded note) tick in their file while reading, as a line's do.
+const TICKS = "Qa markdown/Ticks.md", TICKED = "Qa markdown/Ticked.md"
+const text = async (p) => (await (await fetch(`${B}api/file?path=${encodeURIComponent(p)}`)).json()).text
+await put(TICKED, "- [ ] embedded one\n- [ ] embedded two\n")
+await put(TICKS, "> [!todo] Callout\n> - [ ] first\n> - [ ] second\n\n![[Ticked]]\n\n<details open><summary>More</summary>\n\n- [ ] inside\n\n</details>\n\n```\n- [ ] in code\n```\n")
+await page.goto(`${B}#file/${encodeURIComponent(TICKS)}`); await editorOf(TICKS).waitFor(); await ed.locator(".cm-block-embed input[type=checkbox]").nth(1).waitFor(); await ui.idle()
+if (await ed.locator(".cm-content").first().getAttribute("contenteditable") === "true") { await page.keyboard.press("ControlOrMeta+E"); await ed.locator(".cm-content[contenteditable=false]").first().waitFor(); await ed.locator(".cm-block-embed input[type=checkbox]").nth(1).waitFor(); await ui.idle() }
+await ed.locator(".cm-block-callout input[type=checkbox]").nth(1).click(); await ui.idle()
+await ed.locator(".cm-block-details input[type=checkbox]").first().click(); await ui.idle()
+await ed.locator(".cm-block-embed input[type=checkbox]").nth(1).click(); await ui.idle()
+const ticks = await text(TICKS)
+check(`reading: a callout's and a <details>' boxes tick in the file, code's untouched (${JSON.stringify(ticks)})`,
+  ticks.includes("> - [ ] first\n> - [x] second") && ticks.includes("- [x] inside") && ticks.includes("- [ ] in code"))
+check("reading: an embedded note's box ticks in its own file", (await text(TICKED)).includes("- [ ] embedded one\n- [x] embedded two"))
+// The trash is a hidden folder: it opens only with Show hidden files on (File explorer's settings).
+const api = apiAt(B)
+const hiddenBefore = (await api("GET", "config/files")).showHidden ?? null
+await api("PATCH", "config/files", { showHidden: true })
+await put("Qa markdown/Trashed.md", "- [ ] a task\n")
+const trashed = (await (await fetch(`${B}api/file?path=${encodeURIComponent("Qa markdown/Trashed.md")}`, { method: "DELETE" })).json()).trashed
+await page.goto(`${B}#file/${encodeURIComponent(trashed)}`)
+check(`a checkbox in the trash is disabled (${trashed})`, await until(async () => await ed.locator("input.cm-task[disabled]").count() === 1))
+await api("PATCH", "config/files", { showHidden: hiddenBefore })
+
+const PARITY = "Qa markdown/Inline notes.md"
+await put(PARITY, "A labelled one[^a], an inline one^[with **bold** and [[Rich]] in it] and a third^[plain].\n\n> [!recipe] Leek soup\n> A type of its own.\n\n> [!note] A note\n> For its look.\n\n[^a]: The labelled one.\n")
+await page.goto(`${B}#file/${encodeURIComponent(PARITY)}`); await editorOf(PARITY).waitFor(); await ui.idle()
+await switchTo("Switch to reading view")
+const refs = ed.locator(".cm-footnote-ref")
+check("reading: inline footnotes numbered with the labelled one", (await refs.allInnerTexts()).join(",") === "1,2,3", await refs.allInnerTexts())
+check("reading: an inline footnote's text is its tip", await refs.nth(1).getAttribute("data-tip") === "with bold and Rich in it")
+check("reading: none of it shown raw", !(await ed.locator(".cm-line", { hasText: "^[" }).count()))
+const recipe = ed.locator('.callout[data-callout="recipe"]'), noteCallout = ed.locator('.callout[data-callout="note"]')
+const look = (l) => l.evaluate((c) => [getComputedStyle(c).backgroundColor, getComputedStyle(c.querySelector(".callout-title")).color, c.querySelector(".callout-icon").innerHTML])
+check("reading: a custom callout keeps its type and looks like a note", await recipe.count() === 1 && JSON.stringify(await look(recipe)) === JSON.stringify(await look(noteCallout)))
+await refs.nth(1).hover()
+const tipShown = await until(async () => await page.locator(".tooltip").count() > 0, 3000)
+const box = await ed.locator(".cm-line", { hasText: "labelled one" }).first().boundingBox()
+await page.screenshot({ path: `${OUT}inline-footnote.png`, clip: { x: box.x - 8, y: box.y - 70, width: 640, height: box.height + 140 } })
+check("reading: hovering an inline footnote shows its text", tipShown)
+await recipe.screenshot({ path: `${OUT}custom-callout.png` })
+await page.addStyleTag({ content: '.callout[data-callout="recipe"] { --callout-color: 200, 40, 40; }' }); await ui.idle()
+check("reading: a snippet's --callout-color colours it", (await look(recipe))[1] === "rgb(200, 40, 40)", await look(recipe))
+await recipe.screenshot({ path: `${OUT}custom-callout-snippet.png` })
+await switchTo("Switch to live preview")
+await ed.locator(".cm-line", { hasText: "labelled one" }).first().click({ position: { x: 2, y: 8 } }); await page.keyboard.press("End"); await page.keyboard.press("ArrowLeft"); await ui.idle()
+check("live: the cursor on it shows its Markdown", await ed.locator(".cm-line", { hasText: "^[plain]" }).count() === 1)
+
+// Phone.
+const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })
+const pp = watch(await phone.newPage()), pui = app(pp)
+await pp.goto(`${B}#file/${encodeURIComponent(PATH)}`); await pp.locator(".cm-fence-copy, .md-copy").first().waitFor(); await pp.locator(".cm-block-mermaid svg, .mermaid-diagram svg").first().waitFor({ timeout: 10_000 }).catch(() => {}); await pui.idle()
+check("phone: no sideways scroll", await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+const pc = pp.locator(".cm-fence-copy, .md-copy").first()
+check("phone: copy button always shown", await pc.count() === 1 && await pc.evaluate((b) => getComputedStyle(b).opacity === "1"))
+await pp.screenshot({ path: `${OUT}markdown-phone.png`, fullPage: true })
+
+await browser.close()
+await fetch(`${B}api/file?path=${encodeURIComponent("Qa markdown")}`, { method: "DELETE" })
+await done()

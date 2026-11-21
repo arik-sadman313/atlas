@@ -1,50 +1,24 @@
-# Miscellaneous
-.directory
-*.class
-*.log
-*.pyc
-*.swp
+data/
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+node_modules
+web/dist/
+web/qa/shots/
+dist-app/
+dist-test/
+plugins/core/audio-recorder/bin/
+plugins/core/sync-conflicts/bin/
+electron/bin/
+electron/build.json
+electron/shell.json
+electron/cli.json
+.obsidian/
+CLAUDE.local.md
+web/dist-demo/
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-/dist/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Widget Preview related
-.widget_preview/
+# The vault this checkout is opened as (the app writes its own here)
+.vaultite/
+# (Claude Code writes a mod's types into it as it loads one)
+plugins/core/terminal/claude-pictures/.claude-plugin/types/
+plugins/core/terminal/claude-pictures/tsconfig.json
+.tsbuild/
+.compile-cache/

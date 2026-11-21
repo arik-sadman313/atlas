@@ -1,0 +1,40 @@
+import fs from "node:fs"
+import path from "node:path"
+import { writeAtomic } from "../../../core/vault.ts"
+import { TERMINAL } from "./model.ts"
+import { dir, MAX, plugin } from "./server.ts"
+
+const handedFile = () => path.join(dir(), "handed.json")
+export function handed(): string[] {
+  try {
+    const v = JSON.parse(fs.readFileSync(handedFile(), "utf8"))
+    return Array.isArray(v) ? v.filter((t) => typeof t === "string") : []
+  } catch { return [] }
+}
+export function hand(terminal: string, on = true) {
+  if (!TERMINAL.test(terminal)) return
+  const all = handed().filter((t) => t !== terminal)
+  if (on) all.push(terminal)
+  fs.mkdirSync(dir(), { recursive: true })
+  writeAtomic(handedFile(), JSON.stringify(all.slice(-MAX)))
+}
+
+export const ending = new Map<string, number>()
+const ENDING = 30 * 60_000
+
+const endingSoon = new Map<string, ReturnType<typeof setTimeout>>()
+export function endHanded(terminal: string) {
+  const at = terminal ? ending.get(terminal) : undefined
+  if (at === undefined) return
+  ending.delete(terminal)
+  if (Date.now() - at >= ENDING) return
+  hand(terminal, false)
+  clearTimeout(endingSoon.get(terminal))
+  endingSoon.set(terminal, setTimeout(() => { endingSoon.delete(terminal); void plugin.runOp("terminal.end", { id: terminal, keepTabs: true }).catch(() => {}) }, 2000))
+}
+export function keepHanded(terminal: string) {
+  ending.delete(terminal)
+  const t = endingSoon.get(terminal)
+  if (t) { clearTimeout(t); endingSoon.delete(terminal) }
+}
+

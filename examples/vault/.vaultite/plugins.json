@@ -1,0 +1,29 @@
+{
+  "disabled": [],
+  "enabled": [
+    "audio-recorder",
+    "books",
+    "calendar",
+    "dispatch",
+    "health",
+    "hermes",
+    "learning",
+    "lessons",
+    "logs",
+    "note-composer",
+    "note-dates",
+    "notes",
+    "openclaw",
+    "people",
+    "people-map",
+    "projects",
+    "random-note",
+    "today",
+    "token-count",
+    "unique-note",
+    "web-viewer",
+    "activity",
+    "workspaces",
+    "codex"
+  ]
+}

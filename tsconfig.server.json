@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.server.tsbuildinfo",
+    // how a vault plugin's backend imports the core (core/vaultplugins.ts): the example in tools/fixtures
+    "paths": { "@vaultite/core/*": ["./core/*"], "@plugins/*": ["./plugins/core/*.ts", "./plugins/core/*/index.ts"] },
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Node runs these files as they are (type stripping): imports name the .ts file */
+    "module": "nodenext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["server.ts", "core", "web/demo/worker.ts", "web/demo/mount.ts", "web/demo/machine.ts", "web/demo/researchfiles.ts", "web/demo/env.d.ts", "web/demo/node", "web/offline/worker.ts", "plugins/**/plugin.ts", "plugins/**/*.d.ts", "plugins/**/import.ts", "plugins/**/cli.ts", "tools", "electron/*.ts", "electron/browser/*.ts", ".github/windows/*.ts"],
+  // an example vault plugin's frontend: tsconfig.app.json
+  // (upstream kdbxweb's tests, kept as written: typed for an older TypeScript's ArrayBuffer)
+  "exclude": ["tools/fixtures/**/*.tsx", "tools/test/kdbx/upstream"]
+}

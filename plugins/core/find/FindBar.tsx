@@ -1,0 +1,309 @@
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { createPortal, flushSync } from "react-dom"
+import { ChevronRight } from "lucide-react"
+import { EditorView, keymap, type Panel, type ViewUpdate } from "@codemirror/view"
+import { EditorSelection, Prec, StateEffect, StateField, type EditorState, type Extension, type SelectionRange } from "@codemirror/state"
+import {
+  closeSearchPanel, findNext, findPrevious, getSearchQuery, openSearchPanel, replaceAll, replaceNext, search, searchPanelOpen, SearchQuery, setSearchQuery,
+} from "@codemirror/search"
+import { cn, commandKeys, editorOf, isDesktop, keyHint, onLayoutChange, openAround, textRanges } from "@vaultite"
+import { badField, countText, field, FindTools, floatingCard, floatingSpot, MAX, tool } from "./tools"
+
+type Spec = { search: string; replace: string; caseSensitive: boolean; regexp: boolean; wholeWord: boolean }
+const queryIn = (view: EditorView, q: Spec) => new SearchQuery({ search: q.search, replace: q.replace, caseSensitive: q.caseSensitive, regexp: q.regexp,
+  wholeWord: q.wholeWord, test: (_m, state, from, to) => {
+    const ed = editorOf(view)
+    return from >= (ed?.start?.(state) ?? 0) && (ed?.findable?.(state, from, to) ?? true)
+  } })
+
+type Count = { total: number; current: number; more: boolean }
+
+function countOf(state: EditorState, q: SearchQuery): Count {
+  if (!q.search || !q.valid) return { total: 0, current: 0, more: false }
+  const sel = state.selection.main
+  const cur = q.getCursor(state)
+  let total = 0, current = 0
+  for (let m = cur.next(); !m.done; m = cur.next()) {
+    total++
+    if (m.value.from === sel.from && m.value.to === sel.to) current = total
+    if (total >= MAX) return { total, current, more: true }
+  }
+  return { total, current, more: false }
+}
+
+function seek(view: EditorView, q: SearchQuery) {
+  if (!q.search || !q.valid) return
+  const from = view.state.selection.main.from
+  let m = q.getCursor(view.state, from).next()
+  if (m.done) m = q.getCursor(view.state, 0, from + q.search.length).next()
+  if (m.done) return
+  const range = EditorSelection.range(m.value.from, m.value.to)
+  view.dispatch({ selection: range, effects: scrollTo(range, view), userEvent: "select.search" })
+}
+
+export function pattern(q: SearchQuery): RegExp | null {
+  if (!q.search || !q.valid) return null
+  let src = q.regexp ? q.search
+    : (q.literal ? q.search : q.search.replace(/\\([nrt\\])/g, (_, c) => (c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : "\\"))).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  if (q.wholeWord) src = `(?<![\\p{L}\\p{N}_])(?:${src})(?![\\p{L}\\p{N}_])`
+  for (const flags of ["gmu", "gm"]) {
+    try { return new RegExp(src, flags + (q.caseSensitive ? "" : "i")) } catch { /* (valid only without u) */ }
+  }
+  return null
+}
+
+export const lit = new Map<object, { all: Range[]; current: Range | null }>()
+export function paintLit() {
+  if (typeof CSS === "undefined" || !("highlights" in CSS)) return
+  const all = [...lit.values()].flatMap((x) => x.all), cur = [...lit.values()].flatMap((x) => (x.current ? [x.current] : []))
+  if (all.length) CSS.highlights.set("vau-find", new Highlight(...all)); else CSS.highlights.delete("vau-find")
+  if (cur.length) { const h = new Highlight(...cur); h.priority = 1; CSS.highlights.set("vau-find-current", h) } else CSS.highlights.delete("vau-find-current")
+}
+
+export function scroller(el: Element | null, axis: "x" | "y", stop?: Element): HTMLElement | null {
+  for (; el && el !== stop; el = el.parentElement) {
+    const cs = getComputedStyle(el), o = axis === "x" ? cs.overflowX : cs.overflowY
+    if (el instanceof HTMLElement && /auto|scroll/.test(o) && (axis === "x" ? el.scrollWidth > el.clientWidth : el.scrollHeight > el.clientHeight)) return el
+  }
+  return null
+}
+
+function show(view: EditorView, r: Range | Element) {
+  reveal(r, view.contentDOM, scroller(view.scrollDOM, "y"), panels.get(view)?.card ?? view.dom.querySelector(".cm-panels-top"))
+}
+
+export function reveal(r: Range | Element, within: Element, sc: HTMLElement | null, bar?: Element | null) {
+  const inside = r instanceof Range ? r.startContainer.parentElement : null
+  if (r instanceof Range) openAround(r)
+  for (let el = scroller(inside, "x", within); el; el = scroller(el.parentElement, "x", within)) {
+    const m = r.getBoundingClientRect(), e = el.getBoundingClientRect(), pad = 24
+    if (m.left < e.left + pad) el.scrollLeft -= e.left + pad - m.left
+    else if (m.right > e.right - pad) el.scrollLeft += Math.min(m.right - (e.right - pad), m.left - (e.left + pad))
+  }
+  if (!sc) return
+  const m = r.getBoundingClientRect(), s = sc.getBoundingClientRect()
+  const top = Math.max(s.top, bar?.getBoundingClientRect().bottom ?? s.top)
+  sc.scrollTop += Math.round((m.top + m.bottom) / 2 - (top + s.bottom) / 2)
+}
+
+const shownByBar = StateEffect.define<null>()
+
+function scrollTo(range: SelectionRange, view: EditorView): StateEffect<unknown> {
+  const panel = panels.get(view)
+  const block = panel && editorOf(view)?.blocks?.().find((b) => b.from <= range.from && range.from < b.to)
+  if (!panel || !block) return EditorView.scrollIntoView(range, { y: "center" })
+  panel.target = { pos: range.from, tries: 0 }
+  return shownByBar.of(null)
+}
+
+type BarProps = { view: EditorView; query: SearchQuery; count: Count; readOnly: boolean; replacing: boolean; setReplacing: (on: boolean) => void
+  focus: { n: number; field: "find" | "replace" }
+  floating: boolean; card: (el: HTMLDivElement | null) => void }
+
+function Bar({ view, query, count, readOnly, replacing, setReplacing, focus, floating, card }: BarProps) {
+  const [find, setFind] = useState(query.search)
+  const [repl, setRepl] = useState(query.replace)
+  useEffect(() => { setFind((f) => (f === query.search ? f : query.search)) }, [query.search])
+  useEffect(() => { setRepl((r) => (r === query.replace ? r : query.replace)) }, [query.replace])
+  const findRef = useRef<HTMLInputElement>(null), replRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const el = focus.field === "replace" && replRef.current ? replRef.current : findRef.current
+    el?.focus(); el?.select()
+  }, [focus])
+  const set = (spec: Partial<{ search: string; replace: string; caseSensitive: boolean; regexp: boolean; wholeWord: boolean }>) => {
+    const q = queryIn(view, { search: query.search, replace: query.replace, caseSensitive: query.caseSensitive, regexp: query.regexp, wholeWord: query.wholeWord, ...spec })
+    view.dispatch({ effects: setSearchQuery.of(q) })
+    if (spec.search !== undefined || spec.caseSensitive !== undefined || spec.regexp !== undefined || spec.wholeWord !== undefined) seek(view, q)
+  }
+  const keys = (e: KeyboardEvent, which: "find" | "replace") => {
+    if (e.key === "Escape") { e.preventDefault(); closeSearchPanel(view); view.focus(); return }
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    if (which === "replace" && !readOnly) { if (e.metaKey || e.ctrlKey) replaceAll(view); else replaceNext(view); return }
+    if (e.shiftKey) findPrevious(view); else findNext(view)
+  }
+  const none = !!query.search && query.valid && count.total === 0
+  const bad = none || (!!query.search && !query.valid)
+  const status = countText({ search: query.search, valid: query.valid, total: count.total, current: count.current - 1, more: count.more })
+  const canReplace = !readOnly
+  return (
+    <div ref={card} className={floating ? cn("pointer-events-auto top-[calc(var(--vau-panel-top,0px)+8px)] flex flex-col gap-1", floatingSpot, floatingCard) : "flex flex-col gap-1 px-1 py-1.5 max-md:gap-1.5"}
+      data-find-bar data-overlay={floating ? "" : undefined} data-replacing={replacing && canReplace ? "" : undefined}>
+      <div className="flex min-w-0 items-center gap-0.5 max-md:flex-wrap max-md:gap-y-1.5">
+        {canReplace && (
+          <button type="button" aria-label={replacing ? "Hide replace" : "Show replace"} aria-expanded={replacing} data-tip={replacing ? "Hide replace" : `Replace${commandKeys("find:replace") ? ` (${commandKeys("find:replace")})` : ""}`}
+            onClick={() => setReplacing(!replacing)} onMouseDown={(e) => e.preventDefault()} className={cn(tool, "w-5 max-md:w-7")}>
+            <ChevronRight className={cn("size-3.5 transition-transform duration-150", replacing && "rotate-90")} strokeWidth={2.5} />
+          </button>
+        )}
+        <div className="relative min-w-0 flex-1 max-md:order-first max-md:basis-full">
+          <input ref={findRef} main-field="true" value={find} placeholder="Find" aria-label="Find" spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="off"
+            onChange={(e) => { setFind(e.target.value); set({ search: e.target.value }) }} onKeyDown={(e) => keys(e, "find")}
+            className={cn(field, "pr-28 max-md:pr-24", bad && badField)} />
+          <span aria-live="polite" data-find-count className={cn("pointer-events-none absolute inset-y-0 right-2 flex items-center text-[12px] tabular-nums max-md:text-[13px]", bad ? "text-ink-(--red)" : "text-muted-foreground")}>{status}</span>
+        </div>
+        <FindTools spec={query} set={set} total={count.total} step={(by) => (by < 0 ? findPrevious(view) : findNext(view))}
+          close={() => { closeSearchPanel(view); view.focus() }} />
+      </div>
+      {replacing && canReplace && (
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="w-5 shrink-0 max-md:hidden" />
+          <input ref={replRef} value={repl} placeholder="Replace" aria-label="Replace" spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="off"
+            onChange={(e) => { setRepl(e.target.value); set({ replace: e.target.value }) }} onKeyDown={(e) => keys(e, "replace")} className={cn(field, "flex-1")} />
+          <button type="button" disabled={!count.total} onClick={() => replaceNext(view)} onMouseDown={(e) => e.preventDefault()} data-tip={`Replace this match (${keyHint("Enter")})`}
+            className="h-7 shrink-0 cursor-pointer rounded-[6px] px-2 text-[13px] font-medium hover:bg-foreground/[0.06] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent max-md:h-9 max-md:text-[15px]">Replace</button>
+          <button type="button" disabled={!count.total} onClick={() => replaceAll(view)} onMouseDown={(e) => e.preventDefault()} data-tip={`Replace every match (${keyHint("Mod+Enter")})`}
+            className="h-7 shrink-0 cursor-pointer rounded-[6px] px-2 text-[13px] font-medium hover:bg-foreground/[0.06] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent max-md:h-9 max-md:text-[15px]">Replace all</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+class FindPanel implements Panel {
+  dom: HTMLElement
+  top = true
+  view: EditorView
+  root: Root
+  replacing = false
+  focus: { n: number; field: "find" | "replace" } = { n: 0, field: "find" }
+  count: Count = { total: 0, current: 0, more: false }
+  counted: { query: SearchQuery; doc: unknown; sel: unknown } | null = null
+  timer: ReturnType<typeof setTimeout> | null = null
+  target: { pos: number; tries: number } | null = null
+  frame = 0
+  watcher: MutationObserver
+  card: HTMLDivElement | null = null
+  redraw = () => this.draw(false)
+  unlayout: () => void
+
+  constructor(view: EditorView) {
+    this.view = view
+    this.dom = document.createElement("div")
+    this.dom.className = "vau-find"
+    this.root = createRoot(this.dom)
+    panels.set(view, this)
+    this.watcher = new MutationObserver(() => this.light())
+    this.watcher.observe(view.contentDOM, { childList: true, subtree: true, characterData: true })
+    this.unlayout = onLayoutChange(this.redraw)
+  }
+  mount() { this.recount(); this.draw(true); this.light() }
+  update(u: ViewUpdate) {
+    this.light()
+    const q = getSearchQuery(u.state), was = getSearchQuery(u.startState)
+    const ro = u.state.readOnly !== u.startState.readOnly
+    const typed = u.docChanged && u.transactions.some((t) => t.isUserEvent("input.type") || t.isUserEvent("delete"))
+    if (!q.eq(was) || (u.selectionSet && !typed) || ro) { this.recount(); this.draw(false) }
+    else if (u.docChanged) {
+      if (this.timer) clearTimeout(this.timer)
+      this.timer = setTimeout(() => { this.timer = null; this.recount(); this.draw(false) }, 150)
+    }
+  }
+  destroy() {
+    if (this.timer) clearTimeout(this.timer)
+    cancelAnimationFrame(this.frame)
+    this.watcher.disconnect()
+    this.unlayout()
+    lit.delete(this.view)
+    paintLit()
+    panels.delete(this.view)
+    const root = this.root
+    setTimeout(() => root.unmount(), 0)
+  }
+  light() {
+    if (this.frame) return
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0
+      const { view } = this, state = view.state, q = getSearchQuery(state), re = pattern(q)
+      const blocks = re ? (editorOf(view)?.blocks?.() ?? []) : []
+      const all: Range[] = []
+      let current: Range | null = null
+      const sel = state.selection.main
+      for (const b of blocks) {
+        if (!b.text || !b.el || !re) continue
+        const found = textRanges(b.el.querySelector<HTMLElement>(".cm-block-body") ?? b.el, re, MAX)
+        all.push(...found)
+        if (!this.count.current || sel.from < b.from || sel.from >= b.to || !found.length) continue
+        let k = 0
+        const cur = q.getCursor(state, b.from, sel.from)
+        for (let m = cur.next(); !m.done; m = cur.next()) if (m.value.from < sel.from) k++
+        current = found[Math.min(k, found.length - 1)]
+      }
+      lit.set(view, { all, current })
+      paintLit()
+      const t = this.target
+      if (!t) return
+      const block = blocks.find((b) => b.from <= t.pos && t.pos < b.to)
+      if (!block || ++t.tries > 4) { this.target = null; return }
+      if (!block.el) {
+        const sc = scroller(view.scrollDOM, "y")
+        if (sc && t.tries === 1) sc.scrollTop += Math.round(view.documentTop + view.lineBlockAt(block.from).top - sc.getBoundingClientRect().top - sc.clientHeight / 3)
+        return
+      }
+      this.target = null
+      show(view, current ?? block.el)
+      const again = current ?? block.el
+      setTimeout(() => {
+        const there = again instanceof Range ? !again.collapsed && again.startContainer.isConnected : again.isConnected
+        if (there && !this.target) show(view, again)
+      }, 100)
+    })
+  }
+  recount() {
+    const s = this.view.state, q = getSearchQuery(s)
+    if (this.counted && this.counted.query.eq(q) && this.counted.doc === s.doc && this.counted.sel === s.selection) return
+    this.counted = { query: q, doc: s.doc, sel: s.selection }
+    this.count = countOf(s, q)
+  }
+  host(): HTMLElement | null {
+    const body = isDesktop() ? this.view.dom.closest<HTMLElement>("[data-tab-body]") : null
+    return body?.parentElement?.querySelector<HTMLElement>(`:scope > [data-tab-overlay="${CSS.escape(body.dataset.tabBody ?? "")}"]`) ?? null
+  }
+  draw(sync: boolean) {
+    const host = this.host()
+    this.dom.toggleAttribute("data-floating", !!host)
+    const bar = <Bar view={this.view} query={getSearchQuery(this.view.state)} count={this.count} readOnly={this.view.state.readOnly} replacing={this.replacing}
+      setReplacing={(on) => { this.replacing = on; if (on) this.focus = { n: this.focus.n + 1, field: "replace" }; this.draw(false) }} focus={this.focus}
+      floating={!!host} card={this.setCard} />
+    const el = host ? createPortal(bar, host) : bar
+    if (sync) flushSync(() => this.root.render(el)); else this.root.render(el)
+  }
+  setCard = (el: HTMLDivElement | null) => { this.card = el && el.closest("[data-tab-overlay]") ? el : null }
+  ask(replace: boolean) {
+    if (replace && !this.view.state.readOnly) this.replacing = true
+    const q = getSearchQuery(this.view.state)
+    this.focus = { n: this.focus.n + 1, field: replace && q.search && this.replacing ? "replace" : "find" }
+    this.draw(true)
+  }
+}
+const panels = new WeakMap<EditorView, FindPanel>()
+
+const installed = StateField.define<boolean>({ create: () => true, update: (v) => v })
+
+export const findExtension: Extension = [
+  installed,
+  search({ top: true, createPanel: (view) => new FindPanel(view), scrollToMatch: scrollTo }),
+  EditorView.scrollMargins.of((view) => {
+    const card = panels.get(view)?.card
+    return card ? { top: Math.max(0, card.getBoundingClientRect().bottom - Math.max(0, view.scrollDOM.getBoundingClientRect().top)) } : null
+  }),
+  Prec.high(keymap.of([
+    { key: "Mod-g", run: (v) => searchPanelOpen(v.state) && findNext(v), shift: (v) => searchPanelOpen(v.state) && findPrevious(v) },
+    { key: "Escape", run: (v) => { if (!searchPanelOpen(v.state)) return false; closeSearchPanel(v); return true } },
+  ])),
+  EditorView.theme({
+    "&.cm-editor .cm-panels": { background: "var(--background)", color: "var(--foreground)", zIndex: "5" },
+    "&.cm-editor .cm-panels.cm-panels-top": { top: "var(--vau-panel-top, 0px)", borderBottom: "0.5px solid var(--border)", marginBottom: "6px" },
+    "&.cm-editor .cm-panels.cm-panels-top:has(> .vau-find[data-floating]:only-child)": { borderBottom: "none", marginBottom: "0" },
+    ".cm-searchMatch": { background: "color-mix(in srgb, var(--yellow) 32%, transparent)", borderRadius: "2px", boxShadow: "0 0 0 1px color-mix(in srgb, var(--yellow) 32%, transparent)" },
+    ".cm-searchMatch.cm-searchMatch-selected": { background: "color-mix(in srgb, var(--orange) 50%, transparent)", boxShadow: "0 0 0 1px color-mix(in srgb, var(--orange) 50%, transparent)" },
+  }),
+]
+
+export function openFind(view: EditorView, replace: boolean) {
+  if (!view.state.field(installed, false)) return
+  openSearchPanel(view)
+  view.dispatch({ effects: setSearchQuery.of(queryIn(view, getSearchQuery(view.state))) })
+  panels.get(view)?.ask(replace)
+}

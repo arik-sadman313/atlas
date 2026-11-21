@@ -1,0 +1,400 @@
+import { Fragment, memo, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { getStore, type Store } from "@/core/data"
+import { confirmDialog } from "@/components/ConfirmDialog"
+import type { ViewDef } from "@/core/define"
+import { useHeldHeight } from "@/core/heights"
+import { barsHidden, closePane, paneById, quietly, replaceTabTarget, setArchivable, setCloseGuard, setFocusedPane, setOpenElsewhere, setOpener, setOwnHistory, setPageTest, setPathView, setTabCloser, setTabKeeper, setWorkspaceOf, useTabList } from "@/core/workspace"
+import { dropAt, dropOn, foldedGroupAt, intoFolded, PANES, springGroup, springOver, type Drop } from "@/core/drop"
+import { evenOut, placeFloat, resize, type Zone } from "@/core/splits"
+import { paneBoxes, paneGap, usePaneMotion } from "@/core/panemotion"
+import { setGroupNamer, setPaneLabeler } from "@/core/tabgroups"
+import { layout, panesOf, placesIn, shownTab, tabOfPane, tabPath, type Divider as DividerAt, type Pane, type Rect, type Side, type Tab, type TabList } from "../../../core/layout.ts"
+import { PaneContext } from "@/core/pane"
+import { VaultLoading } from "@/components/VaultLoading"
+import { isPage } from "@/core/pages"
+import { currentWorkspace } from "@/core/scope"
+import { codeArriving, fillsPane, offText, openElsewhere, switchedOn, usePluginsVersion, viewFor } from "@/core/plugins"
+import { getPrefs, usePrefs } from "@/core/prefs"
+import { FileView } from "@/components/FileView"
+import { Drawn, Guard } from "@/components/Guard"
+import { barMenuOf, DragGhost, PaneBar, springTabAt, tabBarOn, TabStrip, tabLabel, useTabInfo, type TabInfo } from "@/components/Tabs"
+import { NewTab, useNewTabPage } from "@/components/NewTab"
+import { hitOn, useDrag, useDropTarget, type DragItem } from "@/core/drag"
+import { Resizer } from "@/components/Resizer"
+import { resizing, startResizing, stopResizing } from "@/core/resizing"
+import { ViewBar } from "@/components/ViewBar"
+import { keepScroll, restoreScroll, scrollOf } from "@/core/viewstate"
+import { cn } from "@/lib/utils"
+import { menuFor } from "@/components/ContextMenu"
+import { unsavedIn } from "@/core/unsaved"
+import { closestOf } from "@/core/dom"
+
+setTabCloser((to, pane, last, moved) => {
+  const v = viewFor(to, getPrefs().disabled)
+  if (!v?.on) return false
+  v.def.onTabClose?.(v.arg, pane, moved)
+  if (last) v.def.onClose?.(v.arg)
+  return !!v.def.onTabClose
+})
+setOpenElsewhere((to) => openElsewhere(to, getPrefs().disabled))
+setWorkspaceOf(() => currentWorkspace()?.n ?? 0)
+setTabKeeper((to) => !!viewFor(to, getPrefs().disabled)?.def.keepsTab)
+setPathView((to) => !!viewFor(to, getPrefs().disabled)?.def.pathArg)
+setPaneLabeler((p) => tabLabel(p, getStore()).label)
+setGroupNamer((to) => { const v = viewFor(to, getPrefs().disabled); return (v?.on && v.def.groupName?.(v.arg)) || null })
+setOpener((to) => { const v = viewFor(to, getPrefs().disabled); return (v?.on && v.def.opensBeside?.(v.arg)) || null })
+setOwnHistory((p, dir) => { const v = viewFor(p.to, getPrefs().disabled); return (v?.on && v.def.history?.(v.arg, p.id, dir)) || null })
+setPageTest((path) => isPage(path))
+setArchivable((p) => {
+  if (p.to.startsWith("file:")) return !unsavedIn(p.to.slice(5))
+  if (!p.to.startsWith("view:")) return true
+  const v = viewFor(p.to, getPrefs().disabled), a = v?.def.archives
+  if (!v?.on) return false
+  try { return typeof a === "function" ? a(v.arg, p.id) : a ?? !(v.def.keepsTab || v.def.onClose || v.def.confirmClose) } catch { return false }
+})
+setCloseGuard(async (tos) => {
+  const byView = new Map<ViewDef, string[]>()
+  for (const to of tos) {
+    const v = viewFor(to, getPrefs().disabled)
+    if (v?.on && v.def.confirmClose) byView.set(v.def, [...(byView.get(v.def) ?? []), v.arg])
+  }
+  for (const [def, args] of byView) {
+    const ask = await def.confirmClose!(args)
+    if (ask && !(await confirmDialog(ask))) return false
+  }
+  return true
+})
+
+type PageTab = { label: string; full?: boolean; render?: (store: Store, to: string, pane: Pane | null) => ReactNode }
+type Props = {
+  store: Store | null; error: unknown
+  left: string
+  right?: string
+  page: (to: string) => PageTab | null
+  pageInfo: (id: string) => TabInfo | null
+}
+
+const pct = (n: number) => `${n * 100}%`
+const place = (r: Rect) => ({ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) })
+const G = "var(--pane-gap)"
+const along = (at: number) => `calc(${at} * (100% - ${G}) + ${G})`
+const span = (n: number) => `calc(${n} * (100% - ${G}) - ${G})`
+const tile = (r: Rect) => ({ left: along(r.x), top: along(r.y), width: span(r.w), height: span(r.h) })
+
+const cellEdges = (r: Rect) => [r.x + r.w > 1 - 1e-6 && "right", r.y + r.h > 1 - 1e-6 && "bottom"].filter(Boolean).join(" ")
+
+const TABS_KEPT = 5
+
+// A pane coming or going never reorders the others: a moved iframe reloads.
+type Kept = { slots: string[]; recent: string[] }
+function keepPanes(k: Kept, l: TabList, shown: string): Kept {
+  const has = new Map(l.tabs.map((t) => [t.id, t]))
+  const recent = [shown, ...k.recent.filter((id) => id !== shown && has.has(id))].slice(0, TABS_KEPT)
+  const want = new Set(recent.flatMap((id) => (id === shown ? placesIn : panesOf)(has.get(id)!).map((p) => p.id)))
+  const slots = [...k.slots.filter((id) => want.has(id)), ...[...want].filter((id) => !k.slots.includes(id))]
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i])
+  return same(slots, k.slots) && same(recent, k.recent) ? k : { slots, recent }
+}
+
+function springAt(item: DragItem, x: number, y: number) {
+  const t = springTabAt(item, x, y)
+  springOver(t, item, x, y)
+  springGroup(t ? null : foldedGroupAt(item, x, y), item, x, y)
+  return t
+}
+
+export function Workspace(props: Props) {
+  const l = useTabList()
+  const tab = shownTab(l) ?? l.tabs[0]
+  const prefs = usePrefs(), bar = tabBarOn(prefs)
+  const info = useTabInfo(props.store, props.pageInfo)
+  const box = useRef<HTMLDivElement>(null)
+  const { dividers } = layout(tab.root)
+  const shown = panesOf(tab)
+  const drawn = paneBoxes(tab)
+  usePaneMotion(box, tab.id, drawn, tab.focus, [props.left, props.right ?? "0px"])
+  const lifted = useDrag((d) => d?.item.pane ?? null)
+  useDropTarget<Drop>(PANES, (item, x, y, el) => dropAt(item, x, y, el, springAt(item, x, y)), dropOn,
+    { stay: (d) => d.kind === "list" && !!d.home, into: (d) => intoFolded(l, d), end: () => { springOver(null, null); springGroup(null, null) } })
+  const [was, setKept] = useState<Kept>({ slots: [], recent: [] })
+  const kept = keepPanes(was, l, tab.id)
+  if (kept !== was) setKept(kept)
+  const only = l.tabs.length === 1 && shown.length === 1
+  const bars = !barsHidden() && (!bar || shown.length > 1)
+  const z0 = new Map(drawn.map((b) => [b.id, b]))
+  useLayoutEffect(() => { document.documentElement.toggleAttribute("data-top-tabs", bar) }, [bar])
+  return (
+    <main data-top={bar || undefined} data-corner={bar || undefined} data-right-corner={bar || undefined} className="fixed inset-y-0 z-10 flex flex-col" style={{ left: props.left, right: props.right ?? 0 }}>
+      {bar && <TabStrip info={info} />}
+      <div ref={box} data-pane-area data-split={shown.length > 1 ? "" : undefined} className="relative min-h-0 flex-1">
+        {kept.slots.map((id) => {
+          const t = tabOfPane(l, id), p = t && placesIn(t).find((x) => x.id === id)
+          if (!t || !p) return null
+          const b = t.id === tab.id ? z0.get(id) : undefined
+          if (!b) return <Fragment key={id}>{null}<Frame pane={p} tab={t} {...props} info={info} />{null}</Fragment>
+          const { rect, layer } = b, float = !!p.float, zoomed = id === tab.zoom, focused = id === tab.focus
+          const under = !!tab.zoom && !zoomed && !float
+          const top = !bar && !under && !float && rect.y < 1e-6
+          const z = float ? 20 + 3 * (layer - 2) : zoomed ? 11 : undefined
+          const at = float ? place(rect) : tile(rect)
+          return (
+            <Fragment key={id}>
+              <div aria-hidden data-plate={id} style={{ ...at, zIndex: z }}
+                className={cn("pointer-events-none absolute bg-background", !layer && "invisible", float && "rounded-card shadow-[0_12px_40px_-8px_rgb(0_0_0/0.35),0_2px_8px_-2px_rgb(0_0_0/0.2)] ring-[0.5px] ring-border")}>
+                {!float && !zoomed && <div data-pane-cell={cellEdges(rect)} />}
+              </div>
+              <Frame pane={p} tab={t} {...props} info={info} on={{ at, z, rect, float, zoomed, focused, under, top, lifted: lifted === id, bar: bars, only, box }} />
+              {!float && !under && rect.y < 1e-6 && <div data-pane-gap={id} onContextMenu={menuFor(() => barMenuOf(id))}
+                style={{ left: at.left, width: at.width, top: 0, height: G, zIndex: z }} className="absolute" />}
+              {float ? <CardEdges id={id} rect={rect} box={box} z={z! + 1} /> : null}
+            </Fragment>
+          )
+        })}
+        {!tab.zoom && dividers.map((d) => <Divider key={`${d.split.id}:${d.i}`} at={d} box={box} />)}
+      </div>
+      <DragGhost info={info} />
+    </main>
+  )
+}
+
+type On = { at: Record<string, string>; z?: number; rect: Rect; float: boolean; zoomed: boolean; focused: boolean; under: boolean; top: boolean; lifted: boolean
+  bar: boolean
+  only: boolean; box: React.RefObject<HTMLElement | null> }
+
+function Frame({ pane, tab, on, info, ...p }: Props & { pane: Pane; tab: Tab; on?: On; info: (t: Tab | Pane) => TabInfo }) {
+  const id = pane.id, r = on?.rect
+  return (
+    <section aria-label={info(pane).label} data-pane-frame={id} data-ui={`pane:${id}`} data-away={on ? undefined : ""}
+      data-top={on?.top || undefined} data-corner={(on?.top && r!.x < 1e-6) || undefined} data-right-corner={(on?.top && r!.x + r!.w > 1 - 1e-6) || undefined}
+      data-floating={on?.float || undefined} data-zoomed={on?.zoomed || undefined} data-focused={on?.focused || undefined}
+      data-overlay={on?.float || undefined} inert={!on || on.under || undefined} data-lifted={on?.lifted || undefined}
+      onPointerDownCapture={on ? () => setFocusedPane(id) : undefined} onPointerDown={on?.float ? (e) => moveCard(e, id, on.box) : undefined}
+      style={on ? { ...on.at, zIndex: on.z && on.z + 2 } : { display: "none" }}
+      className={cn("absolute flex min-h-0 min-w-0 flex-col border-border", on?.float ? "overflow-hidden rounded-card" : on && !on.zoomed && cn(r!.x > 1e-6 && "border-l", r!.y > 1e-6 && "border-t"))}>
+      {on?.bar ? <PaneBar pane={pane} tab={tab} focused={on.focused} info={info} only={on.only} float={on.float} zoomed={on.zoomed} /> : null}
+      <PaneBody pane={pane} tab={tab} shown={!!on} focused={!!on?.focused} {...p} />
+    </section>
+  )
+}
+
+const CARD_MIN = { w: 280, h: 160 }
+
+function cardRect(px: { x: number; y: number; w: number; h: number }, b: DOMRect): Rect {
+  const w = Math.min(b.width, Math.max(CARD_MIN.w, px.w)), h = Math.min(b.height, Math.max(CARD_MIN.h, px.h))
+  const x = Math.min(b.width - w, Math.max(0, px.x)), y = Math.min(b.height - h, Math.max(0, px.y))
+  return { x: x / b.width, y: y / b.height, w: w / b.width, h: h / b.height }
+}
+
+function track(e: React.PointerEvent<HTMLElement>, cursor: string, move: (dx: number, dy: number) => void, undo: () => void, done?: () => void) {
+  const el = e.currentTarget, id = e.pointerId, x = e.clientX, y = e.clientY
+  e.preventDefault()
+  el.setPointerCapture(id)
+  startResizing(cursor)
+  const onMove = (m: PointerEvent) => { if (m.pointerId === id) move(m.clientX - x, m.clientY - y) }
+  const end = () => {
+    el.removeEventListener("pointermove", onMove); el.removeEventListener("pointerup", end); el.removeEventListener("lostpointercapture", end)
+    removeEventListener("keydown", esc, true)
+    done?.()
+    stopResizing()
+  }
+  const esc = (k: KeyboardEvent) => {
+    if (k.key !== "Escape") return
+    k.preventDefault(); k.stopPropagation()
+    undo(); end()
+    try { el.releasePointerCapture(id) } catch {}
+  }
+  el.addEventListener("pointermove", onMove); el.addEventListener("pointerup", end); el.addEventListener("lostpointercapture", end)
+  addEventListener("keydown", esc, true)
+}
+
+function moveCard(e: React.PointerEvent<HTMLElement>, id: string, box: React.RefObject<HTMLElement | null>) {
+  const b = box.current?.getBoundingClientRect(), was = paneById(id)?.float
+  if (e.button !== 0 || !b || !was || !closestOf(e.target, "[data-pane-bar]") || closestOf(e.target, "button, a, input, [role=separator]")) return
+  const r = { x: was.x * b.width, y: was.y * b.height, w: was.w * b.width, h: was.h * b.height }
+  const plate = box.current?.querySelector<HTMLElement>(`:scope > [data-plate="${CSS.escape(id)}"]`)
+  if (plate) plate.dataset.dragging = ""
+  track(e, "move", (dx, dy) => placeFloat(id, cardRect({ ...r, x: r.x + dx, y: r.y + dy }, b)), () => placeFloat(id, was), () => { if (plate) delete plate.dataset.dragging })
+}
+
+const EDGES = [["n", "inset-x-2 -top-1 h-2", "ns"], ["s", "inset-x-2 -bottom-1 h-2", "ns"], ["w", "inset-y-2 -left-1 w-2", "ew"], ["e", "inset-y-2 -right-1 w-2", "ew"],
+  ["nw", "-top-1 -left-1 size-3", "nwse"], ["se", "-right-1 -bottom-1 size-3", "nwse"], ["ne", "-top-1 -right-1 size-3", "nesw"], ["sw", "-bottom-1 -left-1 size-3", "nesw"]] as const
+function CardEdges({ id, rect, box, z }: { id: string; rect: Rect; box: React.RefObject<HTMLElement | null>; z: number }) {
+  const down = (e: React.PointerEvent<HTMLElement>, edge: string, cursor: string) => {
+    const b = box.current?.getBoundingClientRect()
+    if (e.button !== 0 || !b) return
+    const r = { x: rect.x * b.width, y: rect.y * b.height, w: rect.w * b.width, h: rect.h * b.height }
+    track(e, cursor, (dx, dy) => {
+      let l = r.x, rt = r.x + r.w, t = r.y, bm = r.y + r.h
+      if (edge.includes("w")) l = Math.min(rt - CARD_MIN.w, Math.max(0, l + dx))
+      if (edge.includes("e")) rt = Math.max(l + CARD_MIN.w, Math.min(b.width, rt + dx))
+      if (edge.includes("n")) t = Math.min(bm - CARD_MIN.h, Math.max(0, t + dy))
+      if (edge.includes("s")) bm = Math.max(t + CARD_MIN.h, Math.min(b.height, bm + dy))
+      placeFloat(id, cardRect({ x: l, y: t, w: rt - l, h: bm - t }, b))
+    }, () => placeFloat(id, rect))
+  }
+  return (
+    <div aria-hidden data-card-edges={id} className="pointer-events-none absolute" style={{ ...place(rect), zIndex: z }}>
+      {EDGES.map(([edge, at, cursor]) => (
+        <div key={edge} data-card-edge={edge} onPointerDown={(e) => down(e, edge, cursor)} className={cn("pointer-events-auto absolute", at)} style={{ cursor: `${cursor}-resize` }} />
+      ))}
+    </div>
+  )
+}
+
+const useZone = (pane: string) => useDrag((d) => {
+  const h = hitOn(d?.hit, PANES)
+  return h?.kind === "pane" && h.pane === pane ? h.zone : null
+})
+
+function PaneBody({ pane, tab, shown, focused, ...p }: Props & { pane: Pane; tab: Tab; shown: boolean; focused: boolean }) {
+  const zone = useZone(pane.id)
+  return (
+    <div data-pane-body={pane.id} className="relative min-h-0 flex-1">
+      <PlaceBody pane={pane} tab={tab} shown={shown} focused={focused} {...p} />
+      {zone && <DropZone zone={zone} />}
+    </div>
+  )
+}
+
+function DropZone({ zone }: { zone: Zone }) {
+  const whole = { top: 4, right: 4, bottom: 4, left: 4 }, half = (side: Side) => ({ ...whole, [side]: "calc(50% + 2px)" })
+  const other: Record<Side, Side> = { left: "right", right: "left", top: "bottom", bottom: "top" }
+  return (
+    <>
+      <div aria-hidden data-drop-rest className="drop-zone pointer-events-none absolute z-20 rounded-[8px] bg-foreground/[0.04] ring-1 ring-foreground/15 ring-inset"
+        style={zone === "center" ? { ...whole, opacity: 0 } : half(zone)} />
+      <div aria-hidden data-drop-zone={zone} className="drop-zone pointer-events-none absolute z-20 rounded-[8px] border-2 border-primary/55 bg-primary/15"
+        style={zone === "center" ? whole : half(other[zone])} />
+    </>
+  )
+}
+
+function PlaceBody({ pane, tab, shown, focused, ...p }: Props & { pane: Pane; tab: Tab; shown: boolean; focused: boolean }) {
+  const { disabled } = usePrefs()
+  usePluginsVersion()
+  const to = pane.to, id = pane.id
+  const view = to.startsWith("view:") ? viewFor(to, disabled) : null
+  const file = tabPath(to)
+  const fullPage = !view && !file && !!p.page(to)?.full
+  const full = view ? !!view.on && !!view.def.full : file ? fillsPane(file, disabled) : fullPage
+  // What the box scrolls while the next file comes in (the browser clamping to a shorter page) is no place.
+  const box = useRef<HTMLDivElement>(null)
+  const place = useRef(to)
+  const restoring = useRef(false)
+  const loaded = !!p.store
+  useLayoutEffect(() => {
+    place.current = to
+    if (!box.current || full || !loaded) return
+    restoring.current = true
+    return restoreScroll(box.current, scrollOf(to), () => { restoring.current = false }, to)
+  }, [to, full, loaded])
+  const wasShown = useRef(shown)
+  useLayoutEffect(() => {
+    if (shown && !wasShown.current && box.current && !full) box.current.scrollTop = scrollOf(place.current)
+    if (!shown && wasShown.current) for (const m of box.current?.querySelectorAll("audio:not([data-keeps-playing]), video:not([data-keeps-playing])") ?? []) if (m instanceof HTMLMediaElement) m.pause()
+    // Blurred now: the browser's own focus fixup for a hidden element comes a frame later.
+    if (!shown && wasShown.current && document.activeElement instanceof HTMLElement && box.current?.contains(document.activeElement)) document.activeElement.blur()
+    wasShown.current = shown
+  }, [shown, full])
+  const ctx = useMemo(() => ({ pane: id, tab: tab.id, focused, hidden: !shown }), [id, tab.id, focused, shown])
+  if (!shown && full && !fullPage) return null
+  const scroller = cn("h-full min-h-0", full ? "relative overflow-hidden" : "overflow-y-auto overscroll-contain [scrollbar-gutter:stable]")
+  return (
+    <PaneContext.Provider value={ctx}>
+      <div ref={box} id={focused ? "main-scroll" : undefined} data-pane={shown ? id : undefined} data-kept={shown ? undefined : id} data-tab-body={id}
+        className={scroller} style={shown ? undefined : { display: "none" }}
+        onScroll={(e) => { if (!restoring.current && shown) keepScroll(place.current, e.currentTarget.scrollTop, e.currentTarget) }}>
+        <PlaceContent {...p} pane={pane} to={to} view={view} file={file} full={full} focused={focused} shown={shown} />
+        {!file && <PageHeading label={tabLabel(pane, p.store).label} />}
+      </div>
+      {!full && <div data-tab-overlay={id} className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0" style={shown ? undefined : { display: "none" }} />}
+    </PaneContext.Provider>
+  )
+}
+
+const PageHeading = memo(function PageHeading({ label }: { label: string }) {
+  const ref = useRef<HTMLHeadingElement>(null)
+  useLayoutEffect(() => {
+    // A child's layout effect runs before its parent's ref is set.
+    const box = ref.current?.parentElement
+    const own = () => {
+      const has = !!box?.querySelector("h1:not([data-tab-heading])")
+      if (ref.current) ref.current.hidden = has
+      if (has) watch.disconnect()
+    }
+    const watch = new MutationObserver(own)
+    if (box) watch.observe(box, { childList: true, subtree: true })
+    own()
+    const stop = setTimeout(() => watch.disconnect(), 3000)
+    return () => { watch.disconnect(); clearTimeout(stop) }
+  }, [])
+  return <h1 ref={ref} data-tab-heading className="sr-only">{label}</h1>
+})
+
+export function viewBody(store: Store, pane: Pane, to: string, view: ReturnType<typeof viewFor>, focused: boolean):
+  { title: string; drawn: ReactNode; note: string | null; bar?: { title?: ReactNode; right?: ReactNode } } {
+  if (!view) return { title: to.slice(5), drawn: null, note: codeArriving() ? null : "No plugin draws this tab." }
+  const title = view.def.title(view.arg)
+  if (!view.on) return { title, drawn: null, note: `${offText(view.plugin)}.${switchedOn(view.plugin) ? "" : " Turn it on in Plugins to open this tab."}` }
+  const name = to.slice(5).split("/")[0]
+  const ctx = { store, arg: view.arg, focused, close: () => closePane(pane.id, true), setArg: (arg: string) => replaceTabTarget(pane.id, `view:${name}${arg ? `/${arg}` : ""}`) }
+  return { title, drawn: <Drawn draw={() => view.def.render(ctx)} />, note: null, bar: view.def.bar?.(ctx) }
+}
+
+export function HeldView({ to, view, children }: { to: string; view: ReturnType<typeof viewFor>; children: ReactNode }) {
+  const ref = useHeldHeight<HTMLDivElement>(`view:${view?.def.argState ? to.split("/")[0] : to}`, true)
+  return <div ref={ref}>{children}</div>
+}
+
+const PlaceContent = memo(function PlaceContent({ pane, to, view, file, full, focused, ...p }: Props & {
+  pane: Pane; to: string; view: ReturnType<typeof viewFor>; file: string | null; full: boolean; focused: boolean; shown: boolean
+}) {
+  const padded = (wide: boolean, bar: ReactNode, body: ReactNode) => (
+    <div data-page className={cn("mx-auto px-8 pb-6", wide ? "max-w-none" : "max-w-[912px]")}>{bar}{body}</div>
+  )
+  const startPage = useNewTabPage(to === "new" ? p.store : null)
+  let body: ReactNode = null
+  if (!p.store) body = padded(false, null, <VaultLoading error={p.error} />)
+  else if (file) body = full ? <div className="absolute inset-0"><FileView store={p.store} path={file} pane /></div> : padded(true, null, <FileView store={p.store} path={file} pane />)
+  else if (to.startsWith("view:")) {
+    const v = viewBody(p.store, pane, to, view, focused)
+    body = v.drawn && full ? <div className="absolute inset-0">{v.drawn}</div>
+      : padded(!!view?.def.wide, <ViewBar right={v.bar?.right}>{v.bar?.title ?? v.title}</ViewBar>, v.drawn ? <HeldView to={to} view={view}>{v.drawn}</HeldView> : <p data-placeholder className="mt-6 text-[15px] text-muted-foreground">{v.note}</p>)
+  } else if (to === "new") body = startPage ? padded(true, null, <FileView store={p.store} path={startPage} pane />) : padded(false, <ViewBar>New tab</ViewBar>, <NewTab store={p.store} />)
+  else {
+    const page = p.page(to)
+    if (page?.render && full) body = (
+      <div data-page className="absolute inset-0 flex flex-col">
+        <div className="shrink-0 px-8"><ViewBar>{page.label}</ViewBar></div>
+        <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]"><Drawn draw={() => page.render!(p.store!, to, pane)} /></div>
+      </div>
+    )
+    else if (page?.render) body = padded(false, <ViewBar>{page.label}</ViewBar>, <Drawn draw={() => page.render!(p.store!, to, pane)} />)
+  }
+  return (
+    <Fragment key={view?.def.argState ? to.split("/")[0] : to}>
+      <Guard what="This tab" size="tab" reset={to} close={() => closePane(pane.id)}>{body}</Guard>
+    </Fragment>
+  )
+}, (was, now) => !was.shown && !now.shown)
+
+function Divider({ at: d, box }: { at: DividerAt; box: React.RefObject<HTMLElement | null> }) {
+  const row = d.split.dir === "row"
+  const r = d.rect
+  const move = (x: number, y: number) => {
+    const b = box.current?.getBoundingClientRect()
+    if (!b) return
+    const g = paneGap(box.current!), half = g / 2
+    const at = row ? ((x - b.left - half) / (b.width - g) - r.x) / r.w : ((y - b.top - half) / (b.height - g) - r.y) / r.h
+    const go = () => resize(d.split.id, d.i, at, row ? 200 / (b.width * r.w) : 120 / (b.height * r.h))
+    if (resizing()) quietly(go); else go()
+  }
+  const mid = (at: number) => `calc(${at} * (100% - ${G}) + ${G} / 2 - 3px)`
+  const style = row
+    ? { left: mid(r.x + d.at * r.w), top: along(r.y), height: span(r.h), width: 7 }
+    : { top: mid(r.y + d.at * r.h), left: along(r.x), width: span(r.w), height: 7 }
+  const was = useRef(d.at)
+  return <Resizer label="Resize the split" horizontal={!row} onStart={() => { was.current = d.at }} onDrag={move}
+    onCancel={() => quietly(() => resize(d.split.id, d.i, was.current, 0))} onReset={() => evenOut(d.split.id)} resetTip="even it out"
+    style={style} className="absolute" />
+}

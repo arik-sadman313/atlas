@@ -1,0 +1,115 @@
+import fs from "node:fs"
+import path from "node:path"
+import type { VaultTest } from "./harness.ts"
+
+export default async ($: VaultTest) => {
+  const { VAULT, api, check, read, vault, write } = $
+  // Pins follow moves made through the API (an AI moving files), not only the app's: files, whole folders, and deletes.
+  // "files" is an old app's phone Files page: a pin that isn't a file, kept in place.
+  const pins = () => JSON.stringify(vault.config("pages").pinned ?? [])
+  const list = (...xs: string[]) => JSON.stringify(xs)
+  vault.setConfig("pages", { pinned: ["Dashboards/Errors.md", "files", "Dashboards/People.md", "Notes/Linker.md"] })
+  const movesHeard: string[] = []
+  const unhear = vault.onMove((from, to) => movesHeard.push(`${from} -> ${to}`))
+  await api("POST", "file/move", { from: "Notes/Linker.md", to: "Linker.md" })
+  unhear()
+  check("a move through the API is told (the live socket's `moved`: open tabs follow it)", movesHeard.join() === "Notes/Linker.md -> Linker.md", movesHeard)
+  check("a moved file keeps its pin, in place", pins() === list("Dashboards/Errors.md", "files", "Dashboards/People.md", "Linker.md"), pins())
+  await api("POST", "file/move", { from: "Dashboards", to: "People/Dashboards" })
+  check("a moved folder's pins follow", pins() === list("People/Dashboards/Errors.md", "files", "People/Dashboards/People.md", "Linker.md"), pins())
+  await api("POST", "file/move", { from: "People/Dashboards", to: "Dashboards" })
+  check("and back to the top level", JSON.stringify(JSON.parse(pins()).slice(0, 3)) === list("Dashboards/Errors.md", "files", "Dashboards/People.md"), pins())
+  let [code] = await api("POST", "file/move", { from: "Dashboards", to: "Dashboards/Inner/Dashboards" })
+  check("a folder can't move into itself", code === 400 && fs.statSync(path.join(VAULT, "Dashboards")).isDirectory()
+    && JSON.parse(pins())[0] === "Dashboards/Errors.md", code)
+  await api("DELETE", "file?path=Linker.md")
+  check("a trashed file loses its pin", !JSON.parse(pins()).includes("Linker.md"), pins())
+  await api("POST", "folder", { path: "Boards" })
+  const people = read("Dashboards/People.md")
+  await api("POST", "file/move", { from: "Dashboards/People.md", to: "Boards/People.md" })
+  await api("DELETE", "file?path=Boards")
+  check("a trashed folder loses its pins", pins() === list("Dashboards/Errors.md", "files"), pins())
+  write("Dashboards/People.md", people) // (the People plugin's page: the areas after this one need it)
+  vault.setConfig("pages", { pinned: ["People/Block Person.md"] })
+  await api("DELETE", "people/Block Person")
+  check("an item deleted through its collection loses its pin", pins() === list(), pins())
+
+  // Pins change one at a time (POST /api/pins), on the list as it is; a plugin turned on again never pins its page again.
+  // (turned on, a plugin whose page is gone writes it: core/pages.ts)
+  const turnOn = async (id: string, page?: string) => {
+    await api("POST", "ops/plugin.disable", { id })
+    if (page) fs.rmSync(path.join(VAULT, page), { force: true })
+    await api("POST", "ops/plugin.enable", { id })
+  }
+  vault.setConfig("pages", { pinned: ["files", "Dashboards/Errors.md", "Dashboards/Claude.md"] })
+  await api("POST", "pins", { path: "Dashboards/Claude.md", pinned: false })
+  check("unpin", pins() === list("files", "Dashboards/Errors.md"), pins())
+  await turnOn("claude-code")
+  check("turned on again, its page isn't pinned again", pins() === list("files", "Dashboards/Errors.md"), pins())
+  fs.mkdirSync(path.join(VAULT, "Notes"), { recursive: true })
+  fs.writeFileSync(path.join(VAULT, "Notes/A.md"), "A note to pin.\n")
+  await api("POST", "pins", { path: "Notes/A.md", pinned: true, before: "Dashboards/Errors.md" })
+  check("pin before another", pins() === list("files", "Notes/A.md", "Dashboards/Errors.md"), pins())
+  await api("POST", "pins", { path: "files", pinned: true, before: null })
+  check("move to the end", pins() === list("Notes/A.md", "Dashboards/Errors.md", "files"), pins())
+  await api("POST", "pins", { path: "Dashboards/Errors.md", pinned: true })
+  check("pinning a pinned one keeps its place", pins() === list("Notes/A.md", "Dashboards/Errors.md", "files"), pins())
+  const [missing] = await api("POST", "pins", { path: "Notes/Nowhere.md", pinned: true })
+  check("a file that isn't there isn't pinned", missing === 404 && pins() === list("Notes/A.md", "Dashboards/Errors.md", "files"), [missing, pins()])
+  // Bookmarks: a heading in a note, a search; a heading of a note that isn't there isn't pinned.
+  await api("POST", "pins", { path: "Notes/A.md#Plan", pinned: true })
+  await api("POST", "pins", { path: "search:tag:#book", pinned: true })
+  const [noHeading] = await api("POST", "pins", { path: "Notes/Nowhere.md#Plan", pinned: true })
+  const [noSearch] = await api("POST", "pins", { path: "search: ", pinned: true })
+  check("a heading and a search are pinned; a missing note's heading and an empty search aren't", noHeading === 404 && noSearch === 404 &&
+    pins() === list("Notes/A.md", "Dashboards/Errors.md", "files", "Notes/A.md#Plan", "search:tag:#book"), [noHeading, noSearch, pins()])
+  // A folder (it opens in place) and a file that isn't a note (a recording) are pinned; a folder moved takes its pin.
+  fs.mkdirSync(path.join(VAULT, "Notes/Pin trips"), { recursive: true })
+  fs.writeFileSync(path.join(VAULT, "Notes/Pin trips/Lisbon.md"), "A trip.\n")
+  fs.writeFileSync(path.join(VAULT, "Notes/Pin trips/Voice note.m4a"), "")
+  const [folderPin] = await api("POST", "pins", { path: "Notes/Pin trips", pinned: true })
+  const [mediaPin] = await api("POST", "pins", { path: "Notes/Pin trips/Voice note.m4a", pinned: true })
+  const [noHeadingInFolder] = await api("POST", "pins", { path: "Notes/Pin trips#Plan", pinned: true })
+  check("a folder and a recording are pinned; a folder's heading isn't", folderPin === 200 && mediaPin === 200 && noHeadingInFolder === 404 &&
+    pins() === list("Notes/A.md", "Dashboards/Errors.md", "files", "Notes/A.md#Plan", "search:tag:#book", "Notes/Pin trips", "Notes/Pin trips/Voice note.m4a"), [folderPin, mediaPin, noHeadingInFolder, pins()])
+  const moved = await api("POST", "file/move", { from: "Notes/Pin trips", to: "Pin trips" })
+  check("a pinned folder follows its move, and what's pinned in it", JSON.stringify(JSON.parse(pins()).slice(-2)) === list("Pin trips", "Pin trips/Voice note.m4a"), [moved, pins()])
+  await api("POST", "pins", { path: "Pin trips", pinned: false })
+  await api("POST", "pins", { path: "Pin trips/Voice note.m4a", pinned: false })
+  fs.rmSync(path.join(VAULT, "Pin trips"), { recursive: true })
+  // Views: a plugin's page (no arg), a web page by its address (vau pin <address>, named by --label); not a bare "view:".
+  const [inboxPin] = await api("POST", "pins", { path: "view:inbox", pinned: true })
+  const [noView] = await api("POST", "pins", { path: "view:", pinned: true })
+  const [webOp] = await api("POST", "ops/page.pin", { path: "https://example.com/docs/", label: "Example docs", vault: true })
+  const [fileLabel] = await api("POST", "ops/page.pin", { path: "Notes/A.md", label: "A", vault: true })
+  const web = "view:web/https://example.com/docs/"
+  check("a plugin's page and a web page (its address as is, named) are pinned; a bare view: and a file's label aren't",
+    inboxPin === 200 && noView === 404 && webOp === 200 && fileLabel === 400 && JSON.stringify(JSON.parse(pins()).slice(-2)) === list("view:inbox", web) &&
+    vault.config("pages").labels?.[web] === "Example docs", [inboxPin, noView, webOp, fileLabel, pins(), vault.config("pages").labels])
+  await api("POST", "ops/page.unpin", { path: "https://example.com/docs/", vault: true })
+  await api("POST", "pins", { path: "view:inbox", pinned: false })
+  check("unpinned, a web page's name goes with it", !JSON.parse(pins()).includes(web) && !(web in (vault.config("pages").labels ?? {})), [pins(), vault.config("pages").labels])
+  await api("POST", "pins", { path: "Notes/A.md#Plan", pinned: false })
+  await api("POST", "pins", { path: "search:tag:#book", pinned: false })
+  await api("POST", "pins", { path: "files", pinned: false })
+  const [filesPin] = await api("POST", "pins", { path: "files", pinned: true })
+  check("the old Files page can be unpinned, not pinned again", filesPin === 404 && pins() === list("Notes/A.md", "Dashboards/Errors.md"), [filesPin, pins()])
+  const pagesJson = path.join(VAULT, ".vaultite/pages.json")
+  fs.writeFileSync(pagesJson, "{not json")
+  await turnOn("people-map", "Dashboards/People map.md")
+  check("an unreadable pages.json isn't replaced by the page a plugin writes", fs.readFileSync(pagesJson, "utf8") === "{not json" && fs.existsSync(path.join(VAULT, "Dashboards/People map.md")))
+  fs.rmSync(pagesJson)
+  await turnOn("people-map", "Dashboards/People map.md")
+  check("a missing one gets the page", JSON.parse(pins()).includes("Dashboards/People map.md"), pins())
+  // A pages.json that's in iCloud only isn't replaced by the default list.
+  const pluginsWas = vault.config("plugins")
+  fs.rmSync(pagesJson)
+  fs.writeFileSync(path.join(VAULT, ".vaultite/.pages.json.icloud"), "")
+  await turnOn("people-map", "Dashboards/People map.md")
+  check("a pages.json in iCloud only isn't replaced", !fs.existsSync(pagesJson))
+  fs.rmSync(path.join(VAULT, ".vaultite/.pages.json.icloud"))
+  await turnOn("people-map", "Dashboards/People map.md")
+  check("a vault with no pins gets the page", JSON.parse(pins()).includes("Dashboards/People map.md"), pins())
+  vault.setConfig("pages", { pinned: ["Errors", "People map", "Days", "People", "Activity"].map((n) => `Dashboards/${n}.md`) }) // (the areas after it pin around these)
+  Object.assign($.vars, { pluginsWas })
+}

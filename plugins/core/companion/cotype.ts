@@ -1,0 +1,206 @@
+import { Compartment, EditorState, type Extension, Transaction } from "@codemirror/state"
+import { EditorView, ViewPlugin } from "@codemirror/view"
+import { fromBase64, toBase64 } from "lib0/buffer"
+import { yCollab, ySyncAnnotation } from "y-codemirror.next"
+import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness"
+import * as Y from "yjs"
+import { keepLive, merge3, notify, settleFile } from "@vaultite"
+import { getState, type Person, say, setPeople, setRooms, subscribe } from "./live"
+import { span } from "./text"
+
+type Room = { path: string; doc: Y.Doc; text: Y.Text; aw: Awareness | null; views: Set<EditorView>; ready: boolean; bound: boolean; others: number
+  hold: ReturnType<typeof keepLive> | null; joining: boolean
+  asking: boolean
+  alone: boolean
+  settled: string | null
+  remote: boolean
+  synced: string | null }
+const rooms = new Map<string, Room>()
+const slot = new Compartment()
+const theirs = EditorState.transactionExtender.of((tr) => (tr.annotation(ySyncAnnotation) !== undefined ? { annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] } : null))
+
+function fresh(r: Room, aware = true) {
+  r.aw?.destroy()
+  r.doc?.destroy()
+  const doc = new Y.Doc(), aw = aware ? new Awareness(doc) : null
+  Object.assign(r, { doc, text: doc.getText("md"), aw })
+  doc.on("update", (u: Uint8Array, origin: unknown) => {
+    if (origin === "server") r.synced = r.text.toString()
+    else if (r.bound) say({ t: "y", path: r.path, u: toBase64(u) })
+  })
+  aw?.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+    if (origin === "local" && r.bound) say({ t: "aw", path: r.path, u: toBase64(encodeAwarenessUpdate(aw, [...added, ...updated, ...removed])) })
+    tellPeople(r)
+  })
+}
+
+function open(path: string): Room {
+  const r = { path, views: new Set(), ready: false, bound: false, others: 0, hold: null, joining: false, asking: false, settled: null, alone: false, remote: false, synced: null } as unknown as Room
+  fresh(r, false)
+  rooms.set(path, r)
+  if (getState().connected) say({ t: "y-open", path, bare: true })
+  return r
+}
+
+function tellPeople(r: Room) {
+  const list: Person[] = []
+  if (r.bound && r.aw) for (const [id, s] of r.aw.getStates()) {
+    const u = (s as { user?: { name?: string; color?: string } }).user
+    if (id !== r.doc.clientID && u?.name) list.push({ id, name: u.name, color: u.color ?? "var(--muted-foreground)" })
+  }
+  setPeople(r.path, list)
+}
+
+function bind(r: Room) {
+  if (!r.aw) return
+  r.bound = true
+  r.hold ??= keepLive(r.path)
+  r.hold.live()
+  const text = r.text.toString(), first = [...r.views].find((v) => v.dom.isConnected)
+  const typed = first && r.settled !== null && first.state.doc.toString() !== r.settled ? merge3(r.settled, first.state.doc.toString(), text) : null
+  r.settled = null
+  for (const v of r.views) {
+    if (v.state.doc.toString() !== text) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text }, annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] })
+    v.dispatch({ effects: slot.reconfigure([yCollab(r.text, r.aw, { undoManager: false }), theirs]) })
+  }
+  if (first && typed !== null && typed !== text) {
+    const [a, b] = span(text, typed)
+    first.dispatch({ changes: { from: a, to: text.length - b, insert: typed.slice(a, typed.length - b) } })
+  }
+  r.aw.setLocalStateField("user", { name: "" })
+}
+
+function unbind(r: Room, how: "alone" | "dropped" | "going" | "again" = "alone") {
+  const base = !r.bound || how === "going" || r.remote ? null : how === "dropped" ? r.synced : r.text.toString()
+  const shown = r.bound ? r.text.toString() : null
+  if (r.bound) {
+    r.bound = false
+    for (const v of r.views) if (v.dom.isConnected) v.dispatch({ effects: slot.reconfigure([]) })
+    if (r.aw) {
+      removeAwarenessStates(r.aw, [r.doc.clientID], "gone")
+      if (getState().connected) say({ t: "aw", path: r.path, u: toBase64(encodeAwarenessUpdate(r.aw, [r.doc.clientID])) })
+      r.aw.destroy()
+      r.aw = null
+    }
+    tellPeople(r)
+  } else if (how !== "again" && r.hold) r.settled = null
+  if (how !== "again") handBack(r, base, shown, how === "going")
+}
+
+function handBack(r: Room, base: string | null, shown: string | null, later = false) {
+  const hold = r.hold
+  r.hold = null
+  if (later) setTimeout(() => hold?.handBack(base, shown), 2000)
+  else hold?.handBack(base, shown)
+}
+
+function away(r: Room) {
+  if (r.remote && r.bound) r.settled = r.synced ?? r.text.toString()
+  unbind(r, "dropped")
+  r.remote = false
+  r.ready = false
+  r.asking = false
+  r.others = 0
+}
+
+async function together(r: Room) {
+  if (r.bound || r.joining || r.asking) return
+  r.joining = true
+  let disk: string | undefined
+  try { disk = await settleFile(r.path) } finally { r.joining = false }
+  r.settled = disk ?? [...r.views].find((v) => v.dom.isConnected)?.state.doc.toString() ?? null
+  if (rooms.get(r.path) === r && (r.others > 0 || r.remote) && getState().connected) {
+    r.asking = true
+    r.hold ??= keepLive(r.path)
+    say({ t: "y-open", path: r.path })
+  }
+}
+
+function close(r: Room) {
+  unbind(r, "going")
+  rooms.delete(r.path)
+  if (getState().connected) say({ t: "y-close", path: r.path })
+  setPeople(r.path, [])
+  r.aw?.destroy()
+  r.doc.destroy()
+}
+
+function heard(m: Record<string, unknown>) {
+  const r = typeof m.path === "string" ? rooms.get(m.path) : undefined
+  if (!r) return
+  if (m.t === "y-state") r.asking = false
+  if (m.t === "y-state" && typeof m.u !== "string") {
+    r.others = Number(m.others) || 0
+    r.alone = m.alone === true
+    if (r.others > 0 && !r.alone) void together(r)
+  } else if (m.t === "y-state" && typeof m.u === "string") {
+    const was = r.bound && !r.remote ? r.text.toString() : null
+    unbind(r, "again")
+    r.remote = m.remote === true
+    fresh(r)
+    Y.applyUpdate(r.doc, fromBase64(m.u), "server")
+    if (typeof m.aw === "string") applyAwarenessUpdate(r.aw!, fromBase64(m.aw), "server")
+    r.ready = true
+    r.others = Number(m.others) || 0
+    r.alone = m.alone === true
+    if ((r.others > 0 || r.remote) && !r.alone && r.settled !== null) bind(r)
+    else {
+      handBack(r, was, was)
+      if ((r.others > 0 || r.remote) && !r.alone) void together(r)
+    }
+  } else if (m.t === "y-peers") {
+    r.others = Number(m.others) || 0
+    if (r.others === 0) { if (!r.remote) unbind(r) }
+    else if (!r.bound && !r.alone) void together(r)
+  } else if (m.t === "y-gone") {
+    away(r)
+    if (getState().connected) say({ t: "y-open", path: r.path, bare: true })
+  } else if (m.t === "y" && typeof m.u === "string") Y.applyUpdate(r.doc, fromBase64(m.u), "server")
+  else if (m.t === "aw" && typeof m.u === "string") { if (r.aw) applyAwarenessUpdate(r.aw, fromBase64(m.u), "server") }
+  else if (m.t === "y-clash") notify(m.kept === "file" ? "Someone changed the same lines on disk as you typed: theirs stayed" : "Someone changed the same lines on disk as you typed: yours stayed, theirs is in the note's history", { id: "cotype-clash" })
+  else if (m.t === "y-reject") {
+    if (typeof m.why === "string" && m.why) notify(`That change wasn't kept: ${m.why}`, { kind: "error", id: "cotype-reject" })
+    r.settled = [...r.views].find((v) => v.dom.isConnected)?.state.doc.toString() ?? ""
+  }
+}
+
+function join(path: string, v: EditorView) {
+  const r = rooms.get(path) ?? open(path)
+  r.views.add(v)
+  // CodeMirror refuses a dispatch mid-update: bind once the update that made this editor's plugin is over
+  if (r.bound) queueMicrotask(() => { if (r.bound && r.views.has(v)) bind(r) })
+}
+
+function leave(path: string, v: EditorView) {
+  const r = rooms.get(path)
+  if (!r?.views.delete(v)) return
+  if (!r.views.size) close(r)
+}
+
+let was = getState().connected
+subscribe(() => {
+  const now = getState().connected
+  if (now === was) return
+  was = now
+  for (const r of rooms.values()) {
+    if (!now) away(r); else say({ t: "y-open", path: r.path, bare: true })
+  }
+})
+
+setRooms({
+  heard,
+  goTo: (path, id) => {
+    const r = rooms.get(path), s = r?.aw?.getStates().get(id) as { cursor?: { head?: unknown } } | undefined
+    const v = r && [...r.views].find((x) => x.dom.isConnected)
+    if (!r || !v || !s?.cursor?.head) return
+    const at = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(s.cursor.head), r.doc)
+    if (at) v.dispatch({ effects: EditorView.scrollIntoView(Math.min(at.index, v.state.doc.length), { y: "center" }) })
+  },
+})
+
+export function cotype(path: string): Extension {
+  return [slot.of([]), ViewPlugin.define((v) => {
+    join(path, v)
+    return { destroy: () => leave(path, v) }
+  })]
+}

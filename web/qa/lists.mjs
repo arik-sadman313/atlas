@@ -1,0 +1,122 @@
+// Long lists show everything (pages/Search.tsx, SearchPalette.tsx, FileTree.tsx): totals count all, more come as it's
+// scrolled. WRITES a "Qa lists" folder (removed after).
+//   node web/qa/lists.mjs <base url> <vault path>
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import { qa, until, wait } from "./lib/qa.mjs"
+const { args: [B, VAULT], browser, check, watch, done } = await qa(import.meta.url)
+
+const DIR = "Qa lists", FILES = 340, LINES = 25
+mkdirSync(path.join(VAULT, DIR), { recursive: true })
+for (let i = 1; i <= FILES; i++) {
+  const body = Array.from({ length: LINES }, (_, k) => `Line ${k + 1} of ${i}: a quokka here`).join("\n")
+  writeFileSync(path.join(VAULT, DIR, `Qa note ${i}.md`), `---\nstatus: seed\n---\n\n${body}\n${i === 7 ? "A rare xq pair\n" : ""}`)
+}
+await wait(2500) // (the server reads them)
+
+try {
+  const page = watch(await browser.newPage({ viewport: { width: 1280, height: 800 } }))
+  await page.goto("about:blank")
+  await page.goto(`${B}#view/search%2Fquokka`)
+  await until(() => page.$("[data-search-file]"), 10000)
+  await wait(800)
+  const head = await page.textContent('[aria-label="In files"] h2')
+  check("the search tab counts every line in every file", head.includes(`${FILES * LINES} lines in ${FILES} files`), head)
+  const first = await page.$$eval("[data-search-file]", (es) => es.length)
+  check("it lists a first page of files, more than fills the screen, not all of them", first >= 10 && first < FILES, first)
+  for (let n = 0; n < 40 && (await page.$$eval("[data-search-file]", (es) => es.length)) < FILES; n++) {
+    await page.evaluate(() => { const s = document.querySelector("[data-search-view]")?.closest("[data-pane], #main-scroll"); (s ?? document.scrollingElement).scrollTop = 1e9 })
+    await wait(500)
+  }
+  const all = await page.$$eval("[data-search-file]", (es) => es.length)
+  check("scrolled to the end, it lists every file", all === FILES, all)
+
+  const one = `${DIR}/Qa note 3.md`
+  const sel = `[data-search-file="${one}"]`
+  await page.$eval(sel, (e) => e.scrollIntoView())
+  const lines = () => page.$$eval(`${sel} [data-line]`, (es) => es.length)
+  check("a file shows its first 20 lines", (await lines()) === 20, await lines())
+  await page.click(`${sel} button:has-text("5 more in this file")`)
+  await until(async () => (await lines()) === LINES, 5000)
+  check("N more in this file shows every line", (await lines()) === LINES, await lines())
+  const at = await page.$eval(`${sel} [data-line]:nth-child(1)`, (e) => e.getAttribute("data-line")).catch(() => null)
+  check("lines are numbered as the file's, frontmatter counted", at === "5", at)
+
+  await page.click(`${sel} li:nth-child(12) [data-line]`)
+  // (the editor's own selection: CodeMirror draws it, and the page's may lag behind in a headless browser)
+  const picked = () => page.evaluate(() => {
+    const v = [...document.querySelectorAll(".cm-content")].find((e) => e.getClientRects().length)?.cmTile?.root?.view
+    const r = v?.state.selection.main
+    return r ? { text: v.state.sliceDoc(r.from, r.to), line: v.state.doc.lineAt(r.head).text } : null
+  })
+  await until(async () => (await picked())?.text === "quokka", 6000)
+  const where = await picked() ?? {}
+  check("a line opens its file there, the match selected", where.text === "quokka" && where.line?.startsWith("Line 12 of 3:"), where)
+
+  // The quick switcher: more rows as it's scrolled, then the search tab; text from two letters.
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("ControlOrMeta+o")
+  await until(() => page.$('[role="dialog"][aria-label="Search"]'), 8000)
+  await page.fill('[role="dialog"][aria-label="Search"] input', "qa note")
+  await wait(700)
+  const options = () => page.$$eval('[role="listbox"] [role="option"]', (es) => es.length)
+  const before = await options()
+  const lastOption = () => page.$$eval('[role="listbox"] [role="option"]', (es) => es.at(-1)?.textContent)
+  // (a page of rows drawn per scroll, and another page of hits found when all are drawn, the search tab last meanwhile:
+  // to the end, every file)
+  const atEnd = async () => /in every file/.test(await lastOption()) && (await options()) > FILES
+  for (let n = 0; n < 60 && !(await atEnd()); n++) { await page.$eval('[role="listbox"]', (l) => { l.scrollTop = 1e9 }); await wait(250) }
+  const after = await options()
+  check("the quick switcher lists more as it's scrolled", before <= 81 && after > before + 100, { before, after })
+  const last = await lastOption()
+  check("it ends with the search tab, every file above it", /Search for "qa note" in every file/.test(last) && after > FILES, { last, after })
+  await page.fill('[role="dialog"][aria-label="Search"] input', "xq")
+  await until(async () => (await page.textContent('[role="listbox"]')).includes("Qa note 7"), 4000).catch(() => {})
+  check("text matches from two letters", (await page.textContent('[role="listbox"]')).includes("Qa note 7"), await page.textContent('[role="listbox"]'))
+  await page.keyboard.press("Escape")
+
+  // The file tree: every file, drawn as it's scrolled.
+  await page.goto("about:blank")
+  await page.goto(`${B}#view/files`)
+  const folder = `[data-path="${DIR}"]`
+  await until(() => page.$(`${folder}, [data-tree-path="${DIR}"]`), 8000).catch(() => {})
+  const row = await page.$(`[data-pane] [data-tree-path="${DIR}"] > button`) ?? await page.$(`[data-pane] [data-tree-path="${DIR}"]`)
+  if (row) {
+    // (open already when a search line opened one of its files: the tree reveals the open file)
+    if (await row.evaluate((e) => (e.closest("[role=treeitem]") ?? e.querySelector("[role=treeitem]")).getAttribute("aria-expanded") !== "true")) await row.click()
+    // (the sidebar has a tree too: the tab's alone)
+    const drawn = () => page.$$eval(`[data-pane] [data-tree-path^="${DIR}/"][data-select-key]`, (es) => es.map((e) => e.dataset.treePath))
+    const d0 = (await until(async () => { const d = await drawn(); return d.length && d }, 5000) || []).length
+    // Only the rows near the screen are drawn (core/virtual.ts): scrolled through, every file is drawn on the way.
+    const seen = new Set(), most = { n: 0 }
+    for (let n = 0; n < 80 && seen.size < FILES; n++) {
+      const end = await page.evaluate((p) => {
+        // (what scrolls the tree, found once: the folder's own row goes undrawn once scrolled past)
+        let s = window.qaScroller ?? document.querySelector(`[data-pane] [data-tree-path="${p}"]`)
+        while (s && !(s.scrollHeight > s.clientHeight && /auto|scroll/.test(getComputedStyle(s).overflowY))) s = s.parentElement
+        if (!s) return true
+        window.qaScroller = s
+        s.scrollTop += s.clientHeight * 0.7
+        return s.scrollTop + s.clientHeight >= s.scrollHeight - 1
+      }, DIR)
+      await wait(150)
+      const d = await drawn(); most.n = Math.max(most.n, d.length); for (const k of d) seen.add(k)
+      if (end) { await wait(300); for (const k of await drawn()) seen.add(k); break }
+    }
+    check("a long folder draws its first rows, then every file as it's scrolled", d0 > 0 && d0 < FILES && seen.size === FILES && most.n < FILES, { d0, seen: seen.size, most: most.n })
+  } else check("the files tab shows the folder", false, null)
+
+  // Recent files: 50 (its setting's default), then Show more.
+  await page.goto("about:blank")
+  await page.goto(`${B}#view/recent`)
+  await until(() => page.$('[data-recent-view] section[aria-label="Recently changed"] [data-recent-more]'), 8000)
+  const changed = () => page.$$eval('[data-recent-view] section[aria-label="Recently changed"] [data-select-key]', (es) => es.length)
+  const c0 = await changed()
+  await page.click('[data-recent-view] section[aria-label="Recently changed"] [data-recent-more]')
+  await wait(400)
+  const c1 = await changed()
+  check("recent files list 50, then Show more lists more", c0 === 50 && c1 === 100, { c0, c1 })
+} finally {
+  rmSync(path.join(VAULT, DIR), { recursive: true, force: true })
+}
+await done()

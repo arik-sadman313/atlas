@@ -1,0 +1,808 @@
+// The screen helper (electron/screen.ts): the dictation and Talk keys (ink while one is held), the app in front, other
+// apps' fields and text (Accessibility), and the display's picture. JSON lines in and out; stdin closing ends it.
+import AppKit
+import ApplicationServices
+import CoreAudio
+import ScreenCaptureKit
+
+// (ax.swift: sending, Accessibility reads, an element's words)
+_ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1)
+
+// ---------- the dictation keys: down and up, on its own thread (a slow request never holds the key)
+
+/** The dictation keys the helper asked for, by keycode: others aren't told. */
+let keysLock = NSLock()
+var watching = Set<Int64>()
+func watched(_ code: Int64) -> Bool { keysLock.lock(); defer { keysLock.unlock() }; return watching.contains(code) }
+
+let MODS: [Int64: CGEventFlags] = [59: .maskControl, 62: .maskControl, 61: .maskAlternate, 54: .maskCommand]
+/** The key's other side's own flag (left Option's for right Option, right Control's for left): held with it, not alone. */
+let LEFT: [Int64: UInt64] = [61: 0x20, 54: 0x08, 59: 0x2000, 62: 0x01]
+let ANY_MOD: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift, .maskSecondaryFn]
+var modHeld = Set<Int64>(), modLive = false
+/** Control's and the right modifiers' presses as they are (core/fnkey.ts decides); what follows one says only that it came. */
+func tappedMod(_ type: CGEventType, _ e: CGEvent) {
+  let code = e.getIntegerValueField(.keyboardEventKeycode)
+  guard type == .flagsChanged, let own = MODS[code], watched(code) else {
+    if modLive { modLive = false; send(["event": "mod", "other": true]) }
+    return
+  }
+  // (the flag stays while the key's other side is down: a held key's next event is its release)
+  let on = e.flags.contains(own) && !modHeld.contains(code)
+  let alone = on && modHeld.isEmpty && e.flags.intersection(ANY_MOD).subtracting(own).isEmpty && e.flags.rawValue & (LEFT[code] ?? 0) == 0
+  if on { modHeld.insert(code) } else { modHeld.remove(code) }
+  modLive = true
+  send(["event": "mod", "code": code, "on": on, "alone": alone, "at": DispatchTime.now().uptimeNanoseconds / 1_000_000])
+}
+
+var fnDown = false, fnOther = false
+func tapped(_ type: CGEventType, _ e: CGEvent) {
+  tappedMod(type, e)
+  tappedChord(type, e)
+  if type == .flagsChanged {
+    let on = e.flags.contains(.maskSecondaryFn)
+    if e.getIntegerValueField(.keyboardEventKeycode) == 63 {
+      if on && !fnDown && watched(63) { fnDown = true; fnOther = false; send(["event": "fn", "down": true]) }
+      else if !on && fnDown { fnDown = false; send(["event": "fn", "down": false]) }
+    } else if fnDown && !fnOther { fnOther = true; send(["event": "fn", "other": true]) }
+  } else if type == .keyDown && fnDown && !fnOther { fnOther = true; send(["event": "fn", "other": true]) }
+}
+
+/** Chords: two modifiers held together and nothing else, by name (core/fnkey.ts CHORDS). Let go of one, it's up; another
+ *  key or modifier with them, `other` (a shortcut). */
+let CHORD_FLAGS: [String: CGEventFlags] = ["control_option": [.maskControl, .maskAlternate], "fn_control": [.maskSecondaryFn, .maskControl]]
+/** `spent`: a shortcut took it; it comes on again only once let go (else letting go of the shortcut's key is a new press). */
+var chords: [String] = [], chordOn: [String: Bool] = [:], chordSpent = Set<String>()
+func tappedChord(_ type: CGEventType, _ e: CGEvent) {
+  keysLock.lock(); let names = chords; keysLock.unlock()
+  if type == .keyDown {
+    for n in names where chordOn[n] == true { chordOn[n] = false; chordSpent.insert(n); send(["event": "chord", "name": n, "other": true]) }
+    return
+  }
+  guard type == .flagsChanged else { return }
+  let mods = e.flags.intersection(ANY_MOD)
+  for n in names {
+    guard let f = CHORD_FLAGS[n] else { continue }
+    if !mods.isSuperset(of: f) { chordSpent.remove(n) }
+    let on = mods == f && !chordSpent.contains(n), was = chordOn[n] ?? false
+    if on == was { continue }
+    chordOn[n] = on
+    // (when it happened, ms since 1970: a busy app hearing it late still tells a tap from a hold)
+    let t = Date().timeIntervalSince1970 * 1000
+    if on { send(["event": "chord", "name": n, "on": true, "t": t]) }
+    else if mods.isSuperset(of: f) { chordSpent.insert(n); send(["event": "chord", "name": n, "other": true]) }
+    else { send(["event": "chord", "name": n, "on": false, "t": t]) }
+  }
+}
+
+/** Ink: while the helper says (a Talk key held, outside Vaultite), a press waits: moved past SLOP points it's a drag, drawn
+ *  and the helper's to its release; let go before, a click, replayed to the app (marked REPLAYED, let by) and told. */
+var inkOn = false, inking = false, inkSent = 0.0
+var pressed: CGEvent? = nil
+let SLOP = 4.0, REPLAYED: Int64 = 0x7661756c74
+/** The Talk key's own modifiers, held now: a click replayed is a plain click (Control's would be a right click). */
+func talkFlags() -> CGEventFlags {
+  var f: CGEventFlags = []
+  for c in modHeld { if let m = MODS[c] { f.formUnion(m) } }
+  for (n, on) in chordOn where on { if let m = CHORD_FLAGS[n] { f.formUnion(m) } }
+  if fnDown { f.formUnion(.maskSecondaryFn) }
+  return f
+}
+func replay(_ events: [CGEvent]) {
+  let strip = talkFlags()
+  for e in events {
+    guard let c = e.copy() else { continue }
+    c.flags = c.flags.subtracting(strip)
+    c.setIntegerValueField(.eventSourceUserData, value: REPLAYED)
+    c.post(tap: .cghidEventTap)
+  }
+}
+/** What the exchange watches meanwhile (its answer showing): a click elsewhere, Esc. Told, never taken. */
+var exchange = false
+/** Clicks told anyway, for the timeline (helper.ts keeps them only while it's on). */
+var clicks = false
+/** While a companion's wait listens (`inputs`): clicks, and that a key was typed (never which), told as they happen. */
+var inputs = false
+/** While the timeline keeps what's done (a lesson's steps): shortcuts and Return, Tab, Esc by name, other keys only that
+ *  one was typed (never which). */
+var keys = false
+func keyName(_ e: CGEvent) -> String? {
+  let code = e.getIntegerValueField(.keyboardEventKeycode), f = e.flags
+  let named: [Int64: String] = [36: "enter", 76: "enter", 48: "tab", 53: "esc"]
+  var mods: [String] = []
+  if f.contains(.maskControl) { mods.append("ctrl") }
+  if f.contains(.maskAlternate) { mods.append("alt") }
+  if f.contains(.maskShift) { mods.append("shift") }
+  if f.contains(.maskCommand) { mods.append("cmd") }
+  if let n = named[code] { return (mods + [n]).joined(separator: "+") }
+  guard f.contains(.maskCommand) || f.contains(.maskControl), let c = NSEvent(cgEvent: e)?.charactersIgnoringModifiers?.lowercased(), c.count == 1, c.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 32 }) else { return nil }
+  return (mods + [c == " " ? "space" : c]).joined(separator: "+")
+}
+var filtering = false
+func mouse(_ type: CGEventType, _ e: CGEvent) -> Bool {
+  let p = e.location
+  if type == .leftMouseDown && inkOn && filtering {
+    pressed = e.copy()
+    return true
+  }
+  if let d = pressed, type == .leftMouseDragged || type == .leftMouseUp {
+    let q = d.location
+    if type == .leftMouseUp {
+      pressed = nil
+      replay([d, e])
+      send(["event": "click", "x": q.x, "y": q.y, "held": true])
+      return true
+    }
+    if hypot(p.x - q.x, p.y - q.y) < SLOP { return true }
+    pressed = nil
+    inking = true
+    send(["event": "ink", "phase": "down", "x": q.x, "y": q.y])
+    send(["event": "ink", "phase": "move", "x": p.x, "y": p.y])
+    return true
+  }
+  if type == .leftMouseDragged && inking {
+    // (at most a point every 8 ms: smooth enough, and the pipe stays light)
+    let now = Date().timeIntervalSince1970
+    if now - inkSent >= 0.008 { inkSent = now; send(["event": "ink", "phase": "move", "x": p.x, "y": p.y]) }
+    return true
+  }
+  if type == .leftMouseUp && inking {
+    inking = false
+    send(["event": "ink", "phase": "up", "x": p.x, "y": p.y])
+    return true
+  }
+  if type == .leftMouseDown && (exchange || clicks) { send(["event": "click", "x": p.x, "y": p.y, "exchange": exchange]) }
+  if type == .leftMouseDown && inputs { send(["event": "input", "kind": "click", "x": p.x, "y": p.y]) }
+  return false
+}
+var tap: CFMachPort?
+/** Started once asked (`fn`): only the menu-bar helper's app hears the key. */
+let tapThread = Thread {
+  // (a click or a scroll too: Option-click or Control-scroll isn't a key alone; drags for ink)
+  let mask = [CGEventType.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel].reduce(CGEventMask(0)) { $0 | CGEventMask(1 << $1.rawValue) }
+  let cb: CGEventTapCallBack = { _, type, e, _ in
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }; return Unmanaged.passUnretained(e) }
+    // (a click held back and let go (mouse): the app's, untouched, and never a key with the Talk key)
+    if e.getIntegerValueField(.eventSourceUserData) == REPLAYED { return Unmanaged.passUnretained(e) }
+    if type == .leftMouseDragged || type == .leftMouseUp { return mouse(type, e) ? nil : Unmanaged.passUnretained(e) }
+    if type == .leftMouseDown && mouse(type, e) { return nil }
+    if type == .keyDown && exchange && e.getIntegerValueField(.keyboardEventKeycode) == 53 { send(["event": "esc"]) }
+    if type == .keyDown && inputs { send(["event": "input", "kind": e.getIntegerValueField(.keyboardEventKeycode) == 53 ? "esc" : "type"]) }
+    if type == .keyDown && keys { if let k = keyName(e) { send(["event": "key", "key": k]) } else { send(["event": "typed"]) } }
+    tapped(type, e)
+    return Unmanaged.passUnretained(e)
+  }
+  // (Accessibility lets a filtering tap in, Input Monitoring a listening one, which can't keep ink from the app below;
+  // asked again till one is granted)
+  while tap == nil {
+    tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: cb, userInfo: nil)
+    filtering = tap != nil
+    if tap == nil { tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask, callback: cb, userInfo: nil) }
+    send(["event": "tap", "ok": tap != nil, "ink": filtering])
+    if tap == nil { Thread.sleep(forTimeInterval: 5) }
+  }
+  let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
+  CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
+  CGEvent.tapEnable(tap: tap!, enable: true)
+  CFRunLoopRun()
+}
+
+// ---------- the app in front, and its focused window's title (metadata only)
+
+var lastFront = ""
+var frontObserver: AXObserver?
+func sayFront() {
+  guard let a = NSWorkspace.shared.frontmostApplication else { return }
+  let app = AXUIElementCreateApplication(a.processIdentifier)
+  let win: AXUIElement? = attr(app, kAXFocusedWindowAttribute)
+  var m = appInfo(a.processIdentifier)
+  m["title"] = win.flatMap { attr($0, kAXTitleAttribute) as String? } ?? ""
+  m["window"] = win.flatMap { wid($0) } ?? 0
+  m["vaultite"] = a.processIdentifier == vaultitePid
+  let key = "\(m["bundle"]!)|\(m["title"]!)|\(m["window"]!)"
+  if key == lastFront { return }
+  lastFront = key
+  m["event"] = "front"
+  send(m)
+}
+func watchFront(_ pid: pid_t) {
+  if let o = frontObserver { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode) }
+  frontObserver = nil
+  var o: AXObserver?
+  guard AXObserverCreate(pid, { _, _, _, _ in sayFront() }, &o) == .success, let o else { return }
+  let app = AXUIElementCreateApplication(pid)
+  for n in [kAXFocusedWindowChangedNotification, kAXTitleChangedNotification, kAXMainWindowChangedNotification] { AXObserverAddNotification(o, app, n as CFString, nil) }
+  CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode)
+  frontObserver = o
+}
+
+// ---------- fields: where words go, and putting them there
+
+let TEXT_ROLES: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+func focused() -> AXUIElement? {
+  let a = NSWorkspace.shared.frontmostApplication
+  if let a { wake(a.processIdentifier) }
+  // (the system-wide answer fails on some Macs and for some apps; the app in front still knows)
+  return attr(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) ?? a.flatMap { attr(AXUIElementCreateApplication($0.processIdentifier), kAXFocusedUIElementAttribute) }
+}
+func editable(_ el: AXUIElement) -> Bool {
+  let role: String = attr(el, kAXRoleAttribute) ?? ""
+  if TEXT_ROLES.contains(role) { return true }
+  // (a web page's contenteditable, Google Docs' hidden field, a code editor)
+  if (attr(el, "AXEditableAncestor") as AXUIElement?) != nil { return true }
+  return settable(el, kAXSelectedTextAttribute) || (role != "AXWindow" && settable(el, kAXValueAttribute) && settable(el, kAXSelectedTextRangeAttribute))
+}
+func windowOf(_ el: AXUIElement) -> AXUIElement? { attr(el, kAXWindowAttribute) }
+/** The text before the caret (what the words join to), when the field tells it. */
+func before(_ el: AXUIElement) -> String? {
+  guard let value: String = attr(el, kAXValueAttribute), let rv: AXValue = attr(el, kAXSelectedTextRangeAttribute) else { return nil }
+  var r = CFRange(); AXValueGetValue(rv, .cfRange, &r)
+  let ns = value as NSString, at = min(max(0, r.location), ns.length)
+  return ns.substring(with: NSRange(location: max(0, at - 40), length: at - max(0, at - 40)))
+}
+/** The field a dictation started in, for its words should nothing else take them. */
+var kept: AXUIElement?
+func focus(keep: Bool = false) -> [String: Any] {
+  if keep { kept = nil }
+  guard let el = focused() else {
+    var m = NSWorkspace.shared.frontmostApplication.map { appInfo($0.processIdentifier) } ?? [:]
+    m["field"] = false
+    return m
+  }
+  let pid = pidOf(el)
+  var m = appInfo(pid)
+  let w = windowOf(el)
+  let open = editable(el)
+  if keep && open && pid != vaultitePid && !secure(el) { kept = el }
+  m["editable"] = open
+  m["field"] = open && pid != vaultitePid
+  m["secure"] = secure(el)
+  m["role"] = attr(el, kAXRoleAttribute) as String? ?? ""
+  m["frame"] = rectJSON(frame(el))
+  m["window"] = w.flatMap { wid($0) } ?? 0
+  m["title"] = w.flatMap { attr($0, kAXTitleAttribute) as String? } ?? ""
+  m["vaultite"] = pid == vaultitePid
+  if !secure(el), let b = before(el) { m["before"] = b }
+  return m
+}
+
+/** Words into the focused field: set as its selected text (checked by its value), else pasted with the clipboard put
+ *  back after, as Wispr Flow does. Never into a password field. */
+func insert(_ text: String) -> [String: Any] {
+  guard let el = focused(), editable(el) else { return ["ok": false, "why": "no-field"] }
+  if secure(el) { return ["ok": false, "why": "secure"] }
+  if setSelected(el, text) { return ["ok": true, "how": "ax"] }
+  paste(text)
+  return ["ok": true, "how": "paste"]
+}
+/** Set as the field's selected text, checked by its value: it needn't be in front. */
+func setSelected(_ el: AXUIElement, _ text: String) -> Bool {
+  let was: String? = attr(el, kAXValueAttribute)
+  guard was != nil, AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success,
+        let now: String = attr(el, kAXValueAttribute), now != was, now.contains(text) else { return false }
+  return true
+}
+/** The kept field: `info`, what precedes its caret; `insert` with it where it is; else `front`, then `paste` once it has the keyboard. */
+func keptField(_ what: String, _ text: String) -> [String: Any] {
+  guard let el = kept, (attr(el, kAXRoleAttribute) as String?) != nil else { kept = nil; return ["ok": false, "why": "gone"] }
+  let pid = pidOf(el)
+  switch what {
+  case "info":
+    var m = appInfo(pid)
+    m["ok"] = true
+    if let b = before(el) { m["before"] = b }
+    return m
+  case "insert": return setSelected(el, text) ? ["ok": true, "how": "ax"] : ["ok": false, "why": "front"]
+  case "front":
+    // (asked of it by Accessibility: macOS may refuse a background process's `activate`)
+    AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    NSRunningApplication(processIdentifier: pid)?.activate()
+    if let w = windowOf(el) { AXUIElementPerformAction(w, kAXRaiseAction as CFString) }
+    AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    return ["ok": true]
+  case "paste":
+    // (a field of that window: web apps' fields don't always keep their element when focused again)
+    guard let now = focused(), pidOf(now) == pid, editable(now), !secure(now), windowOf(now).flatMap({ wid($0) }) == windowOf(el).flatMap({ wid($0) }) else { return ["ok": false, "why": "not-focused"] }
+    paste(text)
+    return ["ok": true, "how": "paste"]
+  default: return ["ok": false, "why": "unknown"]
+  }
+}
+/** The field words just went into (the focused one, or the kept one they went back to), followed a while for the
+ *  user's fixes: its text told as it changes, only while its window is in front; never a password field's. */
+var followed: (el: AXUIElement, pid: pid_t, window: Int, value: String, since: Date, seen: Bool)?
+var followTimer: Timer?
+let FOLLOW_MOST = 100_000
+func followedValue(_ el: AXUIElement) -> String? {
+  guard !secure(el), let v: String = attr(el, kAXValueAttribute), (v as NSString).length <= FOLLOW_MOST else { return nil }
+  return v
+}
+func unfollow() { followTimer?.invalidate(); followTimer = nil; followed = nil }
+func follow(_ what: String, from: String) -> [String: Any] {
+  if what != "start" { unfollow(); return ["ok": true] }
+  unfollow()
+  guard let el = from == "kept" ? kept : focused(), editable(el), pidOf(el) != vaultitePid, let w = windowOf(el).flatMap({ wid($0) }) else { return ["ok": false, "why": "no-field"] }
+  // (a field that doesn't say its text (a canvas, a terminal), or a password's: nothing to follow)
+  guard let v = followedValue(el) else { return ["ok": false, "why": secure(el) ? "secure" : "no-text"] }
+  var caret = -1
+  if let rv: AXValue = attr(el, kAXSelectedTextRangeAttribute) { var r = CFRange(); AXValueGetValue(rv, .cfRange, &r); caret = r.location }
+  followed = (el, pidOf(el), w, v, Date(), false)
+  followTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in followTick() }
+  var m = appInfo(pidOf(el))
+  m["ok"] = true; m["value"] = v; m["caret"] = caret; m["window"] = w
+  return m
+}
+/** Its text again, told when it changed, while its window is in front (words gone back to a field behind wait for it to
+ *  come); left once it was, the field gone or now a password's, or long past what's asked of it: over. */
+func followTick() {
+  guard var f = followed else { return unfollow() }
+  let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+  let win: AXUIElement? = front == f.pid ? attr(AXUIElementCreateApplication(f.pid), kAXFocusedWindowAttribute) : nil
+  let here = win.flatMap({ wid($0) }) == f.window
+  let why = (attr(f.el, kAXRoleAttribute) as String?) == nil ? "gone" : secure(f.el) ? "secure" : !here && f.seen ? "left" : Date().timeIntervalSince(f.since) > 300 ? "time" : nil
+  if let why { unfollow(); return send(["event": "follow", "over": why]) }
+  if !here { return }
+  f.seen = true
+  guard let v = followedValue(f.el) else { unfollow(); return send(["event": "follow", "over": "no-text"]) }
+  let changed = v != f.value
+  f.value = v
+  followed = f
+  if changed { send(["event": "follow", "value": v]) }
+}
+
+func paste(_ text: String) {
+  let pb = NSPasteboard.general
+  let saved: [[NSPasteboard.PasteboardType: Data]] = (pb.pasteboardItems ?? []).map { item in
+    var d: [NSPasteboard.PasteboardType: Data] = [:]
+    for t in item.types { if let v = item.data(forType: t) { d[t] = v } }
+    return d
+  }
+  pb.clearContents()
+  // (marked transient and auto-generated: clipboard managers leave it out of their history)
+  pb.setString(text, forType: .string)
+  pb.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+  pb.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType"))
+  let mine = pb.changeCount
+  let src = CGEventSource(stateID: .combinedSessionState)
+  for down in [true, false] {
+    let e = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: down)
+    e?.flags = .maskCommand
+    e?.post(tap: .cghidEventTap)
+  }
+  // (put back once the app has read it; not if something else was copied meanwhile)
+  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+    guard pb.changeCount == mine else { return }
+    pb.clearContents()
+    let items = saved.map { d -> NSPasteboardItem in let i = NSPasteboardItem(); for (t, v) in d { i.setData(v, forType: t) }; return i }
+    if !items.isEmpty { pb.writeObjects(items) }
+  }
+}
+
+// ---------- windows: which is where, and their text
+
+/** On-screen windows front to back (CGWindowList), every layer: numbers, owners, bounds. */
+func onScreen() -> [[String: Any]] {
+  CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+}
+func layerOf(_ w: [String: Any]) -> Int { w[kCGWindowLayer as String] as? Int ?? -1 }
+func ownerOf(_ w: [String: Any]) -> pid_t { pid_t(w[kCGWindowOwnerPID as String] as? Int ?? 0) }
+func seen(_ w: [String: Any]) -> Bool { (w[kCGWindowAlpha as String] as? Double ?? 1) > 0 }
+/** A window by its number, at any layer: a floating panel's too. */
+func windowNumbered(_ id: Int) -> [String: Any]? { onScreen().first { ($0[kCGWindowNumber as String] as? Int) == id } }
+func boundsOf(_ w: [String: Any]) -> CGRect? {
+  guard let b = w[kCGWindowBounds as String] as? NSDictionary else { return nil }
+  return CGRect(dictionaryRepresentation: b)
+}
+func describe(_ w: [String: Any]) -> [String: Any] {
+  let pid = pid_t(w[kCGWindowOwnerPID as String] as? Int ?? 0), id = w[kCGWindowNumber as String] as? Int ?? 0
+  var m = appInfo(pid)
+  m["window"] = id
+  m["frame"] = rectJSON(boundsOf(w))
+  m["title"] = axWindow(pid, id).flatMap { attr($0, kAXTitleAttribute) as String? } ?? ""
+  m["vaultite"] = pid == vaultitePid
+  return m
+}
+/** The topmost window under a point (screen points, top-left origin): what the companion's cursor was dropped on. */
+/** Vaultite's own count (an ask there is about its note, pane or UI: `vaultite`), its window kept on top too; its overlays
+ *  and boxes, above those, never do. Leaving them all out named the app behind Vaultite's window as the one asked about. */
+/** Another app's panel floating over the others (a tray, a palette, the Dock) counts when Accessibility's hit test lands
+ *  in it: what takes clicks there, so a click-through overlay never does. */
+func windowHere(_ x: Double, _ y: Double) -> [String: Any]? {
+  let list = onScreen(), p = CGPoint(x: x, y: y)
+  var hit: AXUIElement?
+  if AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(x), Float(y), &hit) == .success, let el = hit {
+    let pid = pidOf(el)
+    if pid != vaultitePid, pid != 0, let w = list.first(where: { ownerOf($0) == pid && seen($0) && boundsOf($0)?.contains(p) == true }) { return w }
+  }
+  return list.first(where: { w in
+    let layer = layerOf(w), own = ownerOf(w) == vaultitePid
+    return (layer == 0 || (own && layer == Int(CGWindowLevelForKey(.floatingWindow)))) && boundsOf(w)?.contains(p) == true && seen(w)
+  })
+}
+func windowAt(_ x: Double, _ y: Double) -> [String: Any] { windowHere(x, y).map(describe) ?? ["window": 0] }
+/** What's under a point (screen points, top-left origin), as Accessibility names it: a desktop icon, a button, a row.
+ *  Its words and its parent's, never a password field's; its app. */
+func under(_ x: Double, _ y: Double) -> [String: Any] {
+  var hit: AXUIElement?
+  guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(x), Float(y), &hit) == .success, let el = hit else { return ["ok": false] }
+  let pid = pidOf(el)
+  if pid == vaultitePid { return ["ok": false, "vaultite": true] }
+  var m = appInfo(pid)
+  m["ok"] = true
+  m["role"] = attr(el, kAXRoleDescriptionAttribute) as String? ?? attr(el, kAXRoleAttribute) as String? ?? ""
+  let words = { (e: AXUIElement) -> String in
+    if secure(e) { return "" }
+    for k in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute, kAXHelpAttribute] {
+      if let v: String = attr(e, k), !v.trimmingCharacters(in: .whitespaces).isEmpty { return String(v.prefix(300)) }
+    }
+    return ""
+  }
+  m["label"] = words(el)
+  if let parent: AXUIElement = attr(el, kAXParentAttribute) { m["in"] = words(parent) }
+  m["frame"] = rectJSON(frame(el))
+  return m
+}
+/** Whether a window in front of window `id` (0: any window) covers a point: a cursor there would point at nothing seen. */
+/** (a floating panel's: only what floats with it counts; an ordinary window's: only ordinary ones, as ever) */
+func covered(_ id: Int, _ x: Double, _ y: Double) -> [String: Any] {
+  let p = CGPoint(x: x, y: y), all = onScreen(), floats = id > 0 && (all.first { ($0[kCGWindowNumber as String] as? Int) == id }.map(layerOf) ?? 0) != 0
+  for w in all where floats ? ownerOf(w) != vaultitePid : layerOf(w) == 0 {
+    if id > 0 && (w[kCGWindowNumber as String] as? Int) == id { return ["covered": false] }
+    if seen(w), boundsOf(w)?.contains(p) == true { return ["covered": true] }
+  }
+  return ["covered": false]
+}
+func windowInfo(_ id: Int) -> [String: Any] {
+  guard let w = windowNumbered(id) else { return ["window": 0] }
+  return describe(w)
+}
+
+func runningApp(_ name: String) -> NSRunningApplication? {
+  NSRunningApplication.runningApplications(withBundleIdentifier: name).first
+    ?? NSWorkspace.shared.runningApplications.first { $0.localizedName?.lowercased() == name.lowercased() }
+}
+/** The window asked for (its number), else the focused one of an app (bundle id or name), else of the app in front. */
+func target(_ id: Int, _ bundle: String = "") -> (AXUIElement, pid_t)? {
+  if id > 0 {
+    guard let w = windowNumbered(id), case let pid = ownerOf(w), let ax = axWindow(pid, id) else { return nil }
+    return (ax, pid)
+  }
+  guard let a = bundle.isEmpty ? NSWorkspace.shared.frontmostApplication : runningApp(bundle) else { return nil }
+  wake(a.processIdentifier)
+  guard let w: AXUIElement = attr(AXUIElementCreateApplication(a.processIdentifier), kAXFocusedWindowAttribute) else { return nil }
+  return (w, a.processIdentifier)
+}
+
+/** The windows the companion's cursor points at (helper.ts asks for them all at once): their moves, resizes and closing,
+ *  told as they happen, so the cursor follows a window being dragged. */
+var watchers: [pid_t: AXObserver] = [:]
+func watchWindows(_ ids: [Int]) {
+  for o in watchers.values { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode) }
+  watchers = [:]
+  let list = onScreen()
+  for id in ids {
+    guard let w = list.first(where: { ($0[kCGWindowNumber as String] as? Int) == id }), let pid = (w[kCGWindowOwnerPID as String] as? Int).map({ pid_t($0) }),
+          pid != vaultitePid, let ax = axWindow(pid, id) else { continue }
+    if watchers[pid] == nil {
+      var o: AXObserver?
+      guard AXObserverCreate(pid, { _, el, n, _ in
+        send(["event": "moved", "window": wid(el) ?? 0, "frame": rectJSON(frame(el)), "gone": (n as String) == kAXUIElementDestroyedNotification])
+      }, &o) == .success, let o else { continue }
+      CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .defaultMode)
+      watchers[pid] = o
+    }
+    for n in [kAXMovedNotification, kAXResizedNotification, kAXUIElementDestroyedNotification] { AXObserverAddNotification(watchers[pid]!, ax, n as CFString, nil) }
+  }
+}
+
+/** What a window says, depth first: its texts, fields (never a password's), headings, buttons and links, one a line;
+ *  `find`: instead, the first element saying it, and its frame. Bounded in elements and time. */
+func walk(_ root: AXUIElement, max: Int, find: String?) -> (text: String, found: CGRect?) {
+  var lines: [String] = [], size = 0, seen = 0
+  let deadline = Date().addingTimeInterval(1.5), needle = find?.lowercased()
+  var stack: [(AXUIElement, Int)] = [(root, 0)]
+  while let (el, depth) = stack.popLast() {
+    seen += 1
+    if seen > 6000 || Date() > deadline || size > max { break }
+    let role: String = attr(el, kAXRoleAttribute) ?? ""
+    if secure(el) { continue }
+    var says: [String] = []
+    for a in [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute] {
+      if let s: String = attr(el, a), !s.isEmpty, !says.contains(s) { says.append(s) }
+    }
+    if let n = needle {
+      if says.contains(where: { $0.lowercased().contains(n) }), let f = frame(el), f.width > 0 { return ("", f) }
+    } else if !says.isEmpty, ["AXStaticText", "AXTextField", "AXTextArea", "AXHeading", "AXButton", "AXLink", "AXCell", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXTab", "AXWebArea", "AXComboBox", "AXSearchField"].contains(role) {
+      let line = says.joined(separator: " — ")
+      // (a button's label is its text's too: said once)
+      if lines.last != line { lines.append(line); size += line.count + 1 }
+    }
+    if depth < 60, let kids: [AXUIElement] = attr(el, kAXChildrenAttribute) { for k in kids.reversed() { stack.append((k, depth + 1)) } }
+  }
+  let text = lines.joined(separator: "\n")
+  return (String(text.prefix(max)), nil)
+}
+
+/** What Accessibility finds near a point of the window there (not ours): buttons, links, text, rows..., each with its
+ *  words, frame, state, actions and the labelled things it's in, nearest first (the UI model's shape: uimodel.ts);
+ *  whole subtrees off the area are skipped. Bounded in elements and time. */
+let NEAR_ROLES: Set<String> = ["AXButton", "AXLink", "AXStaticText", "AXTextField", "AXTextArea", "AXHeading", "AXCell", "AXRow", "AXImage", "AXMenuItem",
+  "AXMenuBarItem", "AXCheckBox", "AXRadioButton", "AXTab", "AXPopUpButton", "AXComboBox", "AXSearchField", "AXSlider", "AXDisclosureTriangle", "AXMenuButton", "AXIncrementor", "AXSwitch", "AXToggle"]
+/** Containers whose words name what's in them (a row in "Sidebar"). */
+let HOLDER_ROLES: Set<String> = ["AXGroup", "AXScrollArea", "AXTabGroup", "AXSplitGroup", "AXToolbar", "AXList", "AXOutline", "AXTable", "AXSheet", "AXWindow", "AXWebArea", "AXRadioGroup", "AXBrowser"]
+/** An element's state in the model's words, as far as Accessibility tells it. */
+func stateOf(_ el: AXUIElement, _ role: String, _ sub: String) -> [String: Any] {
+  var s: [String: Any] = [:]
+  if let b: Bool = attr(el, "AXExpanded") { s["expanded"] = b }
+  else if role == "AXDisclosureTriangle", let v: NSNumber = attr(el, kAXValueAttribute) { s["expanded"] = v.intValue != 0 }
+  if let b: Bool = attr(el, kAXSelectedAttribute), b { s["selected"] = true }
+  if ["AXCheckBox", "AXRadioButton", "AXSwitch"].contains(role) || sub == "AXSwitch" || sub == "AXToggle" {
+    if let v: NSNumber = attr(el, kAXValueAttribute) { if role == "AXRadioButton" && sub == "AXTabButton" { s["selected"] = v.intValue != 0 } else { s["checked"] = v.intValue == 2 ? "mixed" as Any : (v.intValue != 0) as Any } }
+  }
+  if let b: Bool = attr(el, kAXEnabledAttribute), !b { s["disabled"] = true }
+  if let b: Bool = attr(el, kAXFocusedAttribute), b { s["focused"] = true }
+  if ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXSlider", "AXPopUpButton", "AXIncrementor"].contains(role), !secure(el) {
+    if let v: String = attr(el, kAXValueAttribute) { s["value"] = String(v.prefix(200)) } else if let v: NSNumber = attr(el, kAXValueAttribute) { s["value"] = v.stringValue }
+  }
+  return s
+}
+func near(_ x: Double, _ y: Double, _ r: Double, _ most: Int, in id: Int = 0) -> [String: Any] {
+  let area = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+  // (a window by its number, one just opened: whatever is above it; else the one there)
+  guard let w = id > 0 ? windowNumbered(id) : windowHere(x, y), case let pid = ownerOf(w), pid != vaultitePid,
+        let ax = axWindow(pid, w[kCGWindowNumber as String] as? Int ?? 0) else { return ["ok": false, "elements": []] }
+  var found: [(Double, [String: Any])] = [], seen = 0
+  let deadline = Date().addingTimeInterval(0.8)
+  // (each with the labelled things it's in, nearest first)
+  var stack: [(AXUIElement, Int, [[String: String]])] = [(ax, 0, [])]
+  while let (el, depth, inside) = stack.popLast() {
+    seen += 1
+    if seen > 5000 || Date() > deadline { break }
+    if secure(el) { continue }
+    let f = frame(el)
+    if let f, f.width > 0, f.height > 0, !f.intersects(area) { continue }
+    let role: String = attr(el, kAXRoleAttribute) ?? ""
+    let label = label(el, role: role)
+    if let f, f.width > 0, NEAR_ROLES.contains(role), !label.isEmpty {
+      let dx = max(f.minX - x, 0, x - f.maxX), dy = max(f.minY - y, 0, y - f.maxY), sub: String = attr(el, kAXSubroleAttribute) ?? ""
+      found.append((dx * dx + dy * dy, ["role": attr(el, kAXRoleDescriptionAttribute) as String? ?? role, "ax": role, "sub": sub, "label": label, "frame": rectJSON(f),
+        "state": stateOf(el, role, sub), "actions": actionNames(el), "inside": Array(inside.prefix(4))]))
+    }
+    let holds = HOLDER_ROLES.contains(role) && !label.isEmpty ? [["ax": role, "label": label]] + inside : inside
+    if depth < 60, let kids: [AXUIElement] = attr(el, kAXChildrenAttribute) { for k in kids.reversed() { stack.append((k, depth + 1, holds)) } }
+  }
+  return ["ok": true, "elements": found.sorted { $0.0 < $1.0 }.prefix(most).map { $0.1 }]
+}
+
+/** The display under a point (or `crop` of it, screen points), as a PNG at `scale` pixels a point (1; a closer look's
+ *  more, with `mark` drawn on it), without the windows asked (ours: the overlay, the conversation); ScreenCaptureKit's,
+ *  macOS 14 on. Answers when it's written. */
+func shootDisplay(_ x: Double, _ y: Double, _ exclude: [Int], _ file: String, _ crop: CGRect?, _ scale: Double = 1, _ mark: [String: Any]? = nil, _ done: @escaping ([String: Any]) -> Void) {
+  guard #available(macOS 14.0, *) else { return done(["ok": false, "why": "macos"]) }
+  SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, err in
+    guard let content else { return done(["ok": false, "why": err?.localizedDescription ?? "no screen recording"]) }
+    let p = CGPoint(x: x, y: y)
+    guard let d = content.displays.first(where: { CGDisplayBounds($0.displayID).contains(p) }) ?? content.displays.first else { return done(["ok": false, "why": "no-display"]) }
+    let whole = CGDisplayBounds(d.displayID)
+    // (a part of it, kept inside it: the source rect is the display's own points, from its top left)
+    var b = whole
+    if let c = crop?.intersection(whole), !c.isNull, c.width >= 1, c.height >= 1 { b = c }
+    let filter = SCContentFilter(display: d, excludingWindows: content.windows.filter { exclude.contains(Int($0.windowID)) })
+    let conf = SCStreamConfiguration()
+    if b != whole { conf.sourceRect = CGRect(x: b.minX - whole.minX, y: b.minY - whole.minY, width: b.width, height: b.height) }
+    let k = max(0.25, min(4, scale))
+    conf.width = Int((b.width * k).rounded()); conf.height = Int((b.height * k).rounded()); conf.showsCursor = false
+    SCScreenshotManager.captureImage(contentFilter: filter, configuration: conf) { img, err in
+      guard let img else { return done(["ok": false, "why": err?.localizedDescription ?? "no-image"]) }
+      let url = URL(fileURLWithPath: file) as CFURL
+      guard let dest = CGImageDestinationCreateWithURL(url, "public.png" as CFString, 1, nil) else { return done(["ok": false, "why": "write"]) }
+      CGImageDestinationAddImage(dest, marked(img, mark, b, k), nil)
+      done(CGImageDestinationFinalize(dest) ? ["ok": true, "file": file, "frame": rectJSON(b)] : ["ok": false, "why": "write"])
+    }
+  }
+}
+
+/** A closer look's spot drawn on it (screen points, `b` its part of the screen at `k` pixels a point): the rings they
+ *  drew (red, round each box), else their pointer's arrow. A model told only where, in words or pixels, named a neighbour. */
+func marked(_ img: CGImage, _ mark: [String: Any]?, _ b: CGRect, _ k: Double) -> CGImage {
+  guard let mark, let space = CGColorSpace(name: CGColorSpace.sRGB),
+        let ctx = CGContext(data: nil, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return img }
+  let h = Double(img.height)
+  ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+  let at = { (x: Double, y: Double) in CGPoint(x: (x - b.minX) * k, y: h - (y - b.minY) * k) }
+  let rings = (mark["rings"] as? [[String: Double]] ?? []).compactMap { r -> CGRect? in
+    guard let x = r["x"], let y = r["y"], let w = r["width"], let hh = r["height"] else { return nil }
+    let a = at(x - 3, y + hh + 3), z = at(x + w + 3, y - 3)
+    return CGRect(x: a.x, y: a.y, width: z.x - a.x, height: z.y - a.y)
+  }
+  if !rings.isEmpty {
+    ctx.setStrokeColor(red: 1, green: 0.18, blue: 0.33, alpha: 1); ctx.setLineWidth(max(3, 2.5 * k))
+    for r in rings { ctx.strokeEllipse(in: r) }
+  } else if let p = mark["pointer"] as? [String: Double], let x = p["x"], let y = p["y"] {
+    let arrow: [(Double, Double)] = [(0, 0), (0, 17), (4, 13), (7, 20), (10, 19), (7, 12), (12, 12)]
+    ctx.beginPath(); ctx.addLines(between: arrow.map { at(x + $0.0, y + $0.1) }); ctx.closePath()
+    ctx.setFillColor(gray: 0, alpha: 1); ctx.setStrokeColor(gray: 1, alpha: 1); ctx.setLineWidth(max(2, 1.2 * k)); ctx.setLineJoin(.round)
+    ctx.drawPath(using: .fillStroke)
+  }
+  return ctx.makeImage() ?? img
+}
+
+/** What's on screen now (ScreenCaptureKit's content), kept a few seconds: a mark's area sampled twice a second asks for it
+ *  each time, and listing it is the costly part. */
+var sampleContent: (at: Date, content: AnyObject)? = nil
+/** Small grey pictures of screen areas (screen points), `w` by `h` pixels each, without the windows asked (the overlay
+ *  drawing the marks): what the helper compares to see the screen under a mark change. Base64, a byte a pixel. */
+func sampleAreas(_ areas: [[String: Double]], _ exclude: [Int], _ done: @escaping ([String: Any]) -> Void) {
+  guard #available(macOS 14.0, *) else { return done(["ok": false, "why": "macos"]) }
+  let shoot: (SCShareableContent) -> Void = { content in
+    var out = [Any](repeating: NSNull(), count: areas.count)
+    let group = DispatchGroup(), lock = NSLock()
+    let hidden = content.windows.filter { exclude.contains(Int($0.windowID)) }
+    for (i, a) in areas.enumerated() {
+      guard let x = a["x"], let y = a["y"], let width = a["width"], let height = a["height"], width >= 1, height >= 1 else { continue }
+      let r = CGRect(x: x, y: y, width: width, height: height), c = CGPoint(x: r.midX, y: r.midY)
+      guard let d = content.displays.first(where: { CGDisplayBounds($0.displayID).contains(c) }) else { continue }
+      let whole = CGDisplayBounds(d.displayID), b = r.intersection(whole)
+      guard !b.isNull, b.width >= 1, b.height >= 1 else { continue }
+      let w = max(2, min(64, Int(a["w"] ?? 32))), h = max(2, min(64, Int(a["h"] ?? 16)))
+      let conf = SCStreamConfiguration()
+      conf.sourceRect = CGRect(x: b.minX - whole.minX, y: b.minY - whole.minY, width: b.width, height: b.height)
+      conf.width = w; conf.height = h; conf.showsCursor = false
+      group.enter()
+      SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: d, excludingWindows: hidden), configuration: conf) { img, _ in
+        defer { group.leave() }
+        guard let img, let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
+        ctx.interpolationQuality = .low
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let px = ctx.data else { return }
+        let data = Data(bytes: px, count: w * h).base64EncodedString()
+        lock.lock(); out[i] = ["w": w, "h": h, "px": data]; lock.unlock()
+      }
+    }
+    group.notify(queue: .global()) { done(["ok": true, "samples": out]) }
+  }
+  if let c = sampleContent, Date().timeIntervalSince(c.at) < 4, let content = c.content as? SCShareableContent { return shoot(content) }
+  SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, err in
+    guard let content else { return done(["ok": false, "why": err?.localizedDescription ?? "no screen recording"]) }
+    DispatchQueue.main.async { sampleContent = (Date(), content) }
+    shoot(content)
+  }
+}
+
+// ---------- who has an audio device running (calllogic.ts: a call keeps the companion quiet), Core Audio's process objects
+
+func audioProp<T>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ zero: T) -> T? {
+  var a = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+  var v = zero, size = UInt32(MemoryLayout<T>.size)
+  return withUnsafeMutablePointer(to: &v) { AudioObjectGetPropertyData(obj, &a, 0, nil, &size, $0) } == noErr ? v : nil
+}
+/** A process's parents, nearest first (launchd left out). */
+func parents(_ pid: pid_t) -> [Int] {
+  var chain: [Int] = [], p = pid
+  for _ in 0..<12 {
+    var info = kinfo_proc(), size = MemoryLayout<kinfo_proc>.size, mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, p]
+    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { break }
+    p = info.kp_eproc.e_ppid
+    if p <= 1 { break }
+    chain.append(Int(p))
+  }
+  return chain
+}
+/** The app macOS holds responsible for a process (a browser for its audio helper), as TCC does. */
+typealias Responsible = @convention(c) (pid_t) -> pid_t
+let responsibleFor: Responsible? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid").map { unsafeBitCast($0, to: Responsible.self) }
+func mics() -> [String: Any] {
+  guard #available(macOS 14.2, *) else { return ["ok": false, "why": "macOS 14.2 tells who uses the mic"] }
+  var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+  var size: UInt32 = 0
+  guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size) == noErr else { return ["ok": false, "why": "core audio"] }
+  var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+  guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &ids) == noErr else { return ["ok": false, "why": "core audio"] }
+  var users: [[String: Any]] = []
+  for id in ids {
+    let input = (audioProp(id, kAudioProcessPropertyIsRunningInput, UInt32(0)) ?? 0) != 0, output = (audioProp(id, kAudioProcessPropertyIsRunningOutput, UInt32(0)) ?? 0) != 0
+    guard input || output, let pid = audioProp(id, kAudioProcessPropertyPID, pid_t(0)), pid > 0 else { continue }
+    let bundle = (audioProp(id, kAudioProcessPropertyBundleID, nil as CFString?) ?? nil) as String? ?? ""
+    let owner = responsibleFor?(pid) ?? pid
+    let app = NSRunningApplication(processIdentifier: owner > 0 ? owner : pid)
+    users.append(["pid": Int(pid), "bundle": bundle, "app": app?.localizedName ?? "", "appBundle": app?.bundleIdentifier ?? "", "chain": parents(pid), "input": input, "output": output])
+  }
+  return ["ok": true, "users": users]
+}
+
+func handle(_ req: [String: Any]) -> [String: Any] {
+  let id = req["window"] as? Int ?? 0
+  switch req["op"] as? String {
+  case "trusted":
+    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: req["prompt"] as? Bool ?? false] as CFDictionary
+    return ["trusted": AXIsProcessTrustedWithOptions(opts)]
+  case "fn":
+    keysLock.lock(); watching = Set((req["keys"] as? [Int] ?? []).map { Int64($0) }); chords = req["chords"] as? [String] ?? []; keysLock.unlock()
+    if !tapThread.isExecuting && !tapThread.isFinished { tapThread.start() }
+    return ["ok": true]
+  case "ink": inkOn = req["on"] as? Bool ?? false; if !inkOn { inking = false }; return ["ok": true, "ink": filtering]
+  case "mics": return mics()
+  case "exchange": exchange = req["on"] as? Bool ?? false; return ["ok": true]
+  case "clicks": clicks = req["on"] as? Bool ?? false; return ["ok": true]
+  case "inputs": inputs = req["on"] as? Bool ?? false; return ["ok": true]
+  case "keys": keys = req["on"] as? Bool ?? false; return ["ok": true]
+  case "notch":
+    // (each display, top-left origin, and its camera's notch: the top between the menu bar's two sides, where one has it)
+    let h = NSScreen.screens.first?.frame.height ?? 0
+    return ["screens": NSScreen.screens.map { s -> [String: Any] in
+      let f = s.frame, top = h - f.maxY
+      var m: [String: Any] = ["frame": rectJSON(CGRect(x: f.minX, y: top, width: f.width, height: f.height))]
+      if #available(macOS 12.0, *), s.safeAreaInsets.top > 0, let l = s.auxiliaryTopLeftArea, let r = s.auxiliaryTopRightArea, r.minX > l.maxX {
+        // (the sides come in the display's own points on some systems, the screen's on others)
+        let off = (f.minX...f.maxX).contains(l.maxX) && f.minX != 0 ? 0 : f.minX
+        m["notch"] = rectJSON(CGRect(x: off + l.maxX, y: top, width: r.minX - l.maxX, height: s.safeAreaInsets.top))
+      }
+      return m
+    }]
+  case "windows":
+    // (on screen, every layer: what a display's picture would show, by whose; metadata only)
+    let all = onScreen()
+    return ["windows": all.map { w -> [String: Any] in
+      var m = appInfo(ownerOf(w)); m["window"] = w[kCGWindowNumber as String] as? Int ?? 0
+      m["layer"] = layerOf(w); m["frame"] = rectJSON(boundsOf(w)); m["seen"] = seen(w); m["vaultite"] = ownerOf(w) == vaultitePid
+      return m
+    }]
+  case "near": return near(req["x"] as? Double ?? 0, req["y"] as? Double ?? 0, req["radius"] as? Double ?? 260, req["max"] as? Int ?? 30, in: id)
+  case "focus": return focus(keep: req["keep"] as? Bool ?? false)
+  case "kept": return keptField(req["do"] as? String ?? "", req["text"] as? String ?? "")
+  case "insert": return insert(req["text"] as? String ?? "")
+  case "follow": return follow(req["do"] as? String ?? "", from: req["from"] as? String ?? "front")
+  case "front": lastFront = ""; sayFront(); return ["ok": true]
+  case "at": return windowAt(req["x"] as? Double ?? 0, req["y"] as? Double ?? 0)
+  case "under": return under(req["x"] as? Double ?? 0, req["y"] as? Double ?? 0)
+  case "covered": return covered(req["window"] as? Int ?? 0, req["x"] as? Double ?? 0, req["y"] as? Double ?? 0)
+  case "watch": watchWindows(req["windows"] as? [Int] ?? []); return ["ok": true]
+  case "window":
+    // (by its number, else an app's focused window)
+    if id == 0, let (w, _) = target(0, req["bundle"] as? String ?? ""), let n = wid(w) { return windowInfo(n) }
+    return windowInfo(id)
+  case "text", "find":
+    guard let (w, pid) = target(id, req["bundle"] as? String ?? "") else { return ["ok": false, "why": "no-window"] }
+    var m = appInfo(pid)
+    m["window"] = wid(w) ?? 0
+    m["title"] = attr(w, kAXTitleAttribute) as String? ?? ""
+    m["frame"] = rectJSON(frame(w))
+    let r = walk(w, max: req["max"] as? Int ?? 20_000, find: req["op"] as? String == "find" ? req["text"] as? String ?? "" : nil)
+    if req["op"] as? String == "find" { m["found"] = rectJSON(r.found) } else { m["text"] = r.text }
+    m["ok"] = true
+    return m
+  default: return ["error": "unknown op"]
+  }
+}
+
+NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { n in
+  guard let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+  watchFront(a.processIdentifier)
+  sayFront()
+}
+if let a = NSWorkspace.shared.frontmostApplication { watchFront(a.processIdentifier) }
+DispatchQueue.main.async { sayFront() }
+Thread {
+  while let line = readLine() {
+    guard let data = line.data(using: .utf8), let req = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+    // (the display's picture comes when it's written: its answer goes then)
+    if req["op"] as? String == "display" {
+      let c = req["crop"] as? [String: Double]
+      let crop = c.flatMap { c in [c["x"], c["y"], c["width"], c["height"]].allSatisfy { $0 != nil } ? CGRect(x: c["x"]!, y: c["y"]!, width: c["width"]!, height: c["height"]!) : nil }
+      shootDisplay(req["x"] as? Double ?? 0, req["y"] as? Double ?? 0, req["exclude"] as? [Int] ?? [], req["file"] as? String ?? "", crop, req["scale"] as? Double ?? 1, req["mark"] as? [String: Any]) { r in var res = r; res["id"] = req["id"]; send(res) }
+      continue
+    }
+    if req["op"] as? String == "sample" {
+      let areas = (req["areas"] as? [[String: Any]] ?? []).map { $0.compactMapValues { ($0 as? NSNumber)?.doubleValue } }
+      DispatchQueue.main.async { sampleAreas(areas, req["exclude"] as? [Int] ?? []) { r in var res = r; res["id"] = req["id"]; send(res) } }
+      continue
+    }
+    DispatchQueue.main.sync {
+      var res = handle(req)
+      res["id"] = req["id"]
+      send(res)
+    }
+  }
+  exit(0)
+}.start()
+RunLoop.main.run()

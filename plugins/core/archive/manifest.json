@@ -1,0 +1,8 @@
+{
+  "id": "archive",
+  "icon": "archive",
+  "category": "writing",
+  "alwaysOn": true,
+  "name": "Archive",
+  "description": "Archiving a file or folder moves it into a hidden .archive folder inside its own folder, out of the way of agents and other tools; a file is also marked archived: true. Links to it follow it there and back."
+}

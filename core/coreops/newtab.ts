@@ -1,0 +1,208 @@
+// A new tab's sections and buttons (core/newtab.ts). Each change writes only its own key, so the others stay as they
+// are on disk.
+import type { App } from "../app.ts"
+import { commandList, type CommandDef, panelsOf, sectionsOf } from "../appsource.ts"
+import { CORE_SECTIONS, isOpens, readNewTab, type SectionInfo, shownActions, shownSections, withIcon, withPanels } from "../newtab.ts"
+import { defineOp, type Op, OpError, type Param, type ParamsOf } from "../ops.ts"
+import { anchorFor, placeKey } from "../slots.ts"
+import { lines } from "./common.ts"
+import { onOff, pluginList } from "./plugins.ts"
+
+type Section = SectionInfo & { plugin: string; on: boolean
+  /** Its place on the page (from 1), or null: hidden. */
+  place: number | null }
+type Button = { id: string; name: string; place: number
+  /** In the app's source (`vau hotkeys --all`): one that isn't (a made-up id, a plugin's gone) isn't drawn. */
+  known: boolean
+  /** The icon newtab.json gives it, over its command's. */
+  icon?: string }
+
+/** Every section there is (the app's, then the plugins', on or off), the shown ones first in their order. */
+function sectionList(app: App): { setup: ReturnType<typeof readNewTab>; sections: Section[]; buttons: Button[] } {
+  const plugins = pluginList(app)
+  const { on } = onOff(plugins, app.vault.config("plugins"))
+  const defs: Section[] = withPanels([
+    ...CORE_SECTIONS.map((s) => ({ ...s, plugin: "core", on: true, place: null })),
+    ...plugins.flatMap(sectionsOf).map((d) => ({ key: d.key, title: d.title, sort: d.sort, hidden: d.hidden, ...(d.only ? { only: d.only } : {}), plugin: d.plugin, on: on(d.plugin), place: null })),
+  ], plugins.flatMap(panelsOf).map((d) => ({ key: d.key, title: d.title, plugin: d.plugin, on: on(d.plugin), place: null })))
+  const setup = readNewTab(app.vault.config("newtab"))
+  const shown = shownSections(setup, defs)
+  const byKey = new Map(defs.map((d) => [d.key, d]))
+  const first = shown.flatMap((k, i) => (byKey.has(k) ? [{ ...byKey.get(k)!, place: i + 1 }] : []))
+  const rest = defs.filter((d) => !shown.includes(d.key)).sort((a, b) => (a.sort ?? 100) - (b.sort ?? 100))
+  const cmds = new Map(commandList(plugins.filter((p) => p.tier === "vault")).map((c) => [c.id, c]))
+  const buttons = shownActions(setup).map((id, i) => ({ id, name: cmds.get(id)?.name ?? id, place: i + 1, known: cmds.has(id), ...(setup.icons?.[id] ? { icon: setup.icons[id] } : {}) }))
+  return { setup, sections: [...first, ...rest], buttons }
+}
+
+function showList(r: { setup: ReturnType<typeof readNewTab>; sections: Section[]; buttons: Button[] }) {
+  const note = (s: Section) => [s.panel && "a sidebar panel", s.only && `${s.only === "phone" ? "phones" : "computers"} only`, !s.on && "plugin off"].filter(Boolean).join(", ")
+  const row = (s: Section) => `${s.key} (${s.title})${note(s) ? `  (${note(s)})` : ""}`
+  const shown = r.sections.filter((s) => s.place)
+  const hidden = r.sections.filter((s) => !s.place)
+  return [
+    ...(r.setup.opens ? [`Opens: ${r.setup.opens === "switcher" ? "the quick switcher (what's picked opens in a new tab)" : `a ${r.setup.opens} tab`} (vau newtab opens page for the page)`] : []),
+    ...(r.setup.page ? [`Page: ${r.setup.page} (drawn instead of the sections; vau newtab page "" shows them again)`] : []),
+    "Sections, top to bottom:", lines(shown.map((s) => `  ${s.place}. ${row(s)}`), "  (none: an empty page)"),
+    `Hidden: ${hidden.map(row).join(", ") || "none"}`,
+    "Buttons (core:actions):", lines(r.buttons.map((b) => `  ${b.place}. ${b.id} (${b.name})${b.icon ? `  (icon: ${b.icon})` : ""}${b.known ? "" : "  (not in the app's source)"}`), "  (none)"),
+  ].join("\n")
+}
+
+const norm = (s: string | undefined) => (s ?? "").toLowerCase().trim().replace(/[\s_-]+/g, " ")
+
+/** A section by its key, title, its name in its plugin, or its plugin's id when that has one ("buttons", "terminals"). */
+function namedSection(list: Section[], q: string) {
+  const low = norm(q)
+  const hit = list.find((s) => s.key === q) ?? list.find((s) => norm(s.title) === low) ?? list.find((s) => norm(s.key.split(":")[1]) === low) ??
+    list.find((s) => s.plugin === low && list.filter((x) => x.plugin === low).length === 1)
+  if (!hit) throw new OpError(`no new tab section '${q}'. Sections: ${list.map((s) => `${s.key} (${s.title})`).join(", ")}`, 404)
+  return hit
+}
+
+/** A command by its id or its name as the palette lists it; an id that isn't in the source is taken as it is. */
+function namedCommand(cmds: CommandDef[], q: string) {
+  const hit = cmds.find((c) => c.id === q) ?? cmds.find((c) => norm(c.name) === norm(q))
+  if (hit) return hit.id
+  if (/^[\w-]+:[\w:-]+$/.test(q)) return q
+  throw new OpError(`no command '${q}': give its id or its name (vau hotkeys --all lists them)`, 404)
+}
+
+const SECTION = { type: "string", required: true, description: "the section: its key (core:actions), title or a plain name (buttons, terminals)" } satisfies Param
+const COMMAND = { type: "string", required: true, description: "the command: its id (file:new) or its name in the palette (Create new note)" } satisfies Param
+const TO = { type: "string", description: "where: a position from 1, up, down, top or bottom (left out: the end)" } satisfies Param
+const MOVE_TO = { ...TO, required: true } satisfies Param
+type To = { to?: typeof TO | typeof MOVE_TO }
+type OfSection = { section: typeof SECTION } & To
+type OfCommand = { command: typeof COMMAND } & To
+
+const HELP = `A blank tab (a new tab, ⌘T) shows sections, top to bottom, kept in .vaultite/newtab.json:
+{"sections": [keys], "actions": [command ids]}. A section is the app's (core:actions the buttons, core:opened the files
+opened lately in the workspace, core:changed the vault's recently changed files) or a plugin's (terminal:sessions the
+running terminals and agents, pages:tiles the pinned pages on phones) or any sidebar panel by its key (files:files,
+recent:recent, activity:feed: vau panels lists them), drawn as in the sidebar; one left out is hidden. Each button of
+core:actions is a palette command: its name, icon and shortcut are the command's (vau hotkeys --all lists them; a
+button whose command isn't there now, its plugin off, isn't drawn). "icons": {command id: name} gives a button another
+icon (a Lucide name, lucide.dev/icons, or an emoji; vau newtab button icon, or right-click it in the app). Unset, the page is every section not hidden by
+default, by its place, and the buttons are New note, Open a file and the command palette (vau settings set newtab
+'{"sections": null}' goes back to that). Positions count from 1. "page": a file's path draws that file instead of the
+sections, a start page made of any blocks: a dashboard (vau docs dashboards) the user or an agent changes like any other;
+one that isn't there (moved, deleted) gives the sections back. "opens": what ⌘T and the + buttons open instead of the
+page: "switcher" (the quick switcher as a launcher: what's picked opens in a new tab, Escape none) or a view's tab
+("view:web": a web page, its address to type; where it can't show, the page).
+
+  vau newtab
+  vau newtab show terminals top
+  vau newtab show "recent files"
+  vau newtab hide "recently changed"
+  vau newtab move buttons 2
+  vau newtab button add terminal:claude top
+  vau newtab button add "Open Claude Code"
+  vau newtab button remove palette:open
+  vau newtab button move file:new up
+  vau newtab button icon audio-recorder:voice-note mic
+  vau newtab button icon audio-recorder:voice-note ""   (its command's icon again)
+  vau newtab page Dashboards/Start.md
+  vau newtab page ""   (the sections again)
+  vau newtab opens switcher
+  vau newtab opens view:web`
+
+export function newTabOps(app: App): Op[] {
+  const cmds = () => commandList(pluginList(app).filter((p) => p.tier === "vault"))
+  /** Write one key (`sections`, `actions`, `icons`, `page` or `opens`) and answer with the page after. */
+  const write = (key: "sections" | "actions" | "icons" | "page" | "opens", list: string[] | Record<string, string> | string | null) => {
+    app.vault.patchConfig("newtab", { [key]: list })
+    return sectionList(app)
+  }
+  const result = { text: showList }
+  const section = (id: string, cli: string, summary: string, args: string[], params: To, fn: (shown: string[], s: Section, given: ParamsOf<OfSection>) => string[]): Op => (defineOp<OfSection, ReturnType<typeof write>>({
+    id, cli, summary, help: `${summary} See vau newtab --help.`, kind: "write", params: { section: SECTION, ...params }, args: ["section", ...args],
+    run: (given) => {
+      const { sections } = sectionList(app)
+      const shown = sections.filter((s) => s.place).map((s) => s.key)
+      return write("sections", fn(shown, namedSection(sections, given.section), given))
+    },
+    ...result,
+  }))
+  const button = (id: string, cli: string, summary: string, args: string[], params: To, fn: (list: string[], cmd: string, given: ParamsOf<OfCommand>) => string[]): Op => (defineOp<OfCommand, ReturnType<typeof write>>({
+    id, cli, summary, help: `${summary} See vau newtab --help.`, kind: "write", params: { command: COMMAND, ...params }, args: ["command", ...args],
+    run: (given) => write("actions", fn(sectionList(app).buttons.map((b) => b.id), namedCommand(cmds(), given.command), given)),
+    ...result,
+  }))
+  /** `key` put at `where` in `list` (left out: the end). */
+  const at = (list: string[], key: string, where: string | undefined) => {
+    const before = where === undefined ? null : anchorFor(list, key, where)
+    if (before === undefined) throw new OpError(`'${where}' isn't a position (a number from 1, up, down, top or bottom)`)
+    return placeKey(list, key, before)
+  }
+  const shownOnly = (list: string[], key: string, what: string) => {
+    if (!list.includes(key)) throw new OpError(`${what} isn't on the page: show or add it first`)
+  }
+
+  return [defineOp({
+    id: "newtab.list",
+    cli: "newtab",
+    summary: "A new tab's page: its sections in order, the hidden ones, and its buttons.",
+    help: HELP,
+    kind: "read",
+    params: {},
+    run: () => sectionList(app),
+    ...result,
+  }),
+  section("newtab.show", "newtab show", "Show a section on a new tab's page (at the end, or at a position).", ["to"], { to: TO },
+    (shown, s, { to }) => (shown.includes(s.key) && to === undefined ? shown : at(shown, s.key, to))),
+  section("newtab.hide", "newtab hide", "Hide a section of a new tab's page.", [], {}, (shown, s) => shown.filter((k) => k !== s.key)),
+  section("newtab.move", "newtab move", "Move a section of a new tab's page: to a position (from 1), up, down, top or bottom.", ["to"], { to: MOVE_TO },
+    (shown, s, { to }) => { shownOnly(shown, s.key, s.title); return at(shown, s.key, to) }),
+  button("newtab.button.add", "newtab button add", "Add a button (a palette command) to a new tab's page (at the end, or at a position).", ["to"], { to: TO },
+    (list, cmd, { to }) => (list.includes(cmd) && to === undefined ? list : at(list, cmd, to))),
+  defineOp({
+    id: "newtab.button.icon", cli: "newtab button icon", kind: "write",
+    summary: "Give a button of a new tab's page an icon of its own (a Lucide name or an emoji; empty: its command's again).",
+    help: "Give a button of a new tab's page an icon of its own, kept in newtab.json's icons. See vau newtab --help.",
+    params: { command: COMMAND, icon: { type: "string", required: true, description: "a Lucide icon's name (mic, lucide.dev/icons) or an emoji; empty for the command's own" } },
+    args: ["command", "icon"],
+    run: (given) => {
+      const name = String(given.icon ?? "").trim()
+      if (name && !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(name) && !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(name))
+        throw new OpError(`'${name}' isn't an icon's name: a Lucide name in lowercase with dashes (mic, file-text) or an emoji`)
+      const { setup, buttons } = sectionList(app)
+      const cmd = namedCommand(cmds(), given.command)
+      if (name) shownOnly(buttons.map((b) => b.id), cmd, cmd)
+      return write("icons", withIcon(setup.icons, cmd, name))
+    },
+    ...result,
+  }),
+  defineOp({
+    id: "newtab.page", cli: "newtab page", kind: "write",
+    summary: "Draw a file (a dashboard) on new tabs instead of the sections; empty for the sections again.",
+    help: "Draw a file on a blank tab instead of its sections: a start page made of any blocks. See vau newtab --help.",
+    params: { path: { type: "string", required: true, description: "the file's path in the vault (Dashboards/Start.md); empty for the sections again" } },
+    args: ["path"],
+    run: (given) => {
+      const rel = String(given.path ?? "").trim().replace(/^\/+/, "")
+      if (!rel) return write("page", null)
+      const file = /\.md$/i.test(rel) ? rel : `${rel}.md`
+      if (!app.vault.entries.has(file)) throw new OpError(`no note '${file}' in the vault: give a dashboard's path (vau ls, or make one: vau docs dashboards)`, 404)
+      return write("page", file)
+    },
+    ...result,
+  }),
+  defineOp({
+    id: "newtab.opens", cli: "newtab opens", kind: "write",
+    summary: "What a new tab (⌘T, the + buttons) opens: its page, the quick switcher as a launcher, or a view's tab (view:web, a web page).",
+    help: "What a new tab opens: page (the default), switcher or a view's tab (view:web). See vau newtab --help.",
+    params: { what: { type: "string", required: true, description: "page (a blank tab's page), switcher (the quick switcher) or view:<name> (view:web: a web page)" } },
+    args: ["what"],
+    run: (given) => {
+      const what = String(given.what ?? "").trim()
+      if (what !== "page" && !isOpens(what)) throw new OpError(`'${what}' isn't what a new tab can open: page, switcher or a view's tab (view:web)`)
+      // (the page is the default: its key goes)
+      return write("opens", what === "page" ? null : what)
+    },
+    ...result,
+  }),
+  button("newtab.button.remove", "newtab button remove", "Remove a button from a new tab's page.", [], {}, (list, cmd) => list.filter((k) => k !== cmd)),
+  button("newtab.button.move", "newtab button move", "Move a button of a new tab's page: to a position (from 1), up, down, top or bottom.", ["to"], { to: MOVE_TO },
+    (list, cmd, { to }) => { shownOnly(list, cmd, cmd); return at(list, cmd, to) })]
+}

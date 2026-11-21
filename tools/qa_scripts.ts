@@ -1,0 +1,62 @@
+// The UI QA scripts (web/qa/*.mjs): which run in a full run, their head comments (their usage line, the files they
+// exercise), and which ones a change reaches (tools/verify.ts).
+import fs from "node:fs"
+import path from "node:path"
+import { parseSync } from "rolldown/utils"
+
+export const QA = path.resolve(import.meta.dirname, "../web/qa")
+/** Not tests (benchmarks, a library, the smoke test), needing more than one machine (machines, inboxmachines), or another
+ *  build (the demo's: CI's demo job runs it, and named here it's built first). */
+export const SKIP = new Set(["boot", "perf", "stability", "termperf", "shots", "subjects", "machines", "inboxmachines", "termhost", "demo"])
+
+/** Desktop scripts that bring their window forward on a Mac (BaseWindow.focus), or whose checks need it to stay in front
+ *  (lights' hover peek): one at a time on a machine (tools/qa_slots.ts' front). */
+export const FRONT = new Set(["agentpages", "desktop", "lights", "webpanes", "webrestore", "webviewer"])
+
+/** Scripts that measure time, each run with the machine to itself (tools/qa_slots.ts' alone), and why. */
+export const MEASURES = new Map([
+  ["paneswipe", "asserts frame timings: other scripts' CPU makes long tasks"],
+  ["screendraw", "asserts frame rates and no long task while the choreography glides"],
+])
+
+export const allScripts = () => fs.readdirSync(QA).filter((f) => f.endsWith(".mjs")).map((f) => f.slice(0, -4)).sort()
+
+const headOf = (text: string) => text.split("\n").filter((l) => l.startsWith("//")).join("\n")
+/** Its comment lines (from the top level: the head comment and the section notes), one text. */
+export const head = (name: string) => headOf(fs.readFileSync(path.join(QA, `${name}.mjs`), "utf8"))
+
+export function usageArgs(name: string, text = head(name)): string[] {
+  const m = new RegExp(`node web/qa/${name}\\.mjs([^\\n(]*)`).exec(text)
+  return (m?.[1] ?? "").match(/<[^>]+>|\[[^\]]+\]/g) ?? []
+}
+
+const program = (file: string, text: string) => {
+  const parsed = parseSync(file, text)
+  return parsed.errors.length ? null : JSON.stringify(parsed.program).replace(/"(start|end)":\d+,?/g, "")
+}
+export function runsTheSame(file: string, before: string, after: string): boolean {
+  const name = path.basename(file, ".mjs"), was = program(file, before)
+  return was !== null && was === program(file, after) && usageArgs(name, headOf(before)).join(" ") === usageArgs(name, headOf(after)).join(" ")
+}
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+/** Whether `text` names path `p` on its own, not inside a longer one (core/x.ts isn't in plugins/core/x.ts nor in
+ *  core/x.tsx); `folder`: only as the folder itself, not one of its files. */
+const names = (text: string, p: string, folder = false) => new RegExp(`(?<![\\w./-])${esc(p)}(?![\\w-]|\\.\\w${folder ? "|/\\w" : ""})`).test(text)
+/** A changed file as heads write it: whole, the web app's without web/src/, a .tsx also as .ts. */
+const forms = (f: string) => [f, ...(f.startsWith("web/src/") ? [f.slice("web/src/".length)] : [])].flatMap((p) => p.endsWith(".tsx") ? [p, p.slice(0, -1)] : [p])
+
+/** The scripts a change to `files` reaches, and why: one that changed, one whose head names a changed file, and for a
+ *  built-in plugin's file no head names, those whose head names the plugin's folder itself (not one of its files). */
+export function qaFor(files: string[]): Map<string, string> {
+  const heads = new Map(allScripts().filter((n) => !SKIP.has(n)).map((n) => [n, head(n)]))
+  const out = new Map<string, string>()
+  for (const n of heads.keys()) if (files.includes(`web/qa/${n}.mjs`)) out.set(n, "changed")
+  for (const f of files) {
+    const hit = [...heads].filter(([, h]) => forms(f).some((p) => names(h, p))).map(([n]) => n)
+    for (const n of hit) if (!out.has(n)) out.set(n, f)
+    const plugin = /^plugins\/core\/[\w-]+/.exec(f)?.[0]
+    if (!hit.length && plugin) for (const [n, h] of heads) if (!out.has(n) && names(h, plugin, true)) out.set(n, plugin)
+  }
+  return out
+}

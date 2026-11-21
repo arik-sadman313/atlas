@@ -1,0 +1,8 @@
+{
+  "id": "pdf",
+  "icon": "file-text",
+  "category": "formats",
+  "alwaysOn": true,
+  "name": "PDF Viewer & Markup",
+  "description": "View PDF documents with vector handwriting, Apple Pencil annotations, and highlighter overlays."
+}

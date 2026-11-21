@@ -1,0 +1,261 @@
+// Appearance settings: every colour scheme in light and dark moves nothing, density, fonts and CSS snippets (live).
+// WRITES appearance.json, a snippet and the workspaces' data.json (put back): throwaway server only.
+//   node web/qa/appearance.mjs <base url> <vault path> [out dir]
+import fs from "node:fs"
+import path from "node:path"
+import { SHOTS, apiAt, qa } from "./lib/qa.mjs"
+import { setAsideWorkspaces } from "./lib/wsfiles.mjs"
+import { app } from "./lib/app.mjs"
+const { args: [B, VAULT, OUT = `${SHOTS}appearance/`], browser, check, watch, done } = await qa(import.meta.url)
+fs.mkdirSync(OUT, { recursive: true })
+const api = apiAt(B)
+const saved = await api("GET", "config/appearance")
+const set = (patch) => api("PUT", "config/appearance", { ...saved, theme: "system", scheme: "default", density: "compact", interfaceFont: "", textFont: "", monoFont: "", snippets: [], ...patch })
+const putBackWs = setAsideWorkspaces(B)
+const files = (await api("GET", "files")).files
+const note = files.find((f) => f.path.startsWith("Notes/") && f.path.endsWith(".md"))?.path ?? files.find((f) => f.path.endsWith(".md")).path
+const today = files.find((f) => f.path === "Dashboards/Today.md")?.path ?? note
+const themes = await api("GET", "themes")
+
+const uis = new WeakMap()
+async function open(w, dark, hash, contrast = "no-preference") {
+  const mobile = w < 768
+  const ctx = await browser.newContext({ viewport: { width: w, height: mobile ? 844 : 900 }, deviceScaleFactor: 2, isMobile: mobile, hasTouch: mobile, colorScheme: dark ? "dark" : "light", contrast })
+  const page = watch(await ctx.newPage()), ui = app(page)
+  uis.set(page, ui)
+  await page.goto(`${B}#${hash}`)
+  await page.locator(hash === "settings" ? '[data-settings-nav="appearance"]' : "article.file-view:visible").first().waitFor(); await ui.idle()
+  if (hash === "settings") { await page.locator('[data-settings-nav="appearance"]').click(); await page.locator("[data-settings-row=theme]:visible").first().waitFor(); await ui.idle() }
+  return page
+}
+const shot = (page, name) => page.screenshot({ path: `${OUT}${name}.png` })
+const token = (page, t) => page.evaluate((t) => getComputedStyle(document.documentElement).getPropertyValue(`--${t}`).trim(), t)
+const fileHash = (p) => `file/${encodeURIComponent(p)}`
+const lowest = (page) => page.evaluate(() => {
+  // (through a canvas: a computed colour may be oklch or oklab, not rgb)
+  const probe = document.body.appendChild(document.createElement("i")), cx = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  const rgb = (t) => { probe.style.color = `var(--${t})`; cx.fillStyle = getComputedStyle(probe).color; cx.fillRect(0, 0, 1, 1); return [...cx.getImageData(0, 0, 1, 1).data.slice(0, 3)] }
+  const lum = (c) => c.map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0)
+  const ratio = (a, b) => { const [x, y] = [lum(rgb(a)), lum(rgb(b))].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05) }
+  const r = Math.min(...["foreground", "muted-foreground"].flatMap((t) => ["background", "card", "sidebar"].map((b) => ratio(t, b))))
+  probe.remove()
+  return Math.round(r * 100) / 100
+})
+
+await set({})
+for (const [w, dark] of [[1440, false], [1440, true], [390, false], [390, true]]) {
+  const page = await open(w, dark, "settings"), ui = uis.get(page)
+  await shot(page, `settings-${w}-${dark ? "dark" : "light"}`)
+  if (w === 390 && !dark) {
+    const fit = await page.evaluate(() => {
+      const row = document.querySelector("[data-settings-row=scheme]"), first = row.querySelector("[role=radio]")
+      const theme = document.querySelector("[data-settings-row=theme]").getBoundingClientRect(), style = document.querySelector("[data-settings-row=translucent]").getBoundingClientRect()
+      return { flush: Math.round(first.getBoundingClientRect().left - row.getBoundingClientRect().left), wrapped: style.top >= theme.bottom && Math.round(style.left) === Math.round(theme.left) }
+    })
+    check("phone: the scheme strip flush under its label, Style under Theme", Math.abs(fit.flush) <= 1 && fit.wrapped, fit)
+  }
+  if (w === 1440 && !dark) {
+    const sliders = await page.locator('input[type="range"]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""))
+    check("no font size setting", !(await page.getByText("Font size", { exact: true }).count()) && !sliders.some((l) => /font|size|text/i.test(l)), sliders)
+    const appearance = page.locator('[data-settings-section="appearance"]')
+    check("CSS snippets are inside Appearance", (await appearance.locator('section[aria-label="CSS snippets"]').count()) === 1)
+    check("no CSS snippets panel of its own", !(await page.getByRole("heading", { name: "CSS snippets" }).count()))
+    const text = await appearance.innerText()
+    const at = ["Theme", "Colour scheme", "Density", "Sidebars", "File icons", "New tabs open", "Fonts", "Note text size", "CSS snippets"].map((t) => text.indexOf(t))
+    check("in order: theme, colour scheme, density, sidebars, file icons, new tabs, fonts, CSS snippets", at.every((x, i) => x >= 0 && (!i || x > at[i - 1])), at)
+    const radios = () => appearance.getByRole("radiogroup", { name: "Colour scheme" }).getByRole("radio").evaluateAll((els) => els.map((e) => `${e.getAttribute("aria-label")}${e.getAttribute("aria-checked") === "true" ? "*" : ""}`))
+    const strip = appearance.getByRole("radiogroup", { name: "Colour scheme" })
+    const all = 16 + themes.filter((t) => !t.problem).length
+    check("every scheme in one strip, Classic in use, and Show all", (await radios()).length === all && (await radios()).includes("Classic*") && (await appearance.locator("[data-schemes-all]").count()) === 1, await radios())
+    const sx = await strip.evaluate((el) => ({ scrolls: el.scrollWidth > el.clientWidth, left: Math.round(el.getBoundingClientRect().left), label: Math.round(el.closest("[data-settings-row]").getBoundingClientRect().left) }))
+    check("the strip scrolls sideways, its first picture under its label", sx.scrolls && Math.abs(sx.left + 12 - sx.label) <= 1, sx)
+    await ui.sees(".vaultite/appearance.json", () => appearance.getByRole("radio", { name: "Gruvbox", exact: true }).click())
+    check("a picture picks its scheme", (await api("GET", "config/appearance")).scheme === "gruvbox")
+    await appearance.locator("[data-schemes-all]").click(); await page.getByRole("dialog").getByRole("radio").first().waitFor(); await ui.idle()
+    check("Show all opens the gallery", (await page.getByRole("dialog").getByRole("radio").count()) === all)
+    await ui.sees(".vaultite/appearance.json", () => page.getByRole("dialog").getByRole("radio", { name: "Nord", exact: true }).click())
+    await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "detached" }); await ui.idle()
+    check("the strip follows the gallery's pick", (await radios()).includes("Nord*"), await radios())
+    const pagesRow = appearance.locator('[data-settings-row="translucent-pages"]')
+    const shown = () => pagesRow.evaluate((el) => el.getBoundingClientRect().height > 0 && !el.closest("[inert]"))
+    check("solid: no translucent pages row", !(await shown()))
+    await ui.sees(".vaultite/appearance.json", () => appearance.getByRole("radio", { name: "Glass", exact: true }).click())
+    check("glass: translucent pages unfolds", (await api("GET", "config/appearance")).translucent === true && await shown())
+    await ui.sees(".vaultite/appearance.json", () => appearance.getByRole("radio", { name: "Solid", exact: true }).click())
+    check("solid again: it folds away", (await api("GET", "config/appearance")).translucent === false && !(await shown()))
+    await ui.sees(".vaultite/appearance.json", () => set({}))
+    const pads = await appearance.evaluate((sec) => [...sec.querySelector(".hairline").children].filter((r) => r.getBoundingClientRect().height > 0).map((r) => {
+      const row = r
+      const box = row.getBoundingClientRect(), kids = [...row.children].map((k) => (k.matches("[data-picture-choice].overflow-x-auto") ? k.querySelector("[role=radio]") : k).getBoundingClientRect())
+      return [Math.round(Math.min(...kids.map((k) => k.top)) - box.top), Math.round(box.bottom - Math.max(...kids.map((k) => k.bottom)))]
+    }))
+    check("every row has the same room above and below", pads.every(([a, b]) => a >= 7 && Math.abs(a - b) <= 1), pads)
+    const fonts = page.locator("[data-fonts-open]")
+    check("fonts: one row saying Default, no pickers on the page", (await fonts.innerText()).includes("Default") &&
+      !(await page.getByRole("button", { name: /^Interface font:/ }).count()), await fonts.innerText())
+    await page.evaluate(() => document.querySelector("#main-scroll")?.scrollTo(0, 99999)); await ui.idle()
+    await shot(page, `settings-${w}-light-end`)
+  }
+  await page.evaluate(() => { location.hash = "settings/schemes" }); await page.getByRole("dialog").getByRole("radio").first().waitFor(); await ui.idle()
+  check(`the gallery's sheet at ${w}px: the same grid`, (await page.getByRole("dialog").getByRole("radio").count()) === 16 + themes.filter((t) => !t.problem).length)
+  await shot(page, `gallery-${w}-${dark ? "dark" : "light"}`)
+  await page.close()
+}
+
+const ids = ["default", "gruvbox", "catppuccin", "nord", "dracula", "solarized", "tokyo-night", "rose-pine", "everforest", "kanagawa", "one", "ayu", "github", "flexoki", "amethyst", "paper", ...themes.map((t) => `theme:${t.name}`)]
+for (const scheme of ids) {
+  await set({ scheme })
+  for (const dark of [false, true]) {
+    const page = await open(1440, dark, fileHash(today))
+    const bg = await token(page, "background")
+    check(`${scheme} ${dark ? "dark" : "light"}: html has it`, await page.evaluate((s) => (document.documentElement.dataset.scheme ?? "default") === s, scheme))
+    check(`${scheme} ${dark ? "dark" : "light"}: background set`, !!bg, bg)
+    if (scheme === "dracula") check("dracula stays dark", await page.evaluate(() => document.documentElement.classList.contains("dark")))
+    await shot(page, `scheme-${scheme.replace(":", "-")}-${dark ? "dark" : "light"}`)
+    await page.close()
+    if (!scheme.startsWith("theme:")) {
+      const more = await open(1440, dark, fileHash(today), "more")
+      const low = await lowest(more)
+      check(`${scheme} ${dark ? "dark" : "light"}, Increase contrast: text at 4.5:1 or more`, low >= 4.5, low)
+      await more.close()
+    }
+  }
+}
+
+const KEY = "aside, nav, main, section, header, h1, h2, h3, button, a, input, [role=switch], [role=radio], [role=tab], [role=treeitem], [role=tablist], [data-titlebar], #main-scroll, [data-panel-handle], label, kbd"
+const boxes = (page) => page.evaluate((KEY) => [...document.querySelectorAll(KEY)].filter((el) => el.getClientRects().length).map((el) => {
+  const b = el.getBoundingClientRect()
+  const name = `${el.tagName.toLowerCase()}${el.getAttribute("role") ? `[${el.getAttribute("role")}]` : ""} "${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 30)}"`
+  return [name, Math.round(b.x * 4) / 4, Math.round(b.y * 4) / 4, Math.round(b.width * 4) / 4, Math.round(b.height * 4) / 4]
+}), KEY)
+const settle = async (page, scheme) => {
+  await page.waitForFunction((s) => (document.documentElement.dataset.scheme ?? "default") === s, scheme, { timeout: 8000 }).catch(() => {})
+  await uis.get(page).idle()
+}
+const loaded = async (page) => { await uis.get(page).idle(); return boxes(page) }
+for (const [w, hash] of [[1440, "settings"], [1440, fileHash(today)], [1440, fileHash(note)], [390, "settings"], [390, fileHash(today)]]) {
+  await set({})
+  const page = await open(w, false, hash)
+  const base = await loaded(page)
+  const moved = []
+  for (const scheme of ids) {
+    await set({ scheme })
+    for (const dark of [false, true]) {
+      await page.emulateMedia({ colorScheme: dark ? "dark" : "light" })
+      await settle(page, scheme)
+      const now = await boxes(page)
+      if (now.length !== base.length) {
+        const names = (l) => l.map((b) => b[0]), gone = names(base).filter((n) => !names(now).includes(n)), added = names(now).filter((n) => !names(base).includes(n))
+        moved.push(`${scheme} ${dark ? "dark" : "light"}: ${base.length} -> ${now.length} elements (gone ${JSON.stringify(gone)}, new ${JSON.stringify(added)})`); continue
+      }
+      const d = now.map((b, i) => [base[i], b]).filter(([a, b]) => a.slice(1).join() !== b.slice(1).join())
+      if (d.length) moved.push(`${scheme} ${dark ? "dark" : "light"}: ${d.length} moved, first ${JSON.stringify(d[0])}`)
+    }
+  }
+  check(`no scheme or mode moves anything: ${decodeURIComponent(hash).split("/").pop()} at ${w}px (${base.length} elements, ${ids.length} schemes)`, !moved.length, moved)
+  await page.close()
+}
+
+await set({ density: "comfortable", scheme: "nord" })
+for (const [w, dark] of [[1440, false], [1440, true], [390, true]]) {
+  const page = await open(w, dark, fileHash(today))
+  check("comfortable: spacing scaled", (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--spacing").trim())) .endsWith(".28125rem"))
+  await shot(page, `comfortable-${w}-${dark ? "dark" : "light"}`)
+  await page.close()
+}
+{
+  await set({ density: "compact", scheme: "nord" })
+  const page = await open(1440, false, fileHash(today))
+  await shot(page, "compact-1440-light")
+  await page.close()
+}
+
+await set({ fontSize: 22 })
+{
+  const page = await open(1440, false, "settings"), ui = uis.get(page)
+  const size = await page.evaluate(() => getComputedStyle(document.body).fontSize)
+  await page.locator("[data-fonts-open]").click(); await page.locator("dialog[open]").getByRole("button", { name: /^Interface font:/ }).waitFor(); await ui.idle()
+  check("fonts: a click opens a sheet of the three pickers", (await page.locator("dialog[open]").getByRole("button", { name: /^(Interface|Text|Monospace) font:/ }).count()) === 3)
+  const button = page.getByRole("button", { name: /^Interface font:/ })
+  await button.scrollIntoViewIfNeeded()
+  check("interface font: a picker button showing the default", (await button.getAttribute("aria-label")) === "Interface font: System font", await button.getAttribute("aria-label"))
+  const dialog = page.getByRole("dialog", { name: "Interface font" })
+  await button.click(); await dialog.waitFor(); await ui.idle()
+  check("the picker opens (the palette)", await dialog.isVisible())
+  const rows = dialog.getByRole("option")
+  const first = await rows.first().textContent()
+  check("the default first, marked", /System font.*Default/.test(first), first)
+  // (a Mac has many of the common families; a bare Linux, as CI's, a few)
+  check("fonts listed (this device's)", (await rows.count()) > (process.platform === "darwin" ? 10 : 2), await rows.count())
+  check("the current one is selected", (await rows.first().getAttribute("aria-selected")) === "true")
+  await shot(page, "font-picker")
+  const names = (await rows.allTextContents()).slice(1).filter((n) => !/Monospace|…/.test(n))
+  const FONT = names.includes("Georgia") ? "Georgia" : names.find((n) => names.filter((m) => m.toLowerCase().startsWith(n.slice(0, 5).toLowerCase())).length === 1) ?? names[0]
+  await page.keyboard.type(FONT.slice(0, 5).toLowerCase()); await ui.idle()
+  const hit = rows.first()
+  check("typing filters (fuzzy)", (await hit.textContent()).startsWith(FONT), [FONT, await hit.textContent()])
+  const drawn = await hit.evaluate((el) => getComputedStyle(el.querySelector("[style]")).fontFamily)
+  check("each font drawn in itself", drawn.replace(/"/g, "").startsWith(FONT), drawn)
+  await shot(page, "font-picker-typed")
+  await ui.sees(".vaultite/appearance.json", () => page.keyboard.press("Enter"))
+  check("Enter applies at once (appearance.json)", (await api("GET", "config/appearance")).interfaceFont === FONT)
+  check("the interface is drawn in it", (await page.evaluate(() => getComputedStyle(document.body).fontFamily)).replace(/"/g, "").startsWith(FONT))
+  check("the button shows it, in itself", (await button.getAttribute("aria-label")) === `Interface font: ${FONT}` &&
+    (await button.evaluate((el) => getComputedStyle(el.querySelector("span")).fontFamily)).replace(/"/g, "").startsWith(FONT))
+  await page.getByRole("button", { name: /^Text font:/ }).click(); await page.getByRole("dialog", { name: "Text font" }).waitFor(); await ui.idle()
+  await page.keyboard.type("Qa Unlisted Serif"); await ui.idle()
+  const other = page.getByRole("dialog").getByRole("option").last()
+  check("a name that isn't listed: offered", (await other.textContent()).includes('Use "Qa Unlisted Serif"'), await other.textContent())
+  await ui.sees(".vaultite/appearance.json", () => page.keyboard.press("Enter"))
+  check("…and used", (await api("GET", "config/appearance")).textFont === "Qa Unlisted Serif")
+  check("fonts: the row says which are set", (await page.locator("[data-fonts-open]").innerText()).includes(`${FONT}, Qa Unlisted Serif`), await page.locator("[data-fonts-open]").innerText())
+  check("quoted in the stack", (await page.evaluate(() => document.documentElement.style.getPropertyValue("--font-text"))).startsWith('"Qa Unlisted Serif"'))
+  await page.getByRole("button", { name: /^Monospace font:/ }).click(); await page.getByRole("dialog", { name: "Monospace font" }).waitFor(); await ui.idle()
+  const second = await page.getByRole("dialog").getByRole("option").nth(1).textContent()
+  check("monospace: monospace fonts first", /Monospace/.test(second), second)
+  await page.keyboard.press("Escape"); await ui.idle()
+  check("Escape closes it, the fonts' sheet stays", !(await page.getByRole("dialog", { name: "Monospace font" }).count()) &&
+    (await page.locator("dialog[open]").getByRole("button", { name: /^Interface font:/ }).count()) === 1)
+  await button.click(); await dialog.waitFor(); await ui.idle()
+  await ui.sees(".vaultite/appearance.json", () => dialog.getByRole("option").first().click())
+  check("the default row resets it", (await api("GET", "config/appearance")).interfaceFont === "")
+  check("an old fontSize key is ignored, and left in the file", size === (await page.evaluate(() => getComputedStyle(document.body).fontSize)) &&
+    (await api("GET", "config/appearance")).fontSize === 22)
+  await page.close()
+}
+{
+  const page = await open(1440, false, fileHash(note))
+  const size = await page.evaluate(() => getComputedStyle(document.querySelector(".vau-editor .cm-editor")).fontSize)
+  check("the editor's text is 16px (no font size setting)", size === "16px", size)
+  await page.close()
+}
+{
+  const page = await open(390, false, "settings"), ui = uis.get(page)
+  await page.locator("[data-fonts-open]").click(); await page.locator("dialog[open]").getByRole("button", { name: /^Interface font:/ }).waitFor(); await ui.idle()
+  await page.getByRole("button", { name: /^Interface font:/ }).click(); await page.getByRole("dialog", { name: "Interface font" }).waitFor(); await ui.idle()
+  check("phone: the picker opens", await page.getByRole("dialog", { name: "Interface font" }).isVisible())
+  await shot(page, "font-picker-390")
+  await page.close()
+}
+
+const snip = path.join(VAULT, ".vaultite/snippets/Qa snippet.css")
+fs.mkdirSync(path.dirname(snip), { recursive: true })
+fs.writeFileSync(snip, ":root { --primary: rgb(1, 2, 3); }\n")
+await set({ snippets: ["Qa snippet"] })
+{
+  const page = await open(1440, false, "settings"), ui = uis.get(page)
+  check("snippet applied", (await token(page, "primary")) === "rgb(1, 2, 3)", await token(page, "primary"))
+  await ui.sees(".vaultite/snippets/Qa snippet.css", () => fs.writeFileSync(snip, ":root { --primary: rgb(4, 5, 6); }\n"))
+  check("snippet edited on disk: live", (await token(page, "primary")) === "rgb(4, 5, 6)", await token(page, "primary"))
+  await ui.sees(".vaultite/appearance.json", () => page.getByRole("switch", { name: "Qa snippet snippet" }).click())
+  check("snippet off from Settings", (await token(page, "primary")) !== "rgb(4, 5, 6)", await token(page, "primary"))
+  check("appearance.json has it off", !(await api("GET", "config/appearance")).snippets.includes("Qa snippet"))
+  await page.close()
+}
+fs.rmSync(snip)
+
+await api("PUT", "config/appearance", saved)
+const left = Object.keys(await api("GET", "config/appearance")).filter((k) => !(k in saved))
+if (left.length) await api("PATCH", "config/appearance", Object.fromEntries(left.map((k) => [k, null])))
+putBackWs()
+await done()

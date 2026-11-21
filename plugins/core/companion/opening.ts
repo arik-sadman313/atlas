@@ -1,0 +1,266 @@
+import { AsyncLocalStorage } from "node:async_hooks"
+import fs from "node:fs"
+import os from "node:os"
+import { z } from "zod"
+import { type OpCtx, OpError } from "../../../core/plugins.ts"
+import { SPLITS } from "../../../core/splitto.ts"
+import { requestWriter } from "../../../core/vault.ts"
+import type { Follow } from "./follows.ts"
+import type { Pane } from "../../../core/desktop/places.ts"
+import { isBrowser, macOpen, nearText } from "./takeover.ts"
+import { LAND_MS } from "./inpanes.ts"
+import { plugin } from "./self.ts"
+import type { Moment, Note } from "./types.ts"
+import { str, ownName } from "./settings.ts"
+import { agents, acted, did, key, setAgent, writingAt, wroteAt } from "./state.ts"
+import { past, kept } from "./comments.ts"
+import { takeover } from "./windows.ts"
+import { nearBy } from "./screensocket.ts"
+import { allPanes, paneById, privatePane, paneFocus, resolve, followed, sourceOf } from "./windowpanes.ts"
+import { cut } from "./edits.ts"
+import { session } from "./alwayson.ts"
+import { laneOf, lane } from "./lane.ts"
+import { AS, PATH, PANE, UI, target, who } from "./args.ts"
+import { askOf } from "./wiring.ts"
+import { messageOf } from "./errors.ts"
+import { byText } from "./people.ts"
+
+const Watch = z.looseObject({ id: z.string(), source: z.string() })
+
+const opening = new AsyncLocalStorage<boolean>()
+function companionAsking(): string | null {
+  const sid = requestWriter.getStore()?.session
+  if (!sid) return null
+  if (laneOf?.vault === plugin.vault && lane().id() === sid) return ownName()
+  return [...agents.values()].find((a) => session(a.name)?.id === sid)?.name ?? null
+}
+const bare = (to: string) => to.replace(/^view:web\/@[a-z0-9]{1,24}\//, "view:web/")
+function shows(p: Pane, path: string) {
+  const x = path.replace(/^file:/, "")
+  const to = bare(p.to)
+  return /^https?:\/\//i.test(x) ? to === `view:web/${x}` || to.startsWith(`view:web/${x.replace(/\/$/, "")}`)
+    : x.startsWith("view:") ? p.to === x : p.to === `file:${x}` || p.to === `file:${x}.md` || p.to === `view:folder/${x}`
+}
+const Answered = z.object({ pane: z.string().nullable(), to: z.string() })
+const Blank = z.object({ blank: z.string().optional() }).catch({})
+const SEEN_MS = 4000
+type Before = { focused?: string; tos: Map<string, string> }
+function showsOpened(x: Pane, a: z.infer<typeof Answered>, before: Before) {
+  if (x.id !== a.pane) return false
+  const was = before.tos.get(x.id), to = bare(x.to), asked = bare(a.to)
+  return to === asked || (asked.startsWith("view:web/") && to.startsWith(asked.replace(/\/$/, ""))) || (was !== undefined ? x.to !== was : to.startsWith("view:web/"))
+}
+async function paneShowing(path: string, answered: z.infer<typeof Answered> | undefined, before: Before) {
+  if (answered && !answered.pane) return undefined
+  for (const until = Date.now() + SEEN_MS; Date.now() < until;) {
+    await new Promise((done) => setTimeout(done, 100))
+    const f = paneFocus(), p = answered ? allPanes().find((x) => showsOpened(x, answered, before))
+      : allPanes().find((x) => shows(x, path)) ?? (f && f.id !== before.focused ? f : undefined)
+    if (p) return p
+  }
+  return undefined
+}
+async function openSeen(name: string, path: string, open: () => Promise<unknown>) {
+  const was = allPanes().find((p) => shows(p, path) && p.tab)
+  acted(name)
+  const done = writingAt(name, was ? { ui: `tab:${was.tab}`, pointed: Date.now() } : null)
+  let p: Pane | undefined
+  try {
+    if (was) await new Promise((done) => setTimeout(done, LAND_MS))
+    const before: Before = { focused: paneFocus()?.id, tos: new Map(allPanes().map((x) => [x.id, x.to])) }
+    const r = await opening.run(true, open)
+    const answered = Answered.safeParse(r).data
+    p = await paneShowing(path, answered, before)
+    return { result: r, pane: p?.id, title: p?.title, sheet: answered?.pane === null }
+  } finally {
+    const at = p && !privatePane(p) ? p : null
+    done(at ? { ...await resolve({ pane: at.id }, name).catch(() => ({ pane: at.id })), pointed: Date.now() } : {})
+  }
+}
+plugin.around("ui.open", async (call, next) => {
+  const name = opening.getStore() ? null : companionAsking()
+  return name ? (await openSeen(name, String(call.params.path ?? ""), () => next())).result : next()
+})
+plugin.around("ui.command", async (call, next) => {
+  const name = companionAsking(), id = str(call.params.id)
+  if (name) acted(name)
+  const done = name ? writingAt(name, id ? { ui: `button:${id}`, pointed: Date.now() } : null) : null
+  try { return await next() } finally { done?.() }
+})
+plugin.around("tabs.focus", async (call, next) => {
+  const name = companionAsking(), what = str(call.params.what), tab = name && allPanes().find((p) => p.id === what || p.tab === what || shows(p, what))?.tab
+  if (name && tab) { wroteAt(name, { ui: `tab:${tab}`, pointed: Date.now() }); await new Promise((done) => setTimeout(done, LAND_MS)) }
+  return next()
+})
+type Opened = { path: string; pane?: string | null; shows?: string; blank?: string; sheet?: true; fresh?: "made" | "there"; unshown?: string; browser?: boolean; in?: string; title?: string; near?: Parameters<typeof nearText>[0] }
+const blankOpened = (r: Opened & { blank: string }) => `Opened ${r.path}${r.pane ? ` (pane ${r.pane})` : ""}, but it shows ${r.blank}: it isn't what they asked for, so never say it is. Find the page that shows it (vau which <words>) and open that, or tell them you couldn't.`
+export const openText = (r: Opened) => (r.blank ? blankOpened({ ...r, blank: r.blank }) : shownText(r))
+const shownText = (r: Opened) => (r.browser ? `Opened ${r.path} in ${r.in}, a new tab there in front of them.`
+  : "in" in r ? `Opened ${r.path} on their Mac${r.in ? `: ${r.in}${r.title ? `, "${r.title}"` : ""} is in front` : ""}.${nearText(r.near ?? [], "In it now (point, ring or act by id)")}`
+  : r.unshown ? `${r.fresh === "made" ? "Made" : "Found"} ${r.path}, but their window couldn't show it (${r.unshown}): it has only its heading: write it all the same with edit (append, a section at a time), it's saved, and say where it is in a few words.`
+  : !r.pane && !r.sheet ? `Asked their window to open ${r.path}, but no pane of it shows it yet: don't say it's open or point at it; look (companion look) and say what's there.`
+  : `Opened ${r.path}${r.pane ? ` (pane ${r.pane}${r.shows ? `, showing "${r.shows}"` : ""})` : " in their phone's sheet"}.${r.fresh === "made" ? " It's new, only its heading in it: write it with edit (append), a section at a time; nothing is in it until you do." : r.fresh === "there" ? " It was there already (new left it as it was): read it before you write in it." : ""}`)
+type UiOpen = { path: string; split?: string; newTab?: true; in?: string; container?: string }
+function whereTo(path: string, app: string, browser: string) {
+  if (browser) return { mac: { url: path, app: browser }, path }
+  const mac = macOpen(path, app, plugin.vault.path, os.homedir()), at = app ? undefined : mac?.path
+  return at && fs.statSync(at, { throwIfNoEntry: false })?.isDirectory() ? { mac: null, path: at } : { mac, path }
+}
+const HAS_EXT = /\.[a-z0-9]{1,8}$/i, OUTSIDE_VAULT = /^[a-z][\w+.-]*:|^[~/]/i
+async function newNote(ctx: OpCtx, path: string): Promise<"made" | "there"> {
+  if (!path.toLowerCase().endsWith(".md") || OUTSIDE_VAULT.test(path)) throw new OpError(`new makes a note in the vault: give its path as Folder/Title.md, not ${path}`)
+  const there = await ctx.api("GET", `file?path=${encodeURIComponent(path)}`).then(() => true, () => false)
+  if (there) return "there"
+  await ctx.api("PUT", "file", { path, text: `# ${path.split("/").pop()!.replace(/\.md$/i, "")}\n` })
+  return "made"
+}
+export const openedFor = new Map<string, Moment>()
+plugin.op({
+  id: "companion.open",
+  cli: "companion open",
+  summary: "Open what the user asked to see, your cursor flying there: a note, a folder (one elsewhere on this machine too), a view or a web page in their window, or on their Mac an app, a file in its app, any address (a System Settings pane).",
+  help: `For what they asked to see: a pinned page, a note, a site, a folder anywhere on this machine (~/Projects/lighthouse:
+its page in their window, as Finder shows it; --app Finder for Finder itself); on their Mac, what they could open
+themselves (an app, a file in its app, a System Settings pane by its address). It answers the pane it opened (a web page's: see and act
+work there), or the Mac's window in front and what's in it by id (point, ring and act on those).
+new: a note to work on with them, made at path when there's none (only its heading, "# <its name>") and opened beside
+them (split right unless split, in or newTab says where); then write all of it with edit (append, a section at a
+time), each typed in as they watch: it holds nothing else.
+
+  vau companion open Personal/Dashboards/Today.md
+  vau companion open https://example.com --split right
+  vau companion open https://www.linkedin.com/in/alice-park --container Personal
+  vau companion open http://localhost:5173 --in left
+  vau companion open "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"
+  vau companion open ~/Projects/lighthouse/docs
+  vau companion open --app Calculator
+  vau companion open "Notes/Blues history.md" --new`,
+  kind: "write",
+  lock: false,
+  params: { path: { type: "string", description: "a vault path (or as they say it: Today), a folder, a view (view:graph), a web address, any other address (x-apple.systempreferences:..., mailto:...), or a path on their Mac (~/Downloads)" },
+    app: { type: "string", description: "an app on their Mac to open (its name, Calculator, or bundle id), with path or the address in it if given" },
+    split: { type: "string", enum: [...SPLITS], description: "in a new pane on that side (right, left, down: below, up: above)" }, newTab: { type: "boolean", description: "in a new tab" },
+    in: { type: "string", description: "the pane to open it in as a new tab, as they name it: where it is (left, top right), this, what it shows (a note, a site, its title's words) or its id" },
+    container: { type: "string", description: "a web page's browser container (its own logins), by its name as they say it: Personal, Work, Agents, or none" },
+    vaultite: { type: "boolean", description: "a web page in Vaultite even when they asked from their browser (where it opens, a new tab, by default)" },
+    new: { type: "boolean", description: "path is a new note to write in with them (edit): made with only its heading when there's none, opened beside them" }, as: AS },
+  args: ["path"],
+  run: async (p, ctx) => {
+    const name = who(p), given = str(p.path), app = str(p.app), m = askOf(name)
+    const path = p.new === true && given && !HAS_EXT.test(given) ? `${given}.md` : given
+    if (!path && !app) throw new OpError("give a path or an app")
+    const fresh = p.new === true ? await newNote(ctx, path) : null
+    did(name, "open")
+    const browser = /^https?:\/\/\S+$/i.test(path) && !app && p.vaultite !== true && !p.container && !p.in && m?.summoned && m.app && isBrowser(m.app) ? m.app : ""
+    const { mac, path: shown } = whereTo(path, app, browser)
+    if (mac) {
+      const r = await takeover.open(mac)
+      if (!r.ok) throw new OpError(`it didn't open${mac.app ? ` in ${mac.app}` : ""}: ${r.text ?? r.why ?? "no answer"}${browser ? " (vaultite: true opens it in Vaultite)" : ""}`, 409)
+      if (r.near?.length) { nearBy.set(key(name), r.near); if (m) openedFor.set(key(name), m) }
+      if (r.frame) { const f = r.frame; void resolve(target({ sx: Math.round(f.x + f.width / 2), sy: Math.round(f.y + Math.min(f.height / 2, 120)) }, true), name).then((t) => setAgent(name, { ...t, pointed: Date.now() }), () => {}) }
+      return { path: path || app, pane: null, in: r.app || mac.app || "", title: r.title ?? "", near: r.near ?? [], browser: !!browser }
+    }
+    const split = p.split || (fresh && !p.in && !p.newTab ? "right" : "")
+    const how: UiOpen = { path: shown }
+    if (split) how.split = split
+    if (p.newTab) how.newTab = true
+    if (p.in) how.in = str(p.in)
+    if (p.container) how.container = str(p.container)
+    const out: Opened = { path, pane: null }
+    if (fresh) out.fresh = fresh
+    try {
+      const seen = await openSeen(name, path, () => ctx.op("ui.open", how))
+      out.pane = seen.pane ?? null
+      if (seen.title) out.shows = seen.title
+      out.blank = Blank.parse(seen.result).blank
+      if (seen.sheet) out.sheet = true
+    } catch (e) {
+      if (!fresh) throw e
+      out.unshown = messageOf(e)
+    }
+    return out
+  },
+  text: (r) => openText(r),
+  did: (p) => ({ action: "ui", text: `Opened ${String(p.path || p.app)}`, paths: [], by: who(p) }),
+})
+
+export const followText = (f: Follow) => `${f.id}: ${f.pane ? `pane ${f.pane}` : f.tab ? `tab ${f.tab}` : f.group ? `tab group ${f.group}` : f.ui}${f.title ? ` "${f.title}"` : ""}`
+plugin.op({
+  id: "companion.follow",
+  cli: "companion follow",
+  summary: "Follow a pane, a tab, a tab group or a part of the app for this session: what it does comes to you as change moments (a terminal at a command's end or its agent's state, a page at a navigation, a selection or a settled change).",
+  help: `Only when they ask you to keep an eye on something now (pointing at it isn't asking). For
+longer than this session, offer to keep it as a watch (companion keep). Without a pane, the list.
+
+  vau companion follow --pane t3k2
+  vau companion follow --tab tk3j2
+  vau companion follow --group s1k2`,
+  kind: "write",
+  lock: false,
+  params: { pane: PANE, tab: { type: "string", description: "a tab (its id: vau tabs): all its panes" }, group: { type: "string", description: "a tab group (its id: vau tabs): all its tabs" }, ui: UI, as: AS },
+  run: async (p) => {
+    const name = who(p), pane = str(p.pane), tab = str(p.tab), group = str(p.group), ui = str(p.ui)
+    if (!pane && !tab && !group && !ui) return { follows: followed.list().filter((f) => key(f.agent) === key(name)) }
+    if (tab) {
+      const ps = allPanes().filter((x) => x.tab === tab && !privatePane(x))
+      if (!ps.length) throw new OpError(`no tab ${tab} in the user's window (vau tabs lists them)`, 404)
+      return { follows: [followed.add({ agent: name, tab, title: ps.map((x) => x.title).join(" · ") })] }
+    }
+    const pn = pane ? paneById(pane) : undefined
+    if (pane && !pn) throw new OpError(`no pane ${pane} in the user's window (vau tabs lists them)`, 404)
+    if (pn && privatePane(pn)) throw new OpError("that pane is private: the companion never sees it", 403)
+    return { follows: [followed.add({ agent: name, ...(pane ? { pane } : group ? { group } : { ui }), title: pn?.title ?? "" })] }
+  },
+  text: (r) => (r.follows.length ? r.follows.map(followText).join("\n") : "Following nothing."),
+})
+plugin.op({
+  id: "companion.unfollow",
+  cli: "companion unfollow",
+  summary: "Stop following a pane, a tab, a tab group or a part of the app (by its follow's id, pane, tab, group or ui; none: all yours).",
+  kind: "write",
+  lock: false,
+  params: { id: { type: "string", description: "the follow (f2), or the pane, tab, group or ui id it follows" }, as: AS },
+  args: ["id"],
+  run: async (p) => ({ stopped: followed.remove(str(p.id) || null, who(p)).length }),
+  text: (r) => `Stopped ${r.stopped} follow${r.stopped === 1 ? "" : "s"}.`,
+})
+plugin.op({
+  id: "companion.keep",
+  cli: "companion keep",
+  summary: "Keep a follow as a watch (a file, checked by the server after this session too): when the user says yes to keeping an eye on it.",
+  help: `A watch of the pane's terminal, page or note (or the whole tab group), live or every few minutes, until what it
+waits for happens (vau docs watches). The follow ends: the watch tells you instead.
+
+  vau companion keep --pane t3k2 --until "idle" --why "Tell me when the migration finishes"
+  vau companion keep --pane t5x1 --every 30m --until Shipped --why "Tell me when it ships"`,
+  kind: "write",
+  lock: false,
+  params: { pane: PANE, group: { type: "string", description: "a tab group (its id)" }, every: { type: "string", default: "live", description: "live, or how often: 5m, 2h, 1d" },
+    until: { type: "string", description: "what it waits for (words, or a /regular expression/)" }, why: { type: "string", description: "what to do then, in the user's words" },
+    title: { type: "string", description: "its name" }, as: AS },
+  run: async (p, ctx) => {
+    const pn = str(p.pane) ? paneById(str(p.pane)) : undefined
+    const source = str(p.group) ? `group:${str(p.group)}` : pn ? sourceOf(pn) : null
+    if (!source) throw new OpError(str(p.pane) ? `pane ${str(p.pane)} shows nothing to watch (a terminal, a page or a note)` : "give `pane` or `group`")
+    if (pn && privatePane(pn)) throw new OpError("that pane is private: the companion never sees it", 403)
+    const r = Watch.parse(await ctx.op("watches.add", { source, every: str(p.every) || "live", ...(str(p.until) ? { until: str(p.until) } : {}), ...(str(p.why) ? { why: str(p.why) } : {}),
+      ...(str(p.title) ? { title: str(p.title) } : pn ? { title: `Watch ${pn.title}`.slice(0, 80) } : {}), by: who(p) }))
+    followed.remove(str(p.group) || str(p.pane))
+    return r
+  },
+  text: (r) => `Kept as a watch: ${r.id}.md (${r.source}).`,
+})
+
+plugin.op({
+  id: "companion.history",
+  cli: "companion history",
+  summary: "A note's margin threads: the comments in it now, and those the user dismissed (newest last).",
+  kind: "read",
+  params: { path: PATH },
+  run: async (p) => {
+    const path = target(p).path!
+    return { path, open: kept(path).filter((n) => n.kind === "comment"), past: past.get(path) ?? [] }
+  },
+  text: (r) => [`${r.path}: ${r.open.length} open, ${r.past.length} dismissed.`,
+    ...[...r.open, ...r.past].map((n: Note) => `- ${n.id}${n.dismissed ? " (dismissed)" : ""} by ${byText(n)} at line ${n.line ?? "?"}: ${cut(n.text ?? "", 80)}${n.replies?.length ? ` (${n.replies.length} replies)` : ""}`)].join("\n"),
+})

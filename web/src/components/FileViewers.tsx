@@ -1,0 +1,200 @@
+import { useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react"
+import { ArrowUpRight, Download, SquareArrowOutUpRight, type LucideIcon } from "lucide-react"
+import { dateText } from "@/core/data"
+import { get } from "@/core/http"
+import { localCopy } from "@/core/justsaved"
+import { formatSize, kindIcon, kindName, type FileKind } from "@/core/filekinds"
+import { gone, openFile } from "@/core/files"
+import { isDesktop } from "@/core/platform"
+import { saveFile, savesBySharing } from "@/core/savefile"
+import { useVaultChange } from "@/core/live"
+import { useRead } from "@/core/reading"
+import { playerFor } from "@/core/plugins"
+import { useStateFor } from "@/core/statefor"
+import { usePrefs } from "@/core/prefs"
+import { canOpenHere, openOnComputer } from "@/components/FileActions"
+import { cn, plural } from "@/lib/utils"
+import { Button, buttonClass } from "@/components/Button"
+
+export type FileInfo = { path: string; kind: FileKind; size: number; mtime: number; ctime: number; pages?: number | null }
+
+// Safari draws HEIC photos itself; Chrome, and so Electron, doesn't.
+const drawsHeic = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\/|Electron|Android/.test(navigator.userAgent)
+
+/** The address of a file's bytes (a vault path, or an outside file's absolute path). An iPhone photo (HEIC) a browser
+ *  can't draw comes as JPEG, made on the server (core/heic.ts); a download is always the file itself. */
+export const rawUrl = (path: string, opts: { download?: boolean; v?: number } = {}) =>
+  (!opts.download && !opts.v && localCopy(path)) ||
+  `api/raw/${encodeURIComponent(path.split("/").pop()!)}?path=${encodeURIComponent(path)}${opts.download ? "&download=1" : !drawsHeic && /\.(heic|heif)$/i.test(path) ? "&as=jpeg" : ""}${opts.v ? `&v=${opts.v}` : ""}`
+
+export const thumbUrl = (path: string, px: number, v: number) =>
+  `api/raw/${encodeURIComponent(path.split("/").pop()!)}?path=${encodeURIComponent(path)}&thumb=${px}&v=${Math.round(v)}`
+
+export function useFileInfo(path: string) {
+  const [n, setN] = useState(0)
+  const read = useRead(() => get<FileInfo>(`file/info?path=${encodeURIComponent(path)}`), [path, n])
+  useVaultChange(() => setN((x) => x + 1), [path])
+  return [read.value ?? null, n, read.error !== undefined && gone(read.error), read] as const
+}
+
+export function useFill(on: boolean) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [h, setH] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!on) return
+    const fit = () => {
+      const top = ref.current?.getBoundingClientRect().top ?? 0
+      const scroller = ref.current?.closest("[data-pane], [data-stacked]")
+      const off = scroller ? scroller.scrollTop : window.scrollY
+      setH(Math.max(280, window.innerHeight - Math.max(0, top + off) - 24))
+    }
+    fit()
+    addEventListener("resize", fit)
+    return () => removeEventListener("resize", fit)
+  }, [on])
+  return [ref, h] as const
+}
+
+const primary = buttonClass({ look: "primary" }), secondary = buttonClass()
+
+export function FileCard({ path, info, note, children }: { path: string; info: FileInfo | null; note?: ReactNode; children?: ReactNode }) {
+  const Icon = kindIcon(path)
+  const name = path.split("/").pop()!
+  const modified = info ? dateText(new Date(info.mtime), { day: "numeric", month: "short", year: "numeric" }) : null
+  const here = canOpenHere()
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center px-4 py-10 text-center" data-file-card>
+      <Icon className="size-14 text-muted-foreground" strokeWidth={1.25} />
+      <p className="mt-3 text-[17px] font-semibold break-all">{name}</p>
+      <p className="mt-1 text-[15px] text-muted-foreground md:text-[13px]">
+        {[kindName(path), info && formatSize(info.size), info?.pages ? `${plural(info.pages, "page")}` : null, modified && `modified ${modified}`].filter(Boolean).join(" · ")}
+      </p>
+      {note && <p className="mt-2 text-[15px] text-muted-foreground md:text-[13px]">{note}</p>}
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        {children}
+        {here && (
+          <Button look={children ? "secondary" : "primary"} onClick={() => openOnComputer(path)}>
+            <SquareArrowOutUpRight className="size-4" strokeWidth={2} />Open in default app
+          </Button>
+        )}
+        <a href={rawUrl(path, { download: true })} download={name} className={here || children ? secondary : primary}
+          onClick={(e) => { if (savesBySharing) { e.preventDefault(); saveFile(e.currentTarget.href, name) } }}>
+          <Download className="size-4" strokeWidth={2} />Download
+        </a>
+      </div>
+    </div>
+  )
+}
+
+export function ImageView({ path, info, v, page, onSize }: { path: string; info: FileInfo | null; v: number; page: boolean; onSize: (w: number, h: number) => void }) {
+  const [zoom, setZoom] = useState(false)
+  const [failed, setFailed] = useStateFor([v], () => false)
+  const [ref, h] = useFill(page)
+  if (failed) return <FileCard path={path} info={info} note="This browser can't show this image." />
+  return (
+    <div ref={ref} className={cn("flex rounded-[10px]", zoom ? "overflow-auto" : "items-center justify-center overflow-hidden", !page && "max-h-[75vh]")}
+      style={h ? { height: h } : undefined} data-image-view>
+      <img src={rawUrl(path, { v })} alt={path.split("/").pop()} draggable={false}
+        onLoad={(e) => onSize(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} onError={() => setFailed(true)}
+        onClick={() => setZoom((z) => !z)} data-zoomed={zoom || undefined}
+        className={cn("select-none", zoom ? "m-auto max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in object-contain", !page && !zoom && "max-h-[75vh]")} />
+    </div>
+  )
+}
+
+// Mobile browsers draw only a picture of a PDF's first page in a frame.
+export function PdfView({ path, info, v, page }: { path: string; info: FileInfo | null; v: number; page: boolean }) {
+  const [ref, h] = useFill(page)
+  if (!isDesktop()) {
+    return (
+      <FileCard path={path} info={info}>
+        <a href={rawUrl(path, { v })} target="_blank" rel="noopener" className={primary}><ArrowUpRight className="size-4" strokeWidth={2} />Open</a>
+      </FileCard>
+    )
+  }
+  return (
+    <div ref={ref} style={{ height: h ?? 600 }}>
+      <iframe src={rawUrl(path, { v })} title={path.split("/").pop()} className="size-full rounded-[10px] border-[0.5px] border-border bg-card" />
+    </div>
+  )
+}
+
+function useSoundOnly(path: string) {
+  const [sound, setSound] = useStateFor([path], () => false)
+  const check = (e: SyntheticEvent<HTMLMediaElement>) => {
+    const el = e.currentTarget
+    if (el instanceof HTMLVideoElement && el.videoWidth === 0 && el.videoHeight === 0) setSound(true)
+  }
+  return [sound, check] as const
+}
+
+export function PlayerView({ path, info, v, video, onDuration }: { path: string; info: FileInfo | null; v: number; video: boolean; onDuration: (s: number) => void }) {
+  const [failed, setFailed] = useStateFor([path, v], () => false)
+  const [sound, check] = useSoundOnly(path)
+  const Player = playerFor(usePrefs().disabled)
+  if (failed) return <FileCard path={path} info={info} note="This browser can't play this file." />
+  if (Player) return <Player path={path} video={video} place="page" v={v} onDuration={onDuration} onFail={() => setFailed(true)} />
+  const common = { src: rawUrl(path, { v }), controls: true, preload: "metadata", onError: () => setFailed(true),
+    onLoadedMetadata: (e: SyntheticEvent<HTMLMediaElement>) => { onDuration(e.currentTarget.duration); check(e) } }
+  if (video && !sound) return <video {...common} playsInline className="mx-auto max-h-[75vh] w-full rounded-[10px] bg-foreground/[0.04]" />
+  const Icon = kindIcon(path)
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center py-10">
+      <Icon className="size-14 text-muted-foreground" strokeWidth={1.25} />
+      <p className="mt-3 mb-5 text-[17px] font-semibold break-all">{path.split("/").pop()}</p>
+      <audio {...common} className="w-full" />
+    </div>
+  )
+}
+
+export function EmbedHead({ path, icon: Icon, name }: { path: string; icon: LucideIcon; name: string }) {
+  return (
+    <button type="button" data-opens onClick={(e) => openFile(path, { newTab: e.metaKey || e.ctrlKey })} data-hold-menu
+      className="flex h-9 w-full cursor-pointer items-center gap-1.5 px-3 text-left text-[13px] font-semibold text-muted-foreground hover:text-foreground">
+      <Icon className="size-4 shrink-0" strokeWidth={2.25} />
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <ArrowUpRight className="size-3.5 shrink-0" strokeWidth={2.25} />
+    </button>
+  )
+}
+
+export function MediaEmbed({ path, height, fill }: { path: string; height?: number; fill?: boolean }) {
+  const [sound, check] = useSoundOnly(path)
+  const pdf = /\.pdf$/i.test(path), video = !sound && /\.(mp4|m4v|mov|webm|ogv)$/i.test(path)
+  const Icon = kindIcon(path)
+  const Player = playerFor(usePrefs().disabled)
+  if (Player && !pdf) {
+    const player = <Player path={path} video={video} place={fill ? "fill" : "embed"} height={height} />
+    return fill ? <div className="flex size-full items-center justify-center overflow-hidden" data-media-embed={path}>{player}</div>
+      : <div className="glass overflow-hidden rounded-[12px]" data-hold-menu data-media-embed={path}><EmbedHead path={path} icon={Icon} name={path.split("/").pop()!} />{player}</div>
+  }
+  if (fill) {
+    return (
+      <div className="flex size-full items-center justify-center overflow-hidden" data-media-embed={path}>
+        {pdf ? (
+          isDesktop()
+            ? <iframe src={rawUrl(path)} title={path.split("/").pop()} className="block size-full bg-card" />
+            : <a href={rawUrl(path)} target="_blank" rel="noopener" className={primary}><ArrowUpRight className="size-4" strokeWidth={2} />Open</a>
+        ) : video ? (
+          <video src={rawUrl(path)} controls playsInline preload="metadata" onLoadedMetadata={check} className="block size-full object-contain" />
+        ) : (
+          <div className="w-full px-3"><audio src={rawUrl(path)} controls preload="metadata" className="w-full" /></div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="glass overflow-hidden rounded-[12px]" data-hold-menu>
+      <EmbedHead path={path} icon={Icon} name={path.split("/").pop()!} />
+      {pdf ? (
+        isDesktop()
+          ? <iframe src={rawUrl(path)} title={path.split("/").pop()} className="block w-full bg-card" style={{ height: height ?? 520 }} />
+          : null
+      ) : video ? (
+        <video src={rawUrl(path)} controls playsInline preload="metadata" onLoadedMetadata={check} className="block w-full" style={height ? { height } : undefined} />
+      ) : (
+        <div className="px-3 pb-3"><audio src={rawUrl(path)} controls preload="metadata" className="w-full" /></div>
+      )}
+    </div>
+  )
+}

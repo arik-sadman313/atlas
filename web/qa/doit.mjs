@@ -1,0 +1,66 @@
+// Do it: an open task line's button hands it over (the delegate test has the server's side); an inbox suggestion's too.
+// WRITES fixtures in QA/: throwaway server.
+//   node web/qa/doit.mjs <base url> <vault path>
+import { mkdirSync, writeFileSync } from "node:fs"
+import { apiAt, qa, until, wait, SHOTS as OUT } from "./lib/qa.mjs"
+const { args: [B, VAULT], browser, check, watch, done } = await qa(import.meta.url)
+mkdirSync(OUT, { recursive: true })
+mkdirSync(`${VAULT}/QA`, { recursive: true })
+writeFileSync(`${VAULT}/QA/Errands.md`, "---\ntype: note\n---\n# Errands\n\n- [ ] Compare the two flights\n- [x] Book the car\n\n```\n- [ ] In a code block\n```\n")
+writeFileSync(`${VAULT}/QA/Hub.md`, "---\ntype: note\n---\nIts errands:\n\n![[QA/Errands]]\n")
+const api = apiAt(B)
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+watch(page)
+const asked = []
+await page.route("**/api/ops/companion.do", (r) => { asked.push(r.request().postDataJSON()); return r.fulfill({ json: { id: "j1", title: "Compare the two flights", state: "starting", link: "view:terminal/claude-x", unseen: false, at: 1, started: 1, where: "M4, vault, Claude Code Opus", now: "", took: "0 s", result: "" } }) })
+await page.goto(`${B}#file/${encodeURIComponent("QA/Errands.md")}`)
+await page.waitForSelector(".cm-line", { timeout: 20000 })
+const buttons = page.locator(".cm-do-it")
+check("only the open task, not the done one nor code", await until(async () => await buttons.count() === 1, 8000), await buttons.count())
+const line = page.locator(".cm-line", { hasText: "Compare the two flights" })
+check("hidden until hovered", await buttons.evaluate((b) => getComputedStyle(b).opacity) === "0")
+await line.hover()
+check("shown on hover", await until(() => buttons.evaluate((b) => getComputedStyle(b).opacity === "1"), 2000))
+await page.screenshot({ path: `${OUT}doit-line.png` })
+await buttons.click()
+check("a click hands over its note, line and words", await until(() => asked.length === 1, 3000) && asked[0].path === "QA/Errands.md" && asked[0].text === "Compare the two flights" && /^\d+$/.test(String(asked[0].line)), asked)
+check("the toast says so", await until(() => page.getByText("Handed off: Compare the two flights").count().then((n) => n > 0), 3000))
+
+asked.length = 0
+await page.goto(`${B}#file/${encodeURIComponent("QA/Hub.md")}`)
+const read = page.locator(".md-do-it")
+check("drawn: only the open task has one", await until(async () => await read.count() === 1, 15000), await read.count())
+check("drawn: hidden until hovered", await read.evaluate((b) => getComputedStyle(b).opacity) === "0")
+await page.locator("[data-embed] li", { hasText: "Compare the two flights" }).first().hover()
+check("drawn: shown on hover", await until(() => read.evaluate((b) => getComputedStyle(b).opacity === "1"), 2000))
+await page.screenshot({ path: `${OUT}doit-read.png` })
+await wait(3100) // (the same task tapped again within moments is taken for one tap)
+await read.click()
+check("drawn: a click hands over its note, line and words", await until(() => asked.length === 1, 3000) && asked[0].path === "QA/Errands.md" && asked[0].text === "Compare the two flights" && asked[0].line === 6, asked)
+asked.length = 1
+
+const [, item] = await api("POST", "ops/inbox.add", { title: "Tidy the trip note", tldr: "It has three copies of the hotel.", do: "Tidy the trip note", from: "Dream" }).then((r) => [r.status ?? 200, r.body ?? r])
+const row = page.locator("[data-result]", { hasText: "Tidy the trip note" }).first()
+await page.goto(`${B}#view/inbox`)
+check("a suggestion's row has its Do it", await until(() => row.locator("[data-do-it]").count().then((n) => n === 1), 8000), item)
+await page.screenshot({ path: `${OUT}doit-inbox.png` })
+await row.locator("[data-do-it]").click()
+check("a click hands over its words", await until(() => asked.length === 2, 3000) && asked[1].text === "Tidy the trip note" && !asked[1].path, asked)
+check("and settles it", await until(() => row.count().then((n) => n === 0), 5000))
+await page.close()
+
+const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage()
+watch(phone)
+const tapped = []
+await phone.route("**/api/ops/companion.do", (r) => { tapped.push(r.request().postDataJSON()); return r.fulfill({ json: { id: "j2", title: "Water the fern", agent: "claude", state: "running", link: null, unseen: false, at: 1 } }) })
+writeFileSync(`${VAULT}/QA/Phone.md`, "---\ntype: note\n---\n- [ ] Water the fern\n- [ ] Call the dentist\n")
+await phone.goto(`${B}#file/${encodeURIComponent("QA/Phone.md")}`)
+const line2 = phone.locator(".cm-line", { hasText: "Water the fern" })
+await line2.waitFor({ timeout: 20000 })
+await line2.tap()
+const onPhone = phone.locator(".cm-do-it")
+check("phone: the caret's line has it, only that one", await until(() => onPhone.count().then((n) => n === 1), 5000) && await onPhone.evaluate((b) => getComputedStyle(b).opacity) === "1", await onPhone.count())
+await onPhone.tap()
+check("phone: a tap hands it over", await until(() => tapped.length === 1, 3000) && tapped[0].text === "Water the fern", tapped)
+await phone.close()
+done()

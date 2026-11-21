@@ -1,0 +1,300 @@
+import fs from "node:fs"
+import { z } from "zod"
+import type { App } from "./app.ts"
+import { aiOps } from "./coreops/ai.ts"
+import { bundleOps } from "./coreops/bundles.ts"
+import { contextOps } from "./coreops/context.ts"
+import { devOps } from "./coreops/dev.ts"
+import { permissionOps } from "./coreops/permissions.ts"
+import { secretOps } from "./coreops/secret.ts"
+import { anchorOps } from "./coreops/anchors.ts"
+import { fileOps } from "./coreops/files.ts"
+import { uploadOps } from "./coreops/uploads.ts"
+import { itemOps } from "./coreops/items.ts"
+import { installOps } from "./coreops/installs.ts"
+import { newTabOps } from "./coreops/newtab.ts"
+import { pageOps } from "./coreops/pages.ts"
+import { paletteOps } from "./coreops/palette.ts"
+import { panelOps } from "./coreops/panels.ts"
+import { pluginList, pluginOps } from "./coreops/plugins.ts"
+import { Commands, noWindow, Picked, Ran } from "./coreops/common.ts"
+import { settingShowOp } from "./coreops/settingshow.ts"
+import { whichOps } from "./coreops/which.ts"
+import { settingsOps } from "./coreops/settings.ts"
+import { keptOps } from "./coreops/kept.ts"
+import { typeOps } from "./coreops/types.ts"
+import { versionOps } from "./coreops/version.ts"
+import { updateOps } from "./coreops/update.ts"
+import { commandList } from "./appsource.ts"
+import { SPLITS } from "./splitto.ts"
+import { propTypeOps } from "./coreops/proptypes.ts"
+import { topic, topics } from "./docs.ts"
+import { defineOp, type Op, OpError, quoted } from "./ops.ts"
+import { brief } from "./words.ts"
+import { isOutside } from "./fileprops.ts"
+import { allowPath } from "./outside.ts"
+
+export function coreOps(app: App): Op[] {
+  return [...contextOps(app), ...fileOps(app), ...anchorOps(app), ...typeOps(app), ...propTypeOps(app), ...uploadOps(app), ...pluginOps(app), ...aiOps(app), ...installOps(app), ...bundleOps(app), ...panelOps(app), ...newTabOps(app), ...pageOps(app), ...settingsOps(app), ...paletteOps(app), ...keptOps(app), ...itemOps(app),
+    ...docsOps(app), ...whichOps(app), ...uiOps(app), settingShowOp(), ...secretOps(), ...permissionOps(app), ...devOps(), ...versionOps(), ...updateOps(), ...opsOps(app)]
+}
+
+const Shown = z.looseObject({ blank: z.string().optional() }).nullable().catch(null)
+const blankText = (blank: string) => ` But its pane shows ${blank}: it isn't what was asked for (vau which <words> finds the page that shows it).`
+
+function opsOps(app: App): Op[] {
+  return [defineOp({
+    id: "ops.list",
+    cli: "ops",
+    summary: "List the operations: everything the API, vau and MCP can do with this vault (its plugins' too, while they're on).",
+    help: "Give an area (`note`, `file`) or a word to narrow the list. `vau <id> --help` explains one.",
+    kind: "read",
+    params: { filter: { type: "string", description: "an area (note, file) or a word in the summary" } },
+    args: ["filter"],
+    run: ({ filter }) => {
+      const q = String(filter ?? "").trim().toLowerCase()
+      return app.catalog().filter((e) => !q || e.id.startsWith(`${q}.`) || e.id.includes(q) || e.summary.toLowerCase().includes(q))
+        .map(({ id, plugin, summary, kind, cli, mcp }) => ({ id, plugin, summary, kind, cli, mcp }))
+    },
+    text: (rows) => rows.length
+      ? rows.map((r) => `- \`${r.id}\`${r.cli ? ` (vau ${r.cli})` : ""}: ${brief(r.summary)}`).join("\n") + "\n\n`vau <id> --help` explains one."
+      : "No operation matches.",
+  })]
+}
+
+function docsOps(app: App): Op[] {
+  return [defineOp({
+    id: "docs.list",
+    summary: "List the docs topics: the vault in full, the app's settings, each plugin's file formats.",
+    kind: "read",
+    run: () => [{ id: "api", title: "Operations (the API)", plugin: null }, ...topics(app.plugins).map(({ id, title, plugin }) => ({ id, title, plugin }))],
+    text: (rows) => rows.map((t) => `- \`${t.id}\`: ${t.title}`).join("\n"),
+  }), defineOp({
+    id: "docs.read",
+    cli: "docs",
+    mcp: "docs",
+    summary: "The docs, read when needed: a kind of file's format (read it before writing one), the app's settings, the API.",
+    help: `Without a topic: the list. A topic is a plugin's id (its AGENTS.md, then its settings, blocks and operations)
+or one of the app's (vault, app, vault-plugins, from-other-apps, api: every operation); a title's words work too.
+
+  vau docs
+  vau docs people
+  vau docs "database views"`,
+    kind: "read",
+    params: { topic: { type: "string", description: "the topic's id (people, logs, app, api) or words of its title; leave out for the list" } },
+    args: ["topic"],
+    run: ({ topic: t }) => {
+      if (!t) return { topics: [{ id: "api", title: "Operations (the API)" }, ...topics(app.plugins).map(({ id, title }) => ({ id, title }))] }
+      if (t.trim().toLowerCase() === "api") return { id: "api", text: app.opsDoc() }
+      try {
+        const d = topic(app.plugins, t)
+        return { id: d.id, text: d.text }
+      } catch (e) {
+        throw new OpError(e instanceof Error ? e.message : String(e), 404)
+      }
+    },
+    text: (r) => (r.topics ? r.topics.map((t) => `- \`${t.id}\`: ${t.title}`).join("\n") : r.text),
+  })]
+}
+
+function outsideOr(p: string) {
+  if (!isOutside(p) && !/^~(\/|$)/.test(p)) return p
+  let at: ReturnType<typeof allowPath>
+  try { at = allowPath(p) } catch (e) { throw new OpError(e instanceof Error ? e.message : String(e), 404) }
+  return at.folder ? `view:folder/${at.path}` : at.path
+}
+
+function uiOps(app: App): Op[] {
+  return [defineOp({
+    id: "ui.windows",
+    summary: "Which app windows are open on this server, and the workspace they show.",
+    kind: "read",
+    run: (_p, ctx) => ctx.ui(null),
+  }), defineOp({
+    id: "ui.open",
+    cli: "open",
+    mcp: "open",
+    summary: "Open a file, a view or a web page in the user's app window: where they say (a pane they name, as a new tab there; a split), a web page in the browser container they name.",
+    help: `Shows something in the app the user has open: a file in a tab, a folder as its page (a list, a grid or columns of what
+it holds; one elsewhere on this machine too, by its path: ~/Projects/lighthouse, less what git ignores), a view ("view:terminal/<id>", "view:graph") or a web address in a web tab.
+Only the window the user was in last acts. On a phone it opens in the sheet. For something the user should look at now
+(a file you wrote).
+Where, as the user says it:
+- in: the pane it opens in, as a new tab there. By where it is in the tab on screen (left, right, top, bottom, middle,
+  "top right", "the left side panel"), "this" (the one focused), what it shows (a note's name, a site: github.com,
+  words of its tab's title: "the one showing Squad") or its id (vau tabs). With split, the split is beside that pane.
+- split right|left|down|up: in a new pane on that side of the current one (or the one in names).
+- newTab: a new tab, keeping the current one.
+- container: a web address in that browser container (each its own logins): its name as the user says it (Personal,
+  Work, Agents; "my personal one": personal), its id, or none. Left out, the site's rule or the workspace's picks.
+A pane or container nobody has is an error that lists the ones there are.
+
+  vau open Dashboards/People.md
+  vau open "People/Alice Park.md" --split right
+  vau open People
+  vau open Notes/Idea.md --new-tab
+  vau open https://example.com
+  vau open https://www.linkedin.com/in/alice-park --container Personal
+  vau open http://localhost:5173 --in left
+  vau open Notes/Plan.md --in "the one showing Lighthouse"
+  vau open https://github.com --in "top right" --container work`,
+    kind: "write",
+    params: {
+      path: { type: "string", format: "path", outside: true, finds: true, required: true, description: "the vault path (Notes/Idea.md, or as the user says it: Today), a folder, a view (view:graph), a web address, or a folder or file elsewhere on this machine (its absolute path)" },
+      split: { type: "string", enum: [...SPLITS], description: "open it in a new pane on that side (right, left, down: below, up: above) of the current one (or the one `in` names)" },
+      newTab: { type: "boolean", description: "in a new tab, keeping the current one" },
+      in: { type: "string", description: "the pane to open it in, as a new tab there, as the user names it: where it is (left, right, top right, bottom), this (the focused one), what it shows (a note, a site, its title's words) or its id" },
+      container: { type: "string", description: "a web address's browser container, by its name as the user says it (Personal, Work, Agents), its id, or none" },
+    },
+    args: ["path"],
+    run: async ({ path, split, newTab, in: into, container }, ctx) => {
+      const why = typeof path === "string" && path.startsWith("view:terminal/") ? await ctx.refusal?.("the terminal") : ""
+      if (why) throw new OpError(why, 403)
+      return Shown.parse(await ctx.ui({ action: "open", path: outsideOr(path), split: split ?? null, newTab: !!newTab, ...(into ? { in: into } : {}), ...(container ? { container } : {}) }).catch(noWindow))
+    },
+    text: (r, p) => `Opened ${p.path}${p.in ? ` as a new tab in the pane "${p.in}"` : ""}${p.split ? ` in a split ${p.split}` : ""}${p.container ? ` in the container ${p.container}` : ""}.${r?.blank ? blankText(r.blank) : ""}`,
+    did: ({ path, split }) => ({ action: "ui", text: `Opened ${path} in the app${split ? ` (split ${split})` : ""}`, paths: path && !path.startsWith("view:") ? [path] : [] }),
+  }), defineOp({
+    id: "ui.command",
+    cli: "command",
+    summary: "Run a command from the app's palette in the user's window (by id).",
+    help: `Runs a palette command in the window the user was in last, as if they picked it. Ids: vau commands. A
+command that isn't available right then (it needs an open file) runs nothing, and says so. Once it has run, its answer
+has the toasts it showed (notices): one saying it couldn't means it didn't do it.
+
+  vau command sidebar:toggle
+  vau command terminal:open
+  vau command theme:dark`,
+    kind: "write",
+    owner: "the app's commands",
+    params: { id: { type: "string", required: true, description: "the command's id (sidebar:toggle)" } },
+    args: ["id"],
+    run: async ({ id }, ctx) => Ran.parse(await ctx.ui({ action: "command", id }).catch(noWindow)),
+    text: (r, p) => !r?.ran ? `Sent ${p.id}.` : `Ran ${p.id}.${r.notices?.length ? ` The app then showed: ${r.notices.map((n) => `${JSON.stringify(n.text)}${n.kind === "error" ? " (an error)" : ""}`).join(", ")}.` : ""}`,
+    did: ({ id }) => ({ action: "ui", text: `Ran the command ${id} in the app` }),
+  }), defineOp({
+    id: "ui.commands",
+    cli: "commands",
+    summary: "The palette's commands, by id (for vau command): the user's window's, with which can run now, else the app's.",
+    help: `With an app window open, the commands it has right now (a file's and a view's too) and whether each can run
+there now; with none, the ones in the app's source. filter keeps ids and names with a word.
+
+  vau commands
+  vau commands sidebar
+  vau commands --available`,
+    kind: "read",
+    params: {
+      filter: { type: "string", description: "a word in the command's id or name" },
+      available: { type: "boolean", description: "only the commands that can run in the window now" },
+    },
+    args: ["filter"],
+    run: async ({ filter, available }, ctx) => {
+      let from = "window", rows: z.infer<typeof Commands>
+      try {
+        rows = Commands.parse(await ctx.ui({ action: "commands", timeout: 3 }))
+      } catch (e) {
+        if (!(e instanceof OpError) || ![409, 503, 504].includes(e.status)) throw e
+        from = "source"
+        rows = commandList(pluginList(app).filter((p) => p.tier === "vault")).map((c) => ({ id: c.id, name: c.name, keys: c.keys, available: null }))
+      }
+      const q = String(filter ?? "").trim().toLowerCase()
+      const commands = rows.filter((c) => (!q || c.id.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)) && (!available || c.available !== false))
+        .sort((a, b) => a.id.localeCompare(b.id))
+      return { from, commands }
+    },
+    text: (r) => (r.commands.length ? r.commands.map((c) => `${c.id.padEnd(28)} ${c.name}${c.available === false ? "  (not now)" : ""}`).join("\n") : "No command matches.") +
+      (r.from === "source" ? "\n(from the app's source: no app window is open)" : ""),
+  }), defineOp({
+    id: "ui.notify",
+    home: true,
+    cli: "notify",
+    summary: "Tell the user something happened: a toast in their window, kept in their inbox.",
+    help: `Tells the user something finished or changed ("Imported 12 meals", "Wrote the weekly review"), not every step.
+It's an event in their inbox: a toast in every open window, a system notification while the desktop app is in the
+background, and kept for later when no window is open. actionOpen adds its Open button, to a vault file or view, a
+web address, or a file elsewhere on this machine by its absolute path (the desktop app opens it in a tab). error shows
+it as an error (a red icon).
+
+  vau notify "Imported 12 meals from Hevy"
+  vau notify "Wrote your weekly review" --action-open "Notes/Weekly review.md"
+  vau notify "The recording is ready" --action-open ~/Downloads/demo.mp4
+  vau notify "The GitHub refresh failed: rate limited" --error`,
+    kind: "write",
+    params: {
+      text: { type: "string", required: true, description: "what happened, one line" },
+      actionOpen: { type: "string", format: "path", outside: true, finds: true, description: "a vault file, view or web address its Open button opens, or a file elsewhere on this machine (its absolute path)" },
+      error: { type: "boolean", description: "shown as an error" },
+      terminal: { type: "string", env: "VAULTITE_TERMINAL", description: "the app terminal it's about (its id; vau fills it in when it runs in one)" },
+    },
+    args: ["text"],
+    run: async ({ text, actionOpen, error, terminal }, ctx) => {
+      const why = await ctx.refusal?.("the inbox")
+      if (why) throw new OpError(why, 403)
+      if (isOutside(actionOpen)) {
+        const st = fs.statSync(actionOpen, { throwIfNoEntry: false })
+        if (!st) throw new OpError(`\`actionOpen\`: there's no ${actionOpen} on this machine`)
+        if (!st.isFile()) throw new OpError(`\`actionOpen\`: ${actionOpen} is a folder: give a file`)
+      }
+      const source = ctx.who.source === "cli" || ctx.who.source === "api" ? "vau" : ctx.who.source
+      const event = await app.notice({ source, kind: error ? "error" : "info", title: text,
+        ...(actionOpen ? { link: actionOpen } : {}), ...(terminal ? { terminal } : {}) })
+      return { event }
+    },
+    text: (r, p) => `Shown: ${p.text}${p.actionOpen ? ` [Open: ${p.actionOpen}]` : ""}${r.event ? " (kept in the inbox)" : ""}`,
+    did: ({ text }) => ({ action: "ui", text: `Showed ${quoted(text)}` }),
+  }), defineOp({
+    id: "ui.choose",
+    cli: "choose",
+    mcp: "choose",
+    summary: "Ask the user to pick one of a list, in their window's palette, and wait for it: what they picked, or nothing.",
+    help: `Shows the items in the palette of the window the user was in last (desktop, browser or phone), searchable like
+the quick switcher, and waits until they pick one (Enter or a click) or dismiss it (Esc), at most timeout seconds. For a
+choice that's the user's to make (which note, which of three plans), not a yes or no. Items are lines (piped in, like
+dmenu) or a list of strings or {id, label, detail, icon} (icon: a Lucide name); prompt is the question, drawn above
+the list. other lets them type something that isn't listed (with no items, it asks for text). The answer is the pick
+({index, id, label}; id is the label when not given), the text typed, or nothing when dismissed; vau prints the pick's
+id, or nothing.
+
+  ls Notes | vau choose --prompt "Which note to merge into?"
+  vau choose --items '["Keep both","Merge","Skip"]' --prompt "Alice Park is in two files"
+  printf 'Low\\nMedium\\nHigh\\n' | vau choose --current Medium --other`,
+    kind: "read",
+    params: {
+      items: { type: "array", stdin: true, commas: false, required: true, description: "what to pick from: lines of text, or a list of strings or {id, label, detail, icon}" },
+      prompt: { type: "string", description: "the question, shown above the list" },
+      current: { type: "string", description: "the item selected at first, by id or label (the current value)" },
+      other: { type: "boolean", description: "what's typed can be picked too, when it isn't listed" },
+      timeout: { type: "integer", minimum: 5, maximum: 600, default: 300, description: "seconds to wait for the user's pick" },
+    },
+    run: async ({ items, prompt, current, other, timeout }, ctx) => {
+      const list = chooseItems(items)
+      if (!list.length && !other) throw new OpError("`items` is empty: nothing to pick from (with `other`, it asks for text)")
+      const at = current === undefined ? -1 : list.findIndex((it) => it.id === current || it.label === current)
+      const r = Picked.parse(await ctx.ui({ action: "choose", prompt: prompt ?? null, timeout, other: !!other, current: at < 0 ? null : at,
+        items: list.map(({ label, detail, icon }) => ({ label, detail, icon })) }).catch(noWindow).catch((e: unknown) => {
+        if (e instanceof OpError && e.status === 504) throw new OpError(`the user picked nothing within ${timeout} s`, 504)
+        throw e
+      }))
+      if (r && r.typed !== null && other) return { picked: null, typed: r.typed }
+      const i = r?.index ?? -1
+      return { picked: list[i] ? { index: i, ...list[i] } : null, typed: null }
+    },
+    text: (r) => r.picked?.id ?? r.typed ?? "",
+  })]
+}
+
+const Choice = z.object({ id: z.unknown(), label: z.unknown(), detail: z.unknown(), icon: z.unknown() }).partial()
+type ChoiceItem = { id: string; label: string; detail?: string; icon?: string }
+function chooseItems(items: unknown[]): ChoiceItem[] {
+  const text = (v: unknown, most: number) => (typeof v === "string" || typeof v === "number" ? String(v).trim().slice(0, most) : "")
+  return items.flatMap((e): ChoiceItem[] => {
+    if (typeof e === "string") return e.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => ({ id: l, label: l.slice(0, 300) }))
+    if (typeof e === "number") return [{ id: String(e), label: String(e) }]
+    if (!e || typeof e !== "object") return []
+    const o = Choice.parse(e)
+    const label = text(o.label ?? o.id, 300)
+    if (!label) throw new OpError("each item needs a label (or an id)")
+    const detail = text(o.detail, 120), icon = text(o.icon, 60)
+    return [{ id: text(o.id, 300) || label, label, ...(detail ? { detail } : {}), ...(icon ? { icon } : {}) }]
+  }).slice(0, 5000)
+}

@@ -1,0 +1,13 @@
+{
+  "id": "canvas",
+  "icon": "layout-dashboard",
+  "category": "writing",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "name": "Canvas",
+  "description": "Boards of cards, notes, web pages and groups joined by arrows: .canvas files (JSON Canvas) open as an infinite canvas, and ![[Board.canvas]] shows one in a note.",
+  "settings": {
+    "snapToGrid": { "type": "boolean", "default": true, "label": "Snap to grid", "description": "cards line up on a 20px grid; as they move and resize, when near one of its lines" },
+    "snapToObjects": { "type": "boolean", "default": true, "label": "Snap to cards", "description": "cards line up with other cards' edges and centres; as they move and resize" }
+  }
+}

@@ -1,0 +1,119 @@
+import { useEffect } from "react"
+import { AppWindow, PanelRight, PanelRightClose, Pin, PinOff } from "lucide-react"
+import {
+  currentEditor, currentFile, definePlugin, dockAtEnd, DockedFile, DockedViewToggle, filePanelKey, focusedPane, hidePanel, panelSide, stem, getTabLayout, shownTab, iconAt, isViewOpen, openFile, openView, PIN_SEARCH, useCommands, useFocusedFile,
+  usePane, useViewsVersion, useWorkspaceVersion, viewPinLabel, type Store, type TabLayout,
+} from "@vaultite"
+import { PinCurrent, pinChecklist, PinnedPages, showAsMenu } from "./Pinned"
+import { PinnedSettings } from "./SettingsPanel"
+import { currentPins, isPinned, pinItems, pinnable, pinName, pinNoted, relabel, shownPinned, viewPin } from "./types"
+
+function headingHere() {
+  const ed = currentEditor()
+  if (!ed || ed.kind !== "markdown" || !ed.path || !pinnable(ed.path)) return null
+  const doc = ed.view.state.doc
+  let fence = false
+  const found: string[] = []
+  for (let n = doc.lineAt(ed.start?.(ed.view.state) ?? 0).number; n <= doc.lineAt(ed.view.state.selection.main.head).number; n++) {
+    const t = doc.line(n).text
+    if (/^\s*(```|~~~)/.test(t)) fence = !fence
+    const m = !fence && /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(t)
+    if (m) found.push(m[1])
+  }
+  return found.length ? `${ed.path}#${found[found.length - 1]}` : null
+}
+
+function activeTarget(w: TabLayout) {
+  const t = shownTab(w)
+  return t ? focusedPane(t).to : null
+}
+function searchHere() {
+  const to = activeTarget(getTabLayout()) ?? ""
+  const q = to.startsWith("view:search/") ? to.slice("view:search/".length).trim() : ""
+  return q ? PIN_SEARCH + q : null
+}
+
+const showFile = (path: string, on: boolean) => (on ? dockAtEnd(filePanelKey(path), "right") : hidePanel(filePanelKey(path)))
+const fileShown = (path: string) => !!panelSide(filePanelKey(path))
+
+function PinnedView({ store }: { store: Store }) {
+  const focused = useFocusedFile()
+  const own = usePane().pane
+  return (
+    <div data-pages-view>
+      <p className="mb-3 text-[13px] text-muted-foreground max-md:text-[15px]">The sidebar's pages, in its order.<span className="max-md:hidden"> Drag one to reorder it, or onto a pane to open it there.</span></p>
+      <div className="size-up-bleed"><div data-size-up>
+        <PinnedPages store={store} open file={focused.path} tab="" pane={focused.pane && focused.pane !== own ? focused.pane : undefined} />
+      </div></div>
+    </div>
+  )
+}
+
+function PageCommands({ store }: { store: Store }) {
+  useWorkspaceVersion()
+  const pages = shownPinned(store)
+  useCommands(() => pages.map(({ key: p }) => ({ id: `page:file/${encodeURIComponent(p)}`, name: `Open ${pinName(p)}`, run: () => openFile(p), icon: iconAt(p).icon })),
+    [pages.map((p) => `${p.key}\t${p.file?.icon ?? ""}`).join("\n")])
+  return null
+}
+
+function PinLabels({ store }: { store: Store }) {
+  useViewsVersion()
+  useWorkspaceVersion()
+  const pins = currentPins(store)
+  useEffect(() => {
+    for (const k of pins) {
+      const label = k.startsWith("view:") ? viewPinLabel(k) : null
+      if (label && label !== store.pinLabels?.[k]) relabel(k, label)
+    }
+  })
+  return null
+}
+
+function Tiles({ store }: { store: Store }) {
+  if (!shownPinned(store).length) return null
+  return <div data-new-tab-pages><PinnedPages store={store} open tiles file="" tab="" /></div>
+}
+
+export default definePlugin({
+  sidebarFor: {
+    file: (path) => ({
+      title: stem(path).replace(/^.*\//, ""), flyout: { icon: AppWindow, width: 360 },
+      tab: () => ({ name: stem(path).replace(/^.*\//, ""), open: () => void openFile(path, { newTab: true }) }),
+      actions: ({ store }) => <DockedViewToggle store={store} path={path} panel={filePanelKey(path)} />,
+      render: ({ store }) => <div data-file-panel={path} className="px-2 pb-2"><DockedFile store={store} path={path} panel={filePanelKey(path)} /></div>,
+    }),
+  },
+  sidebar: { pages: { title: "Pinned pages", heading: "Pinned", sort: 10, view: "pages", render: (ctx) => <PinnedPages {...ctx} />,
+    actions: ({ file }) => <PinCurrent file={file} />, menu: () => [{ label: "Pinned pages", icon: Pin, run: () => {}, items: pinChecklist(currentFile()) }, ...showAsMenu()] } },
+  views: {
+    pages: { icon: Pin, title: () => "Pinned pages", pinAs: () => null, render: ({ store }) => <PinnedView store={store} /> },
+  },
+  commands: [
+    { id: "pages:open-tab", name: "Open pinned pages in a tab", run: () => openView("pages", { newTab: !isViewOpen("pages") }) },
+    { id: "file:pin", name: "Pin current file to the sidebar", desktop: true, when: () => pinnable(currentFile()) || (!!currentFile() && isPinned(currentFile())),
+      run: () => pinNoted(currentFile(), !isPinned(currentFile())), nameWhenOn: "Unpin current file from the sidebar", on: () => isPinned(currentFile()) },
+    { id: "file:pin-heading", name: "Pin current heading to the sidebar", desktop: true, when: () => { const h = headingHere(); return !!h && !isPinned(h) }, run: () => pinNoted(headingHere()!, true) },
+    { id: "file:panel", name: "Show current file in the sidebar", when: () => !!currentFile(), run: () => showFile(currentFile(), !fileShown(currentFile())),
+      nameWhenOn: "Remove current file from the sidebar", on: () => !!currentFile() && fileShown(currentFile()) },
+    { id: "search:pin", name: "Pin current search to the sidebar", desktop: true, when: () => { const q = searchHere(); return !!q && !isPinned(q) }, run: () => pinNoted(searchHere()!, true) },
+  ],
+  fileMenu: (path) => [...(pinnable(path) ? pinItems(path) : []), fileShown(path)
+    ? { label: "Remove from the sidebar", icon: PanelRightClose, section: "navigate", run: () => showFile(path, false) }
+    : { label: "Show in the sidebar", icon: PanelRight, section: "navigate", run: () => showFile(path, true) }],
+  folderMenu: (path) => (pinnable(path) ? pinItems(path) : []),
+  viewMenu: (target) => {
+    const p = viewPin(target)
+    if (!p) return []
+    return [isPinned(p.key) ? { label: "Unpin", icon: PinOff, run: () => pinNoted(p.key, false) } : { label: "Pin", icon: Pin, run: () => pinNoted(p.key, true, p.label) }]
+  },
+  search: (store) => shownPinned(store).map(({ key }) => ({
+    id: `page-${key}`, title: pinName(key), meta: "Page", kind: "Page", icon: iconAt(key).icon, tint: iconAt(key).tint ?? "var(--primary)",
+    file: key, text: key, recent: 0, weight: 12,
+  })),
+  home: (store) => { const first = shownPinned(store)[0]; return first ? `file:${first.key}` : null },
+  newTab: { tiles: { title: "Pinned pages", sort: 0, only: "phone", heading: "Pinned", render: ({ store }) => <Tiles store={store} /> } },
+  settingsPanel: ({ store }) => <PinnedSettings store={store} />,
+  settingsSearch: [{ label: "Pinned pages", description: "which pages the sidebar pins, in order" }],
+  background: ({ store }) => <><PageCommands store={store} /><PinLabels store={store} /></>,
+})

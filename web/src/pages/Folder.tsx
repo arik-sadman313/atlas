@@ -1,0 +1,418 @@
+import { Fragment, lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type DragEvent, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from "react"
+import { ArrowUpDown, Ellipsis, FileInput, FilePlus, FolderInput, FolderOpen, FolderPlus, RotateCcw, Share, Trash2 } from "lucide-react"
+import { getStore, reload, useStore, useStoreWith, vaultName, type Store } from "@/core/data"
+import { createFolder, folderOf, freeName, inArchive, inTrash, openFile, openingSoon, pathTarget, restoreFile } from "@/core/files"
+import { edgeScroller, startDrag, useDropHit, useDropTarget, type DragItem } from "@/core/drag"
+import { desktop, hasFiles } from "@/core/desktop"
+import { dropInto } from "@/core/desktopapp"
+import { notifyError } from "@/core/notify"
+import { usePane } from "@/core/pane"
+import { isMac, useDesktop } from "@/core/platform"
+import { getPrefs, usePrefs, type FolderView } from "@/core/prefs"
+import { rowMenu, selectClick, selectedAttr, selectionFor, useSelectable, useSelected } from "@/core/select"
+import { openInSplit } from "@/core/splits"
+import { useVirtual } from "@/core/virtual"
+import { useFocusedFile } from "@/core/workspace"
+import { menuBelow, menuFor, type MenuItem } from "@/components/ContextMenu"
+import { copyPathItem, fileMenu, filesMenu, folderMenu, grouped, openFolderHereItem, openItem, pluginFileGroups, remove } from "@/components/FileActions"
+import { runOrSay } from "@/core/commands"
+import { askMove, canMoveInto, fixed, folderItems, moveManyInto, newNote, treeShownItems, type FolderItem } from "@/components/FileTree"
+import { ROW, SidebarRow } from "@/components/Sidebar"
+import type { SwipeAction } from "@/components/SwipeRow"
+import { Arriving, PageHeader } from "@/components/kit"
+import { cn } from "@/lib/utils"
+import { drawnRows, hrefOf, iconFor, metaOf, NameField, naming, pick, pickedIn, SELECT, Tile, useEnter, useKept, usePicked, usePreviews, type Kids, type Moves } from "@/pages/FolderParts"
+import { arrive, arrived, focusThing, keyedPages } from "@/pages/FolderKeys"
+import type { Lister } from "@/pages/FolderColumns"
+import { isOutside } from "@/core/desktop"
+import { arrangeItems, groupOf, outsideMenus, sectionsOf, setView, shownView, viewMenuItems, VIEWS, type Section } from "@/pages/folderviews"
+import { Gallery } from "@/pages/FolderGallery"
+import { closestOf, nodeOf } from "@/core/dom"
+
+/** A folder's name as its tab says it; the vault's own for its top. */
+export const folderName = (path: string) => (path ? path.slice(path.lastIndexOf("/") + 1) : vaultName(getStore()))
+
+/** Its tab's menu: how it shows, then the folder's own, short (as a file's tab has it: the rest in More folder
+ *  actions ▸). */
+export function folderTabMenu(path: string): MenuItem[] {
+  if (isOutside(path)) return outsideMenus.tab(path)
+  const own = path ? folderMenu(path, { inside: true, short: true, newFolder: () => void newFolderIn(path) }) : rootItems()
+  return grouped([viewMenuItems(), own])
+}
+
+async function newFolderIn(folder: string) {
+  const s = getStore()
+  if (!s) return
+  try { naming.set({ path: await createFolder(folder, freeName(s.files, folder, "New folder", "")), fresh: true }) } catch (e) { notifyError(e, "Couldn't make the folder") }
+}
+const newItems = (path: string): MenuItem[] => [{ label: "New note", icon: FilePlus, run: () => newNote(path) }, { label: "New folder", icon: FolderPlus, run: () => newFolderIn(path) }]
+const rootItems = () => newItems("")
+
+function pageMenu(path: string): MenuItem[] {
+  const shown = treeShownItems({ reveal: false })
+  if (!path) return grouped([rootItems(), shown])
+  return grouped([folderMenu(path, { open: false, inside: true, newFolder: () => void newFolderIn(path) }), shown])
+}
+function spaceMenu(path: string): MenuItem[] {
+  const locked = !!path && (fixed(path) || inTrash(path))
+  return grouped([locked ? [] : newItems(path), viewMenuItems(), path ? [copyPathItem(path, { folder: true }), ...openFolderHereItem(path)] : [], treeShownItems({ reveal: false })])
+}
+
+/** The desktop bar's crumbs: the vault, then each folder down to this one (its buttons are on the page, which shows
+ *  where the bar is faded away). */
+export const folderBar = (path: string) => ({ title: isOutside(path) ? <Suspense fallback={<Arriving />}><OutsideCrumbs path={path} /></Suspense> : <Crumbs path={path} /> })
+const Columns = lazy(() => import("@/pages/FolderColumns").then((m) => ({ default: m.Columns })))
+const OutsideCrumbs = lazy(() => import("@/pages/FolderOutside").then((m) => ({ default: m.OutsideCrumbs })))
+const OutsideFolderPage = lazy(() => import("@/pages/FolderOutside").then((m) => ({ default: m.OutsideFolderPage })))
+
+function Crumbs({ path }: { path: string }) {
+  useStore()
+  const enter = useEnter()
+  const parts = path ? path.split("/") : []
+  const crumbs = [{ at: "", name: folderName("") }, ...parts.map((name, i) => ({ at: parts.slice(0, i + 1).join("/"), name }))]
+  const crumb = "h-6 min-w-0 truncate rounded-[4px] px-1 leading-6"
+  return (
+    <nav aria-label="Folder path" className="flex min-w-0 items-center">
+      {crumbs.map((c, i) => i === crumbs.length - 1
+        ? <span key={c.at} aria-current="page" onContextMenu={menuFor(() => pageMenu(c.at))} className={cn(crumb, "shrink-0 font-medium")}>{c.name}</span>
+        : (
+          <Fragment key={c.at}>
+            <button type="button" data-opens onClick={() => enter(c.at, -1)} onContextMenu={c.at ? menuFor(() => folderMenu(c.at)) : undefined} data-tip-cut={c.name}
+              className={cn(crumb, "shrink-[1000] cursor-pointer text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground", c.name.length > 2 && "min-w-[2.5em]")}>{c.name}</button>
+            <span aria-hidden className="shrink-0 px-px text-tertiary">/</span>
+          </Fragment>
+        ))}
+    </nav>
+  )
+}
+
+function Toolbar({ path, view }: { path: string; view: FolderView }) {
+  const choose = (v: FolderView, e: MouseEvent) => { if (e.detail) arrive(path); setView(v) }
+  const tool = "grid h-[26px] w-8 cursor-pointer place-items-center rounded-[7px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+  const grouped = groupOf(usePrefs().folderGroup) !== "none"
+  return (
+    <div className="mb-1 flex shrink-0 items-center gap-1.5">
+      <div role="radiogroup" aria-label="Show as" className="flex rounded-[7px] bg-foreground/[0.05] p-px">
+        {VIEWS.map((o) => (
+          <button key={o.value} type="button" role="radio" aria-checked={view === o.value} aria-label={o.label} data-tip={o.label} data-folder-view={o.value} onMouseDown={(e) => e.preventDefault()} onClick={(e) => choose(o.value, e)}
+            className={cn("grid h-6 w-7 cursor-pointer place-items-center rounded-[6px] transition-colors",
+              view === o.value ? "bg-card text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.12)] dark:bg-[var(--segment-on)]" : "text-muted-foreground hover:text-foreground")}>
+            <o.icon className="size-[15px]" strokeWidth={2} />
+          </button>
+        ))}
+      </div>
+      <button type="button" aria-label="Sort and group" data-tip="Sort and group" data-folder-arrange onClick={(e) => menuBelow(e, arrangeItems())} className={cn(tool, grouped && "text-primary hover:text-primary")}>
+        <ArrowUpDown className="size-[15px]" strokeWidth={2} />
+      </button>
+      <ShareButton path={path} className={tool} />
+      <button type="button" aria-label="More" data-tip="More" data-folder-more onClick={(e) => menuBelow(e, pageMenu(path))} className={tool}>
+        <Ellipsis className="size-4" strokeWidth={2} />
+      </button>
+    </div>
+  )
+}
+
+function ShareButton({ path, className, size = "size-[15px]" }: { path: string; className: string; size?: string }) {
+  const items = path ? pluginFileGroups(path, undefined, true).share : []
+  if (!items.length) return null
+  const Icon = items[0].icon ?? Share
+  return (
+    <button type="button" aria-label="Share" data-tip="Share" data-folder-share onClick={(e) => (items.length === 1 ? items[0].run() : menuBelow(e, items))} className={className}>
+      <Icon className={size} strokeWidth={2} />
+    </button>
+  )
+}
+
+function Heading({ title, count, index, k, first }: { title: string; count: number; index: number; k: string; first: boolean }) {
+  return (
+    <div data-vi={index} data-vk={k} data-folder-heading={title} className={cn("flex items-baseline gap-1.5 px-1.5 pb-1.5 text-[12px] font-semibold text-muted-foreground", first ? "pt-0" : "pt-4")}>
+      {title}<span className="font-normal text-tertiary tabular-nums">{count}</span>
+    </div>
+  )
+}
+
+/** A folder's page: its header, then what it holds in its view, or a calm line when it's empty or gone. */
+export function FolderPage({ store, path }: { store: Store; path: string }) {
+  return isOutside(path) ? <Suspense fallback={<Arriving />}><OutsideFolderPage path={path} /></Suspense> : <VaultFolderPage store={store} path={path} />
+}
+
+function useVaultItems(folder: string) {
+  const files = useStoreWith((s) => s?.files)
+  const { fileSort, showArchived } = usePrefs()
+  return useMemo(() => (files ? folderItems(files, folder, fileSort, showArchived)?.items ?? [] : null), [files, folder, fileSort, showArchived])
+}
+const vaultLister: Lister = {
+  root: "", useList: useVaultItems,
+  peek: (folder) => { const s = getStore(), { fileSort, showArchived } = getPrefs(); return s ? folderItems(s.files, folder, fileSort, showArchived)?.items ?? null : null },
+}
+
+function VaultFolderPage({ store, path }: { store: Store; path: string }) {
+  const { fileSort, showArchived, folderView, folderGroup } = usePrefs()
+  const desk = useDesktop()
+  const view = shownView(folderView, desk)
+  const got = useMemo(() => folderItems(store.files, path, fileSort, showArchived), [store.files, path, fileSort, showArchived])
+  const { pane: own } = usePane()
+  const focused = useFocusedFile()
+  const pane = focused.pane && focused.pane !== own ? focused.pane : undefined
+  const enter = useEnter()
+  const renaming = naming.use((r) => r?.path ?? null)
+  const root = useRef<HTMLDivElement>(null)
+  const moves = useRef<Moves | null>(null)
+
+  const openIt = (n: FolderItem, newTab = false) => {
+    if (n.folder) enter(n.path, 1, newTab)
+    else openFile(n.path, { newTab, pane })
+  }
+  const open = (n: FolderItem, e: MouseEvent) => {
+    if (selectClick(e, SELECT, n.path)) return
+    openIt(n, e.metaKey || e.ctrlKey || e.button === 1)
+  }
+  const menuOf = (n: FolderItem) => rowMenu(SELECT, n.path, (): MenuItem[] => {
+    if (inTrash(n.path)) return filesMenu([n.path])
+    const rename = () => naming.set({ path: n.path, fresh: false })
+    if (n.folder) return folderMenu(n.path, { pane, rename, newFolder: () => void newFolderIn(n.path) })
+    return fileMenu(n.path, { rename, top: [[openItem(() => openFile(n.path, { newTab: true, pane }), desk ? () => openInSplit(`file:${n.path}`, "right") : undefined)]] })
+  })
+  useSelectable(SELECT, { menu: (keys) => filesMenu(keys, { newTab: (p) => openFile(p, { newTab: true, pane }) }), noun: ["item", "items"] })
+  const swipe = (n: FolderItem): SwipeAction[] => {
+    if (fixed(n.path) && !inTrash(n.path)) return []
+    if (inTrash(n.path)) return [{ label: "Restore", icon: RotateCcw, run: () => restoreFile(n.path).catch((e) => notifyError(e, "Couldn't restore")), removes: true }, { label: "Delete", icon: Trash2, run: () => remove(n.path), danger: true }]
+    return [{ label: "Move", icon: n.folder ? FolderInput : FileInput, run: () => askMove(n.path) }, { label: "Delete", icon: Trash2, run: () => remove(n.path), danger: true, removes: true }]
+  }
+  const press = (e: PointerEvent<HTMLElement>, n: FolderItem) => {
+    if (renaming === n.path || fixed(n.path)) return
+    if (!n.folder) openingSoon(n.path, true)
+    const keys = selectionFor(SELECT, n.path, false)?.filter((p) => !fixed(p))
+    const item: DragItem = keys && keys.length > 1 ? { from: "tree", path: n.path, paths: keys, tos: keys.map(pathTarget), folder: n.folder || undefined, to: pathTarget(n.path), label: `${keys.length} items` }
+      : { from: "tree", path: n.path, folder: n.folder || undefined, to: pathTarget(n.path) }
+    startDrag(e, item, { touch: true })
+  }
+
+  const target = `folder:${useId()}`
+  const dropOn = useDropHit<string>(target)
+  const [edge] = useState(() => edgeScroller())
+  useDropTarget<string>(target, (item, x, y, el) => {
+    const box = root.current
+    if (!box || !el || !box.contains(el) || item.from !== "tree" || !item.path) { edge.stop(); return null }
+    edge.over(box, x, y)
+    const into = el.closest<HTMLElement>("[data-folder-drop]")?.dataset.folderDrop
+    const all = item.paths ?? [item.path]
+    return into !== undefined && all.some((p) => canMoveInto(p, into)) && all.every((p) => into !== p && !into.startsWith(`${p}/`)) ? into : null
+  }, (item, folder) => void moveManyInto(item.paths ?? [item.path!], folder, { reveal: false }), { end: edge.stop })
+  const [fromComputer, setFromComputer] = useState<string | null>(null)
+  const at = (t: EventTarget | null) => closestOf<HTMLElement>(t, "[data-folder-drop]")?.dataset.folderDrop ?? path
+  const moving = (e: DragEvent) => !!desktop && (isMac ? e.altKey : e.shiftKey)
+  const computer = {
+    onDragOver: (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer) || fixed(at(e.target))) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = moving(e) ? "move" : "copy"
+      setFromComputer(at(e.target))
+    },
+    onDragLeave: (e: DragEvent) => { if (!e.currentTarget.contains(nodeOf(e.relatedTarget))) setFromComputer(null) },
+    onDrop: (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return
+      e.preventDefault()
+      setFromComputer(null)
+      const into = at(e.target)
+      if (!fixed(into)) void dropInto(e.dataTransfer, into, moving(e)).then(() => reload(), (err) => notifyError(err, "Couldn't add the files"))
+    },
+  }
+  const lit = dropOn ?? (fromComputer !== null && fromComputer !== path ? fromComputer : null)
+
+  useEffect(() => {
+    const el = root.current
+    if (!el || !got) return
+    keyedPages.set(el, () => ({
+      path, items: got.items, moves: moves.current, view, open: openIt,
+      show: (n) => (desk ? void openInSplit(pathTarget(n.path), "right", false) : openIt(n)),
+      up: () => { const parent = folderOf(path); pick(parent, path); arrive(parent); enter(parent, -1) },
+      showAs: (v) => { arrive(path); setView(v) },
+    }))
+  })
+  const onThing = (e: FocusEvent) => {
+    const k = closestOf<HTMLElement>(e.target, "[data-folder-item]")?.dataset.folderItem
+    if (k && got?.items.some((n) => n.path === k)) pick(path, k)
+  }
+
+  if (!got) return <p data-folder-gone className="mt-2 text-[15px] text-muted-foreground">This folder isn't in the vault any more.</p>
+  const { items, counts } = got
+  const kids: Kids = { setMoves: (m) => { moves.current = m }, items, counts, open, menuOf, swipe, press, renaming, lit, desk }
+  const sections = view === "list" || view === "grid" ? sectionsOf(items, groupOf(folderGroup)) : null
+  const keyOn = <KeyOnPickedOnceDrawn page={root} path={path} view={view} items={items} />
+  const body = view === "columns" ? <Suspense fallback={<Arriving />}><Columns {...kids} lister={vaultLister} folder={path} openIt={openIt} />{keyOn}</Suspense>
+    : <>{!items.length ? <Empty path={path} desk={desk} />
+      : view === "gallery" ? <Gallery {...kids} folder={path} openIt={openIt} />
+      : view === "grid" ? <Grid {...kids} sections={sections} folder={path} /> : <Rows {...kids} sections={sections} folder={path} />}{keyOn}</>
+  return (
+    <div ref={root} data-folder-page={path} data-folder-shown={view} data-own-keys data-file-drop {...computer} onFocus={onThing}
+      onContextMenu={(e) => { if (!closestOf(e.target, "[data-folder-item]")) menuFor(() => spaceMenu(path))(e) }}
+      className={cn("min-h-[60vh] rounded-[10px] transition-colors", fromComputer === path && "bg-primary/[0.06]")}>
+      {desk ? <PageHeader title={folderName(path)} className={view === "columns" || view === "gallery" ? "mb-3" : undefined}><Toolbar path={path} view={view} /></PageHeader>
+        : <PhoneHead path={path} view={view} />}
+      {body}
+    </div>
+  )
+}
+
+function KeyOnPickedOnceDrawn({ page, path, view, items }: { page: RefObject<HTMLDivElement | null>; path: string; view: FolderView; items: FolderItem[] }) {
+  useEffect(() => {
+    const el = page.current
+    if (!el || !items.length || !arrived(path)) return
+    const was = pickedIn(path)
+    if (was && items.some((n) => n.path === was)) focusThing(el, was)
+  }, [page, path, view, items])
+  return null
+}
+
+function PhoneHead({ path, view }: { path: string; view: FolderView }) {
+  const enter = useEnter()
+  const parts = path ? path.split("/").slice(0, -1) : []
+  const above = path ? [{ at: "", name: folderName("") }, ...parts.map((name, i) => ({ at: parts.slice(0, i + 1).join("/"), name }))] : []
+  const next = VIEWS.find((o) => o.value === (view === "grid" ? "list" : "grid"))!
+  return (
+    <div data-folder-head className="-mt-2 mb-3 flex items-end justify-between gap-3">
+      <p className="min-w-0 pb-2 text-[15px] text-muted-foreground">
+        {above.map((c, i) => (
+          <Fragment key={c.at}>
+            {i > 0 && <span aria-hidden className="px-1 text-tertiary">/</span>}
+            <button type="button" onClick={() => enter(c.at, -1)} className="cursor-pointer text-primary active:opacity-60">{c.name}</button>
+          </Fragment>
+        ))}
+      </p>
+      <div className="flex shrink-0 items-center gap-2">
+        <ShareButton path={path} size="size-[18px]" className="relative mb-1 grid size-9 shrink-0 cursor-pointer place-items-center rounded-full bg-muted text-primary after:absolute after:-inset-1 active:opacity-60" />
+        <button type="button" aria-label={`Show as ${next.label.toLowerCase()}`} data-folder-view={next.value} onClick={() => setView(next.value)}
+          className="relative mb-1 grid size-9 shrink-0 cursor-pointer place-items-center rounded-full bg-muted text-primary after:absolute after:-inset-1 active:opacity-60">
+          <next.icon className="size-[18px]" strokeWidth={2.25} />
+        </button>
+        <button type="button" onClick={() => void runOrSay(() => newNote(path), "Create new note")} aria-label="New note"
+          className="mb-1 flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-muted px-3.5 text-[15px] font-medium text-primary active:opacity-60">
+          <FilePlus className="size-[18px]" strokeWidth={2.25} />New note
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Empty({ path, desk }: { path: string; desk: boolean }) {
+  return (
+    <div data-folder-empty className="flex flex-col items-center gap-2 py-20 text-center">
+      <FolderOpen className="size-10 text-tertiary" strokeWidth={1.5} />
+      <p className="text-[15px] text-muted-foreground">This folder is empty</p>
+      {desk && <button type="button" onClick={() => void runOrSay(() => newNote(path), "Create new note")} className="cursor-pointer rounded-[6px] px-2 py-1 text-[13px] font-medium text-primary hover:bg-primary/10">New note</button>}
+    </div>
+  )
+}
+
+// File paths can't hold a NUL.
+const headKey = (title: string) => `\0${title}`
+
+type Line = { head: Section } | { n: FolderItem }
+export function Rows({ setMoves, items, counts, open, menuOf, swipe, press, renaming, lit, desk, sections, folder }: Kids & { sections: Section[] | null; folder: string }) {
+  const list = useRef<HTMLDivElement>(null)
+  const lines = useMemo<Line[]>(() => (sections ? sections.flatMap((s) => [{ head: s }, ...s.items.map((n) => ({ n }))]) : items.map((n) => ({ n }))), [items, sections])
+  const keys = useMemo(() => lines.map((l) => ("head" in l ? headKey(l.head.title) : l.n.path)), [lines])
+  const all = useMemo(() => lines.flatMap((l) => ("n" in l ? [l.n.path] : [])), [lines])
+  const keep = useKept(list, keys, all, usePicked(folder))
+  const v = useVirtual(list, keys, { estimate: desk ? 33 : 41, keep: [...keep, renaming] })
+  useEffect(() => setMoves({ lines: all.map((k) => [k]) }))
+  return (
+    <div ref={list} data-keylist data-select-list={SELECT} data-folder-list className="size-up-bleed">
+      {drawnRows(v, (i) => {
+        const l = lines[i]
+        if ("head" in l) return <Heading key={keys[i]} k={keys[i]} index={i} title={l.head.title} count={l.head.items.length} first={i === 0} />
+        return <Row key={l.n.path} n={l.n} index={i} meta={metaOf(l.n, counts)} open={open} menuOf={menuOf} swipe={swipe} press={press} renaming={renaming === l.n.path} lit={lit === l.n.path} />
+      })}
+    </div>
+  )
+}
+
+function Row({ n, index, meta, open, menuOf, swipe, press, renaming, lit }: { n: FolderItem; index: number; meta: string; renaming: boolean; lit: boolean }
+  & Pick<Kids, "open" | "menuOf" | "swipe" | "press">) {
+  const picked = useSelected(SELECT, n.path)
+  const { fileIcons } = usePrefs()
+  const { icon: Icon, tint } = iconFor(n)
+  const archived = !!n.file?.archived || inArchive(n.path)
+  return (
+    <div data-vi={index} data-vk={n.path} data-size-up data-folder-item={n.path} data-folder-drop={n.folder ? n.path : undefined} data-drops={n.folder ? "" : undefined}
+      onPointerDown={(e) => press(e, n)} onPointerEnter={n.folder ? undefined : () => openingSoon(n.path)} onPointerLeave={n.folder ? undefined : () => openingSoon(null)}
+      className={cn("pb-px", archived && "opacity-50")}>
+      {renaming ? (
+        <div className={cn(ROW, "bg-foreground/[0.06]")}>
+          {fileIcons && <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />}
+          <NameField n={n} className="h-6 flex-1" />
+        </div>
+      ) : (
+        <SidebarRow icon={fileIcons ? Icon : undefined} tint={tint} label={n.name} open href={hrefOf(n)} more swipe={() => swipe(n)}
+          data-select-key={n.path} {...selectedAttr(picked)} className={cn("active:bg-foreground/[0.06]", lit && "bg-primary/10")}
+          onClick={(e) => open(n, e)} onContextMenu={menuFor(menuOf(n))}>
+          {meta && <span className="mr-1 shrink-0 text-[11px] text-tertiary tabular-nums group-hover/row:hidden">{meta}</span>}
+        </SidebarRow>
+      )}
+    </div>
+  )
+}
+
+const CARD = { desk: { min: 136, gap: 12 }, phone: { min: 96, gap: 10 } }
+
+type Band = { head: Section } | { cards: FolderItem[] }
+export function Grid({ setMoves, items, counts, open, menuOf, press, renaming, lit, desk, folder, sections }: Kids & { folder: string; sections: Section[] | null }) {
+  const list = useRef<HTMLDivElement>(null)
+  const size = desk ? CARD.desk : CARD.phone
+  const [cols, setCols] = useState(desk ? 5 : 3)
+  useEffect(() => {
+    const el = list.current
+    if (!el) return
+    const fit = () => { const w = el.clientWidth; if (w) setCols(Math.max(2, Math.floor((w + size.gap) / (size.min + size.gap)))) }
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    fit()
+    return () => ro.disconnect()
+  }, [size.gap, size.min])
+  const bands = useMemo<Band[]>(() => {
+    const rowsOf = (xs: FolderItem[]) => Array.from({ length: Math.ceil(xs.length / cols) }, (_, r) => ({ cards: xs.slice(r * cols, r * cols + cols) }))
+    return sections ? sections.flatMap((s) => [{ head: s }, ...rowsOf(s.items)]) : rowsOf(items)
+  }, [items, sections, cols])
+  const keys = useMemo(() => bands.map((b) => ("head" in b ? headKey(b.head.title) : `${cols}\0${b.cards[0].path}`)), [bands, cols])
+  const all = useMemo(() => bands.flatMap((b) => ("cards" in b ? b.cards.map((n) => n.path) : [])), [bands])
+  const bandOf = (p: string | null) => { const i = p ? bands.findIndex((b) => "cards" in b && b.cards.some((n) => n.path === p)) : -1; return i < 0 ? null : keys[i] }
+  const keep = useKept(list, keys, all, bandOf(usePicked(folder)))
+  const v = useVirtual(list, keys, { estimate: desk ? 196 : 150, keep: [...keep, bandOf(renaming)] })
+  const text = usePreviews(folder, items)
+  useEffect(() => setMoves({ lines: bands.flatMap((b) => ("cards" in b ? [b.cards.map((n) => n.path)] : [])), along: true }))
+  return (
+    <div ref={list} data-keylist data-select-list={SELECT} data-folder-grid>
+      {drawnRows(v, (r) => {
+        const b = bands[r]
+        if ("head" in b) return <Heading key={keys[r]} k={keys[r]} index={r} title={b.head.title} count={b.head.items.length} first={r === 0} />
+        return (
+          <div key={keys[r]} data-vi={r} data-vk={keys[r]} className="grid pb-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, columnGap: size.gap }}>
+            {b.cards.map((n) => <Card key={n.path} n={n} meta={metaOf(n, counts)} text={text[n.path]} open={open} menuOf={menuOf} press={press} renaming={renaming === n.path} lit={lit === n.path} desk={desk} />)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Card({ n, meta, text, open, menuOf, press, renaming, lit, desk }: { n: FolderItem; meta: string; text?: string; renaming: boolean; lit: boolean; desk: boolean }
+  & Pick<Kids, "open" | "menuOf" | "press">) {
+  const picked = useSelected(SELECT, n.path)
+  const archived = !!n.file?.archived || inArchive(n.path)
+  // An <a> can't hold an input: while renaming, the card is a div.
+  const Box = renaming ? "div" : "a"
+  return (
+    <Box href={renaming ? undefined : hrefOf(n)} data-keyrow data-select-key={n.path} {...selectedAttr(picked)} data-folder-item={n.path} data-tip={n.name} data-tip-trunc
+      data-folder-drop={n.folder ? n.path : undefined} data-drops={n.folder ? "" : undefined} draggable={false}
+      onPointerDown={(e) => press(e, n)} onPointerEnter={n.folder ? undefined : () => openingSoon(n.path)} onPointerLeave={n.folder ? undefined : () => openingSoon(null)}
+      onClick={(e) => { e.preventDefault(); open(n, e) }} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); open(n, e) } }} onContextMenu={menuFor(menuOf(n))}
+      className={cn("group flex min-w-0 cursor-pointer flex-col items-center gap-1.5 rounded-[10px] p-1.5 text-center transition-colors",
+        desk ? "hover:bg-foreground/[0.04]" : "active:bg-foreground/[0.06]", lit && "bg-primary/10", archived && "opacity-50")}>
+      <Tile n={n} text={text} desk={desk} />
+      {renaming ? <NameField n={n} className={cn("h-6 w-full text-center", desk ? "text-[13px]" : "text-[14px]")} />
+        : <span className={cn("line-clamp-2 w-full break-words", desk ? "text-[13px] leading-[17px]" : "text-[14px] leading-[18px]")}>{n.name}</span>}
+      {meta && <span className={cn("-mt-1 truncate text-tertiary tabular-nums", desk ? "text-[11px]" : "text-[12px]")}>{meta}</span>}
+    </Box>
+  )
+}

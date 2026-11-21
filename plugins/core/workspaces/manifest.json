@@ -1,0 +1,9 @@
+{
+  "id": "workspaces",
+  "icon": "layout-grid",
+  "category": "navigation",
+  "offByDefault": true,
+  "requires": ["tabs"],
+  "name": "Workspaces",
+  "description": "Up to nine desks on your computers (a phone keeps its own tabs), each with its own tabs, panels and pinned pages, numbered in the sidebar's header like a tiling window manager's: switch with ⌃1 to ⌃9 (Alt+1 to Alt+9 off a Mac) or a two-finger swipe over the sidebar. Each can have an icon, a colour the sidebars take, a Browser container its web pages open in and a machine its terminals start on. The Workspaces page (⌃0) shows each one's tabs, and renames, recolours and deletes them. Off, there's one setup."
+}

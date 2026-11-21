@@ -1,0 +1,162 @@
+import { lazy, Suspense, useEffect, useSyncExternalStore } from "react"
+import { Bot, FileText, LogOut, MessageSquareText, Search, Server, SquareTerminal, SquareX } from "lucide-react"
+import { Arriving, agentOfTerminal, aiOn, AmbientButton, canRunAgents, chooseDefaultPlace, choosePlace, definePlugin, getTabLayout, Group, isMac, isViewOpen, Loading, onTabLayoutChange, openTerminal, openView, severalMachines,
+  devicePref, offerPanel, PageHeader, panelSide, SettingRow, useAi, useLive, viewsChanged, whenIdle } from "@vaultite"
+import { awaitsLine } from "../../../core/attention.ts"
+import { agentIn, autoLabel, awaiting, current, dotOf, endForGood, getSessions, iconOf, labelOf, nameSession, needsYou, pinOfTerminal, runningResume, sessionById, stateClass, subscribeSessions, tabClosed, tintOf } from "./sessions"
+import { about, SessionList, Sessions, useSessions } from "./SessionsPanel"
+import { TerminalsView } from "./TerminalsView"
+import { TerminalPicture } from "./Screen"
+import { useTerminalRuns } from "./runs"
+import { AskBox, openAsk } from "./AskBox"
+import { vtModule } from "./vt/wasm"
+import { TERMINAL_POINTS } from "./font"
+
+let chunk: Promise<typeof import("./Terminal")> | null = null
+const preload = () => (chunk ??= Promise.all([import("./Terminal"), vtModule()]).then(([m]) => m))
+const TerminalView = lazy(preload)
+
+
+const AGENTS = "agents:agents"
+const offered = devicePref<boolean>("agents:offered", false)
+
+function SessionNames() {
+  const layout = useSyncExternalStore(onTabLayoutChange, getTabLayout)
+  const any = JSON.stringify(layout).includes('"view:terminal/')
+  useEffect(() => {
+    if (!any) return
+    let was = ""
+    return subscribeSessions(() => { const k = tabsKey(); if (k !== was) { was = k; viewsChanged() } })
+  }, [any])
+  useEffect(() => {
+    if (offered.get()) return
+    const offer = () => {
+      if (offered.get() || !aiOn() || !(getSessions().list ?? []).some((s) => agentIn(s))) return
+      offered.set(true)
+      if (!panelSide(AGENTS)) offerPanel(AGENTS, "right", panelSide("terminal:sessions") === "right" ? "terminal:sessions" : null)
+    }
+    offer()
+    return subscribeSessions(offer)
+  }, [])
+  useEffect(() => {
+    if (matchMedia("(pointer: coarse)").matches) return
+    const load = () => void preload().catch(() => { chunk = null })
+    return whenIdle(load, 5000)
+  }, [])
+  return null
+}
+
+const tabsKey = () => JSON.stringify((getSessions().list ?? []).map((s) => {
+  const a = agentIn(s)
+  return [s.id, labelOf(s, a), s.machineLabel, a?.name, stateClass(s, a), tintOf(s, a), dotOf(s, a), s.note, s.session, s.awaits?.on, s.awaits?.n]
+}))
+
+const openTab = (to: string) => openView(to, { newTab: !isViewOpen(to) })
+
+function AgentsAtWork() {
+  const list = useSessions().list ?? []
+  const working = list.filter((s) => agentIn(s) && (s.state === "working" || awaiting(s))), needs = list.filter((s) => needsYou(s))
+  if (!working.length && !needs.length) return null
+  const need = `${needs.length} need${needs.length === 1 ? "s" : ""} you`, waits = working.filter(awaiting).length
+  const tip = [working.length - waits && `${working.length - waits} working`, waits && `${waits} waiting on background work`, needs.length && need].filter(Boolean).join(", ")
+  return <AmbientButton icon={Bot} text={needs.length ? `${working.length} · ${need}` : working.length} tip={`Agents: ${tip}`}
+    tint={needs.length ? "var(--yellow)" : undefined} onClick={() => openTab(needs.length ? `view:terminal/${needs[0].id}` : "view:terminals")} />
+}
+
+function Instructions() {
+  const { data, error, retry } = useLive<{ text: string }>("terminals/instructions")
+  return (
+    <div data-terminal-instructions>
+      <PageHeader title="What agents are told" subtitle={"A coding agent started in a terminal here gets this added to its instructions, when it takes added " +
+        "instructions. The plugins' lines come from the plugins that are on; the vault's rules, .vaultite/AGENTS.md, have them too."} />
+      {data ? <pre className="rounded-[8px] bg-muted px-4 py-3 font-mono text-[13px] leading-[19px] whitespace-pre-wrap select-text">{data.text}</pre>
+        : <Loading error={error && `Couldn't read them. ${error}`} retry={retry} />}
+    </div>
+  )
+}
+
+const showInstructions = () => openTab("view:terminal-instructions")
+
+function terminalHere() {
+  const at = document.activeElement?.closest("[data-terminal-view]")
+  if (at) return at
+  return document.querySelector("dialog[open]") ? null : document.querySelector("#main-scroll [data-terminal-view]")
+}
+
+function AgentsTold() {
+  if (!useAi()) return null
+  return (
+    <Group>
+      <SettingRow label="What agents are told" sub="Added to an agent's instructions in a terminal here" onClick={showInstructions} />
+    </Group>
+  )
+}
+
+export default definePlugin({
+  views: {
+    terminal: {
+      icon: SquareTerminal,
+      iconFor: (arg) => { const s = sessionById(arg); return (s ? iconOf(s) : agentOfTerminal(arg)?.icon) ?? SquareTerminal },
+      title: (arg) => {
+        const s = sessionById(arg), label = s ? labelOf(s) : agentOfTerminal(arg)?.label ?? "Terminal"
+        const on = s?.machineLabel ?? (arg.includes("@") ? arg.slice(arg.indexOf("@") + 1) : "")
+        return on ? `${label} · ${on}` : label
+      },
+      rename: (arg) => { const s = sessionById(arg); return s ? { name: labelOf(s), auto: autoLabel(s), set: (n) => nameSession(arg, n) } : null },
+      iconClass: (arg) => { const s = sessionById(arg); return s ? stateClass(s) : undefined },
+      iconTint: (arg) => { const s = sessionById(arg); return s ? tintOf(s) : agentOfTerminal(arg)?.tint },
+      iconBadge: (arg) => { const s = sessionById(arg); return !!s && dotOf(s) },
+      iconTip: (arg) => { const s = sessionById(arg); return s?.awaits && awaiting(s) && agentIn(s) ? awaitsLine(s.awaits) : undefined },
+      tabPicture: (arg) => (sessionById(arg || "main") ? <TerminalPicture id={arg || "main"} /> : null),
+      opensBeside: (arg) => { const n = sessionById(arg)?.note; return n ? `file:${n}` : null },
+      full: true,
+      keepsTab: true,
+      pinAs: pinOfTerminal,
+      resolve: runningResume,
+      onClose: (arg) => tabClosed(arg || "main"),
+      tabMenu: (arg) => [{ label: "End session", icon: SquareX, danger: true, run: () => endForGood(arg || "main") }],
+      render: ({ arg, focused, close }) => (
+        <Suspense fallback={<Arriving />}>
+          <TerminalView key={arg} id={arg || "main"} focused={focused} close={close} />
+        </Suspense>
+      ),
+    },
+    terminals: { icon: SquareTerminal, title: () => "Terminals", render: () => <TerminalsView /> },
+    "terminal-instructions": { icon: FileText, title: () => "What agents are told", render: () => <Instructions /> },
+  },
+  settingsPanel: () => <AgentsTold />,
+  textSizes: { terminal: { label: "Terminal", sub: "Terminals' text: more or fewer columns", points: TERMINAL_POINTS } },
+  background: () => <><SessionNames /><AskBox /></>,
+  commands: [
+    { id: "terminal:open", name: "Open terminal", words: "new", run: () => openTerminal(), icon: SquareTerminal },
+    { id: "terminal:open-here", name: "Open terminal on this machine", words: "new", keys: ["Ctrl+`"], run: () => openTerminal({ machine: "" }), icon: SquareTerminal },
+    { id: "terminal:open-split", desktop: true, name: "Open terminal in right split", words: "new", run: () => openTerminal({ split: true }) },
+    { id: "terminal:ask", name: "Ask an agent in the background…", when: () => aiOn() && canRunAgents(), run: openAsk, icon: MessageSquareText, label: "Ask" },
+    { id: "terminal:open-where", name: "Open a terminal or an agent on a machine…", when: severalMachines, run: () => choosePlace(), icon: Server },
+    { id: "terminal:home", name: "Choose where terminals and agents open in this workspace…", when: severalMachines, run: () => chooseDefaultPlace(), icon: Server },
+    { id: "terminal:open-list", name: "Open terminals in a tab", run: () => openTab("view:terminals") },
+    { id: "terminal:instructions", name: "Show what agents in terminals are told", when: aiOn, run: showInstructions, icon: FileText },
+    // Off a Mac ⌃F is the shell's (forward a character): ⌃⇧F, as terminals there have it.
+    { id: "terminal:find", name: "Find in terminal", keys: isMac ? ["Mod+F"] : ["Ctrl+Shift+F"], when: () => !!terminalHere(),
+      run: () => { const v = terminalHere(); if (v) return preload().then((m) => m.openFind(v)) }, icon: Search },
+    { id: "terminal:end", name: "End terminal session", when: () => !!current(), run: () => { const c = current(); if (c) void endForGood(c.id) }, icon: SquareX },
+    { id: "terminal:leave", name: "Leave the terminal", keys: isMac ? ["Ctrl+\\ Ctrl+N"] : undefined,
+      when: () => !!document.activeElement?.matches("[data-term-input]"), run: () => { const at = document.activeElement; if (at instanceof HTMLElement) at.blur() }, icon: LogOut },
+  ],
+  searchLive: {
+    subscribe: subscribeSessions,
+    docs: () => (getSessions().list ?? []).map((s) => {
+      const a = agentIn(s)
+      const label = labelOf(s, a)
+      return {
+        id: `terminal-${s.id}`, title: label, kind: "Terminal", icon: a?.icon ?? SquareTerminal, tint: tintOf(s, a) ?? "var(--muted-foreground)",
+        meta: [a && label !== a.label && a.label, about(s, a)].filter(Boolean).join(" · "),
+        to: `view:terminal/${s.id}`, text: [a?.label, s.process, s.machineLabel, s.name && autoLabel(s, a)].filter(Boolean).join(" "), recent: s.started, weight: 7,
+      }
+    }),
+  },
+  agentRuns: useTerminalRuns,
+  ambient: { agents: { title: "Agents at work", sort: 20, ai: true, render: () => <AgentsAtWork /> } },
+  sidebar: { sessions: { title: "Terminals", names: ["terminals", "terminal", "shells"], heading: false, sort: 30, view: "terminals", render: (ctx) => <Sessions {...ctx} /> } },
+  newTab: { sessions: { title: "Terminals", sort: 5, hidden: true, render: () => <SessionList /> } },
+})

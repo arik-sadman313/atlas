@@ -1,0 +1,41 @@
+{
+  "id": "graph",
+  "icon": "waypoints",
+  "category": "navigation",
+  "alwaysOn": true,
+  "name": "Graph view",
+  "description": "The vault as a graph: files are dots, [[links]] the lines between them. Open it as a tab, see a file's neighbours in the sidebar, or put a local graph in any file.",
+  "settings": {
+    "search": { "type": "string", "default": "", "group": "Filters", "unset": "All files", "label": "Filter", "description": "only the files this search matches; in the whole graph, the search syntax (words, tag:#x, type:person, folder:Notes, [status:done]...), the graph's search box" },
+    "tags": { "type": "boolean", "default": false, "group": "Filters", "label": "Show tags", "description": "as dots, linked to the files that have them" },
+    "attachments": { "type": "boolean", "default": true, "group": "Filters", "label": "Show attachments", "description": "images, PDFs and drawings; files that aren't notes, as dots when something links to them" },
+    "orphans": { "type": "boolean", "default": true, "group": "Filters", "label": "Show files with no links", "description": "files nothing links to, and that link to nothing; in the whole graph" },
+    "archived": { "type": "boolean", "default": false, "group": "Filters", "label": "Show archived files", "description": "left out of the graph unless this is on" },
+    "hidden": { "type": "list", "group": "Filters", "label": "Hidden folders and types", "description": "like `folder:Logs` or `type:log`; left out of the whole graph (a top folder's or a type's exact name)" },
+    "hiddenLinks": { "type": "list", "group": "Filters", "label": "Hidden link types", "description": "link types left out: a frontmatter key links are under (project for project: \"[[Lighthouse]]\"), or body for links in the text" },
+    "colorBy": { "type": "enum", "values": ["folder", "type", "none"], "default": "folder", "preview": true, "group": "Colours", "label": "Colour by", "labels": { "folder": "Folder", "type": "Type", "none": "None" }, "description": "a dot's colour outside the groups; none: grey" },
+    "groups": { "type": "list", "group": "Colours", "label": "Groups", "description": "colour groups, first match wins; the user's, [{\"query\": \"tag:#work\", \"color\": \"blue\"}] (a search query; a colour gray, red, orange, yellow, green, teal, blue, indigo, purple or pink; \"hidden\": true leaves its files out)" },
+    "linkColors": { "type": "map", "group": "Colours", "label": "Link colours", "description": "a colour per link type, others grey; like {\"project\": \"orange\"} (gray, red, orange, yellow, green, teal, blue, indigo, purple or pink)" },
+    "depth": { "type": "enum", "values": [1, 2, 3, 4, 5], "default": 1, "group": "Local graph", "label": "Local graph depth", "labels": { "1": "1 link", "2": "2 links", "3": "3 links", "4": "4 links", "5": "5 links" }, "description": "how many links away from the file" },
+    "incoming": { "type": "boolean", "default": true, "group": "Local graph", "label": "Incoming links", "description": "follows the links to a file" },
+    "outgoing": { "type": "boolean", "default": true, "group": "Local graph", "label": "Outgoing links", "description": "follows the links from a file" },
+    "neighbors": { "type": "boolean", "default": true, "group": "Local graph", "label": "Neighbor links", "description": "between the files around it; not only those leading out from it" },
+    "arrows": { "type": "boolean", "default": false, "group": "Display", "label": "Arrows", "description": "which way each link goes" },
+    "textFade": { "type": "number", "default": 0, "min": -3, "max": 3, "group": "Display", "step": 0.1, "label": "Text fade threshold", "description": "when names show as you zoom in; below 0 sooner, above 0 only closer" },
+    "nodeSize": { "type": "number", "default": 1, "min": 0.25, "max": 3, "group": "Display", "step": 0.05, "label": "Node size", "description": "dots' size, times the usual (2: twice as big)" },
+    "lineWidth": { "type": "number", "default": 1, "min": 0.25, "max": 4, "group": "Display", "step": 0.05, "label": "Line thickness", "description": "links' thickness, times the usual" },
+    "center": { "type": "number", "default": 1, "min": 0, "max": 4, "group": "Forces", "step": 0.05, "label": "Center force", "description": "how strongly files are pulled to the middle; times the usual" },
+    "repel": { "type": "number", "default": 1, "min": 0, "max": 4, "group": "Forces", "step": 0.05, "label": "Repel force", "description": "how strongly files push each other apart; times the usual" },
+    "linkDistance": { "type": "number", "default": 1, "min": 0.25, "max": 4, "group": "Forces", "step": 0.05, "label": "Link distance", "description": "how long links are, times the usual" }
+  },
+  "blocks": {
+    "graph": {
+      "description": "a file's local graph: its neighbours in the vault, files as dots and links as lines",
+      "options": {
+        "depth": { "type": "enum", "values": [1, 2, 3, 4, 5], "default": 1, "description": "how many links away to go" },
+        "height": { "type": "number", "default": 300, "min": 160, "max": 800, "description": "the graph's height in px" },
+        "title": { "type": "string", "default": "Graph", "description": "the card's title" }
+      }
+    }
+  }
+}

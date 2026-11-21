@@ -1,0 +1,36 @@
+import type { ButtonHTMLAttributes, ComponentType } from "react"
+import { cn } from "@/lib/utils"
+
+const BUTTON = "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 font-medium transition-colors disabled:cursor-default disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:outline-none"
+const BUTTON_SIZE = { normal: "h-9 rounded-[8px] px-3.5 text-[15px] md:h-8 md:text-[13px]", small: "h-7 rounded-[6px] px-3 text-[13px] max-md:h-9 max-md:text-[15px]" }
+const BUTTON_LOOK = {
+  primary: "bg-primary text-primary-foreground hover:bg-primary/85 disabled:not-aria-busy:bg-foreground/[0.06] disabled:not-aria-busy:text-muted-foreground",
+  secondary: "bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.1]",
+  outline: "border-[0.5px] border-border bg-background hover:bg-foreground/[0.05]",
+  quiet: "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+}
+type ButtonLook = { look?: keyof typeof BUTTON_LOOK; size?: keyof typeof BUTTON_SIZE }
+/** A button's classes, for a link drawn as one. */
+export const buttonClass = ({ look = "secondary", size = "normal" }: ButtonLook = {}, className?: string) => cn(BUTTON, BUTTON_SIZE[size], BUTTON_LOOK[look], className)
+/** A text button (an icon may lead): `primary` for what the page is for, `secondary` beside it. `busy`: its action is
+ *  running (useBusy): its label shimmers, undimmed, and it takes no second press. */
+export function Button({ look, size, className, type = "button", busy, disabled, children, ...rest }: ButtonLook & { busy?: boolean } & ButtonHTMLAttributes<HTMLButtonElement> & Record<`data-${string}`, unknown>) {
+  return (
+    <button type={type} className={buttonClass({ look, size }, cn(busy && "cursor-progress disabled:cursor-progress disabled:opacity-100", className))}
+      disabled={disabled || busy} aria-busy={busy || undefined} {...rest}>
+      {busy ? <span className="shimmer inline-flex items-center gap-1.5">{children}</span> : children}
+    </button>
+  )
+}
+
+/** An icon button in a panel's heading or a row: its label is its tooltip unless `tip` says otherwise. */
+export function HeadingButton({ icon: Icon, label, tip = label, strokeWidth = 2.25, className, ...rest }: {
+  icon: ComponentType<{ className?: string; strokeWidth?: number }>; label: string; tip?: string; strokeWidth?: number
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & Record<`data-${string}`, unknown>) {
+  return (
+    <button type="button" aria-label={label} data-tip={tip} {...rest}
+      className={cn("relative grid size-5 cursor-pointer place-items-center rounded-[4px] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground before:absolute max-md:before:-inset-2.5", className)}>
+      <Icon className="size-3.5" strokeWidth={strokeWidth} />
+    </button>
+  )
+}

@@ -1,0 +1,68 @@
+import type { Opts } from "./query.ts"
+
+export type BaseView = { name: string; type: string }
+export type BaseConfig = Record<string, unknown>
+
+const TYPES: Record<string, string> = { table: "table", cards: "cards", list: "list", map: "map", kanban: "board", board: "board", calendar: "calendar" }
+
+export const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? { ...v } : null)
+
+export function viewsOf(cfg: BaseConfig): Record<string, unknown>[] {
+  const vs = Array.isArray(cfg.views) ? cfg.views.map(obj).filter((v): v is Record<string, unknown> => !!v) : []
+  return vs.length ? vs : [{ type: "table", name: "Table" }]
+}
+
+export function viewNames(cfg: BaseConfig): BaseView[] {
+  const seen = new Map<string, number>()
+  return viewsOf(cfg).map((v) => {
+    const type = typeof v.type === "string" && v.type.trim() ? v.type.trim() : "table"
+    let name = typeof v.name === "string" && v.name.trim() ? v.name.trim() : type.charAt(0).toUpperCase() + type.slice(1)
+    const n = (seen.get(name.toLowerCase()) ?? 0) + 1
+    seen.set(name.toLowerCase(), n)
+    if (n > 1) name = `${name} ${n}`
+    return { name, type }
+  })
+}
+
+export function pickView(cfg: BaseConfig, want?: string | null): { index: number; found: boolean } {
+  const names = viewNames(cfg)
+  const w = String(want ?? "").trim().toLowerCase()
+  if (!w) return { index: 0, found: true }
+  const i = names.findIndex((v) => v.name.toLowerCase() === w)
+  return i >= 0 ? { index: i, found: true } : { index: 0, found: false }
+}
+
+export function baseOptions(cfg: BaseConfig, want?: string | null): { opts: Opts; views: BaseView[]; index: number; notes: string[] } {
+  const notes: string[] = []
+  if (!obj(cfg)) throw new Error("a base is YAML keys: filters, formulas, properties, summaries, views")
+  const views = viewNames(cfg)
+  const { index, found } = pickView(cfg, want)
+  if (!found) notes.push(`There's no view named ${want}: showing ${views[0].name}`)
+  const v = viewsOf(cfg)[index]
+  const type = views[index].type
+  let view = TYPES[type.toLowerCase()]
+  if (!view) { view = "table"; notes.push(`This app draws ${type} views as a table`) }
+  const group = obj(v.groupBy)
+  if (view === "board" && !(group && typeof group.property === "string")) {
+    view = "table"
+    notes.push("A kanban view needs a group (groupBy): shown as a table")
+  }
+  const filters = [cfg.filters, v.filters].filter((f) => f !== undefined && f !== null && f !== "")
+  const arch = v.archived === "only" ? "only" : v.archived === true
+  const opts: Opts = {
+    title: views[index].name, view, allKeys: true, archived: arch || true, ...(arch ? { archiveFolders: true } : {}),
+    ...(filters.length ? { filters: filters.length === 1 ? filters[0] : { and: filters } } : {}),
+    ...(obj(cfg.formulas) ? { formulas: cfg.formulas } : {}),
+    ...(obj(cfg.properties) ? { properties: cfg.properties } : {}),
+    ...(obj(cfg.summaries) ? { summaryFormulas: cfg.summaries } : {}),
+    ...(obj(v.summaries) ? { summaries: v.summaries } : {}),
+    ...(Array.isArray(v.order) && v.order.length ? { columns: v.order.map(String) } : {}),
+    ...(v.sort !== undefined ? { sort: v.sort } : {}),
+    ...(group && typeof group.property === "string" ? { group: { property: group.property, direction: group.direction } } : {}),
+    ...(typeof v.limit === "number" && v.limit > 0 ? { limit: v.limit } : {}),
+  }
+  for (const k of ["coordinates", "markerColor", "markerIcon", "date", "month", "image", "imageFit"]) if (typeof v[k] === "string") opts[k] = v[k]
+  for (const k of ["cardSize", "imageAspectRatio"]) if (typeof v[k] === "number") opts[k] = v[k]
+  if (Array.isArray(v.groupOrder) && opts.group) opts.groupOrder = v.groupOrder
+  return { opts, views, index, notes }
+}

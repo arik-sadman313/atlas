@@ -1,0 +1,12 @@
+{
+  "id": "backlinks",
+  "icon": "link-2",
+  "category": "navigation",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "name": "Links",
+  "description": "A sidebar panel for the file you're on: what links to it, where its name appears without a link (one click links it), and what it links to. Also opens as a tab that follows the file in the other pane.",
+  "settings": {
+    "inDocument": { "type": "boolean", "default": false, "label": "Backlinks in document", "description": "linked and unlinked mentions, under a note's text" }
+  }
+}

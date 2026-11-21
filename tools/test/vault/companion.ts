@@ -1,0 +1,1268 @@
+import fs from "node:fs"
+import type { Any, VaultTest } from "./harness.ts"
+import type { Moment, Note } from "../../../plugins/core/companion/types.ts"
+import type { Entry } from "../../../plugins/core/claude-code/chatlog.ts"
+import type { Outcome, Step } from "../../evals/companion/score.ts"
+import { fileURLToPath } from "node:url"
+import { waitFor } from "../lib.ts"
+
+export default async ($: VaultTest) => {
+  const { api, app, check, exists, read, write } = $
+  // Companion (plugins/core/companion): moments in, ops out; the windows' socket is QA's (web/qa/companion.mjs).
+  const c = await import("../../../plugins/core/companion/plugin.ts")
+  const cAlwayson = await import("../../../plugins/core/companion/alwayson.ts")
+  const cChat = await import("../../../plugins/core/companion/chat.ts")
+  const cChatturns = await import("../../../plugins/core/companion/chatturns.ts")
+  const cComments = await import("../../../plugins/core/companion/comments.ts")
+  const cEdits = await import("../../../plugins/core/companion/edits.ts")
+  const cLane = await import("../../../plugins/core/companion/lane.ts")
+  const cMoments = await import("../../../plugins/core/companion/momentstext.ts")
+  const cPageops = await import("../../../plugins/core/companion/pageops.ts")
+  const cPeople = await import("../../../plugins/core/companion/people.ts")
+  const cSettings = await import("../../../plugins/core/companion/settings.ts")
+  const cState = await import("../../../plugins/core/companion/state.ts")
+  const cIntake = await import("../../../plugins/core/companion/intake.ts")
+  const cText = await import("../../../plugins/core/companion/text.ts")
+  const cWindowpanes = await import("../../../plugins/core/companion/windowpanes.ts")
+  const cScreen = await import("../../../plugins/core/companion/screensocket.ts")
+  check("companion: a chat session reads what a summoned one does (its jobs, where they run, the talk), as tools",
+    ["jobs", "job", "where", "conversation", "see", "status"].every((t) => cChat.TOOLS.includes(t)) && cLane.SUMMONED_TOOLS.filter((t) => t !== "live-undo").every((t) => cChat.TOOLS.includes(t)),
+    cLane.SUMMONED_TOOLS.filter((t) => !cChat.TOOLS.includes(t)))
+  // (its rounds only when a check runs one: the minute's would end the made-up sessions, whose terminals never run, as a
+  // slower machine's test reaches them)
+  clearInterval(cChatturns.watchdog)
+  {
+    const { loginsText } = await import("../../../plugins/core/companion/logins.ts")
+    const { SUMMONED_PROMPT } = await import("../../../plugins/core/companion/summoned.ts")
+    check("companion: a fresh session is told where the agents' browser is signed in, and to read a dashboard there when a CLI has no login",
+      loginsText([{ name: "Agents", container: "agents", home: true, sites: [{ site: "cloudflare.com", account: "alice@example.com" }] },
+        { name: "Work", container: "work", home: false, sites: [{ site: "github.com" }] }, { name: "Empty", container: "e", home: false, sites: [] }])
+        === "Agents: cloudflare.com as alice@example.com; Work (--container work): github.com" &&
+      /no login here[^.]*is no dead end/.test(SUMMONED_PROMPT) && SUMMONED_PROMPT.includes("vau browser sites"))
+  }
+  check("companion: text found nearest the line it was said to be on", cText.nearest("a\nx\nb\nx\n", "x", 4) === 6 && cText.nearest("a\nx\nb\nx\n", "x") === 2 && cText.nearest("abc", "z") === -1)
+  check("companion: an edit replaces found text, or adds lines after a line, at the top or at the end",
+    cEdits.editText("a\nb\n", { find: "b", text: "B" }) === "a\nB\n" && cEdits.editText("a\nb\n", { line: 1, text: "x" }) === "a\nx\nb\n" &&
+    cEdits.editText("a\nb\n", { line: 0, text: "x" }) === "x\na\nb\n" && cEdits.editText("a\nb\n", { append: true, text: "x" }) === "a\nb\nx\n" &&
+    cEdits.editText("a\nb", { append: true, text: "x" }) === "a\nb\nx")
+
+  {
+    // The talk a fresh summoned session is told: from the log, with what it did, withdrawn answers and small talk.
+    const v = await import("../../../plugins/core/companion/conversation.ts")
+    const now = 10_000_000, ask = (seq: number, t: number, text: string): Moment => ({ seq, t, kind: "ask", text, summoned: true, for: "Claude" })
+    const xs = v.exchanges([ask(1, now - 40 * 60_000, "open the pr"), ask(2, now - 5 * 60_000, "how's it going")], [
+      { t: now - 40 * 60_000 + 500, as: "Claude (summoned)", op: "say", text: "Opening it." },
+      { t: now - 40 * 60_000 + 900, as: "Claude (summoned)", op: "result", text: "open: Opened https://github.com/x/y/pull/3 (pane p7)." },
+      { t: now - 5 * 60_000 + 400, as: "Claude (summoned)", op: "say", text: "Let me look at the whole screen" },
+      { t: now - 5 * 60_000 + 600, as: "Claude", op: "withdrawn", seqs: [2] }, { t: now - 5 * 60_000 + 600, as: "Claude", op: "say", text: "Good, thanks!" },
+      { t: now - 5 * 60_000 + 700, as: "Claude (summoned)", op: "look", text: "at 1006,60 on the screen" },
+      { t: now - 60_000, as: "Claude", op: "talked", text: JSON.stringify({ heard: "thanks", said: "Anytime." }) },
+    ], [], "Claude")
+    const said = v.talkSoFar(xs, now)
+    check("companion: the talk keeps what it did with its ids, the realtime voice's words over a withdrawn answer, and small talk",
+      xs.length === 3 && /40 min ago.*open the pr\n  you: Opening it\.\n  you did: open: Opened https:\/\/github\.com\/x\/y\/pull\/3 \(pane p7\)/.test(said) &&
+      /you: Good, thanks!\n  you did: pointed at 1006,60 on the screen/.test(said) && !/whole screen/.test(said) && /1 min ago, they said: thanks\n  you: Anytime\./.test(said), said)
+    const many = Array.from({ length: 200 }, (_, i) => ask(i, now - (200 - i) * 60_000, `ask number ${i} ${"word ".repeat(40)}`))
+    const long = v.talkSoFar(v.exchanges(many, [], [], "Claude"), now, 3000)
+    check("companion: a long talk is told within its budget, its newest asks whole and the oldest left out",
+      long.length <= 3000 && /ask number 199/.test(long) && !/ask number 0 /.test(long) && long.split("\n").at(-1)!.length > 160, long.length)
+  }
+
+  {
+    // What it showed on the screen, kept a while: the oldest and the stale go, and none is no line.
+    const sh = await import("../../../plugins/core/companion/shown.ts")
+    const t0 = 50_000_000, ring = { t: t0, what: "your ring", at: { x: 10, y: 20, w: 30, h: 40 } }
+    const kept = sh.keepShown(sh.keepShown([], [ring], t0), Array.from({ length: 9 }, (_, i) => ({ t: t0 + i, what: `your num ${i}`, at: { x: i, y: i } })), t0 + 10)
+    const stale = sh.keepShown(kept, [{ t: t0 + 11 * 60_000, what: "your cursor pointed", on: "Notes/A.md:3" }], t0 + 11 * 60_000)
+    check("companion: what it showed is kept, at most a few and only lately; told in words with where",
+      kept.length === sh.SHOWN_KEEP.most && kept[0].what === "your num 1" && stale.length === 1 && sh.shownText([], t0) === "" &&
+      /12 s ago: your ring at 10,20 30×40/.test(sh.shownText([ring], t0 + 12_000)) && /your cursor pointed at Notes\/A\.md:3/.test(sh.shownText(stale, t0 + 11 * 60_000)) &&
+      sh.shownText([ring], t0 + 11 * 60_000) === "", [kept, stale])
+  }
+
+  {
+    // @name in a line: at its start any agent's name; anywhere after, only the companion's and the agents around.
+    const l = await import("../../../plugins/core/companion/live.ts")
+    const names = ["companion", "claude", "ada"], mid = ["claude"], ask = (s: string) => l.mentionIn(s, names, mid)
+    check("companion: a line starting @name asks it what follows", ask("- [ ] @ada: fix this")?.name === "ada" && ask("- [ ] @ada: fix this")?.text === "fix this" &&
+      ask("@claude")?.text === "(no words: look at this)")
+    check("companion: @name mid-line asks it the whole line", JSON.stringify(ask("Alright, hey how is it going @claude?")) === JSON.stringify({ name: "claude", text: "Alright, hey how is it going @claude?" }))
+    check("companion: mid-line, only the agents around count, and never an email or a link", !ask("ask @ada later") && !ask("mail bob@claude.com") && !ask("x.com/@claude") && !ask("@bob hi"))
+    check("companion: every @name of a line is found, where it is", JSON.stringify(l.mentionsOf("@ada and @claude, a@claude", names, mid)) === JSON.stringify([{ from: 0, to: 4, name: "ada" }, { from: 9, to: 16, name: "claude" }]))
+    check("companion: an @name in a person's comment asks that agent; an email or a stranger doesn't",
+      cPeople.mentioned("is this right @claude?") === "Claude" && cPeople.mentioned("@Claude look") === "Claude" && !cPeople.mentioned("mail bob@claude.com") && !cPeople.mentioned("@nobody here"))
+    check("companion: an @ can start a mention after a space or a line's start, not in a word", l.canMention("") && l.canMention("hey ") && l.canMention("(") && !l.canMention("bob") && !l.canMention("x.com/"))
+    check("companion: an ask is sent at a pause only with words besides its @names", !l.asksSomething("@claude?", l.mentionsOf("@claude?", names, mid)) &&
+      !l.asksSomething("- @claude ", l.mentionsOf("- @claude ", names, mid)) && l.asksSomething("how is it @claude?", l.mentionsOf("how is it @claude?", names, mid)))
+  }
+  {
+    // Its threads are the Conversations panel's, in the right sidebar from the start (vau panels reads the source).
+    const { panelsOf } = await import("../../../core/appsource.ts")
+    const { defaultSidebars } = await import("../../../core/sidebars.ts")
+    const ps = panelsOf({ id: "companion", tier: "core", dir: fileURLToPath(new URL("../../../plugins/core/companion", import.meta.url)) })
+    check("companion: the Conversations panel starts in the right sidebar", ps.some((x) => x.key === "companion:conversations" && x.side === "right") &&
+      defaultSidebars(ps).right.includes("companion:conversations"), ps)
+  }
+  {
+    // Note text sent with moments: a short note whole for an ask, a few lines around an edit.
+    const text = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join("\n") + "\n"
+    const ask = cMoments.excerpt("N.md", "a\nb\n", [{ seq: 1, t: 0, kind: "ask", line: 2 }]), long = cMoments.excerpt("N.md", text, [{ seq: 1, t: 0, kind: "ask", line: 150 }])
+    const edit = cMoments.excerpt("N.md", text, [{ seq: 1, t: 0, kind: "edit", line: 50, hunks: [{ line: 50, added: ["x", "y"], removed: [] }] }])
+    check("companion: an ask comes with its note, whole when short, else the lines around it",
+      ask?.from === 1 && ask.to === 2 && ask.lines.join() === "a,b" && long?.from === 110 && long.to === 190 && long.lines[0] === "line 110", [ask, long])
+    check("companion: an edit comes with a few lines around what changed", edit?.from === 44 && edit.to === 57, edit)
+    const para = (k: string) => `${k} ${"word ".repeat(120)}end`
+    const talk = [para("p1"), "", para("p2"), "", para("p3"), "", para("p4"), "", para("p5"), "", `${para("ask")} @claude read these`, "", para("after")].join("\n")
+    const told = cMoments.excerpt("Talk.md", talk, [{ seq: 1, t: 0, kind: "ask", line: 11 }])!
+    check("companion: the ask's paragraph and the three above come whole, other long lines cut",
+      told.lines[10].endsWith("@claude read these") && [4, 6, 8].every((i) => told.lines[i].endsWith("end")) && [0, 2, 12].every((i) => told.lines[i].endsWith("…")), told.lines.map((l) => l.slice(-12)))
+    check("companion: and reads as numbered lines", cMoments.momentsText([], "pair", null, []).includes("Nothing yet") &&
+      cMoments.momentsText([{ seq: 1, t: 0, kind: "ask", path: "N.md", line: 2, text: "hi" }], "pair", null, [ask!]).endsWith("N.md, lines 1-2 of 2:\n   1  a\n   2  b"))
+    // Asked why it said nothing, it knows: each ask's head says why its voice is silent (a call, off, no credits).
+    const rec = cWindowpanes.voiceSilence({ off: false, call: "on a call in Voice Memos" }), off = cWindowpanes.voiceSilence({ off: true, call: "on a call in Zoom" })
+    check("companion: an ask's head says why its voice is silent, and nothing when it speaks",
+      /aren't said aloud now: they seem on a call in Voice Memos .*play button.*Not a call/.test(rec) && /^Your voice is off/.test(off) && !off.includes("Zoom") &&
+      /no credits/.test(cWindowpanes.voiceSilence({ off: false, paused: { account: "quota" } })) && cWindowpanes.voiceSilence({ off: false, paused: null }) === "", [rec, off])
+    // Asked "did you say anything?" once the call is over, it knows its last answer was kept quiet, when and for what.
+    const at = new Date(2026, 10, 10, 16, 24, 46).getTime()
+    const held = cWindowpanes.voiceSilence({ off: false, unheard: [{ at, why: "call", detail: "on a call in Chrome", ask: "What's on my calendar this afternoon?" }] })
+    const twice = cWindowpanes.voiceSilence({ off: false, unheard: [{ at, why: "off", detail: "" }, { at: at + 60_000, why: "silent", detail: "its player quit (SIGKILL)" }] })
+    check("companion: an ask after a held answer says it wasn't heard, when, why (the call's app), and offers to say it",
+      /^Your last answer wasn't heard aloud: at 16:24 \(to "What's on my calendar this afternoon\?"\), kept quiet, as they seemed on a call in Chrome\. .*offer to say it now/.test(held) &&
+      !held.includes("aren't said aloud now") && /answers weren't heard aloud: at 16:24, your voice was off then; at 16:25, your voice failed \(its player quit/.test(twice), [held, twice])
+    // Timings: handed, first action, back to next; seqs restart with the server.
+    const ms: Moment[] = [{ seq: 1, t: 1000, kind: "ask" }, { seq: 2, t: 1500, kind: "edit" }, { seq: 1, t: 9000, kind: "ask" }]
+    const acts = [{ t: 0, as: "C", op: "next" }, { t: 1100, as: "C", op: "handed", seqs: [1] }, { t: 3100, as: "C", op: "say" }, { t: 3200, as: "C", op: "next" },
+      { t: 3200, as: "C", op: "handed", seqs: [2] }, { t: 4000, as: "C", op: "next" }, { t: 9000, as: "C", op: "handed", seqs: [1] }]
+    const [a, e, b] = cPageops.timings(ms, acts)
+    check("companion timings: per moment, its handoff, think to the first action and total", a.handoff === 100 && a.think === 2000 && a.op === "say" && a.total === 2200 &&
+      e.handoff === 1700 && e.think === undefined && e.total === 2500 && b.handoff === 0 && b.total === undefined, [a, e, b])
+    const two = cPageops.timings([{ seq: 5, t: 0, kind: "edit" }], [{ t: 100, as: "C", op: "handed", seqs: [5] }, { t: 300, as: "Q", op: "handed", seqs: [5] },
+      { t: 900, as: "Q", op: "say" }, { t: 2000, as: "C", op: "say" }])
+    check("companion timings: a moment handed to two agents, a row each, and a summary each", two.length === 2 && two[0].as === "C" && two[0].think === 1900 &&
+      two[1].as === "Q" && two[1].think === 600 && /\nQ \(1\): pause -, handoff 0\.3/.test(cPageops.timingsText("2026-10-16", two)), [two, cPageops.timingsText("2026-10-16", two)])
+    check("companion timings: read as a table and a summary", /asks and replies \(2\): pause -, handoff 0\.0\/0\.1, think 2\.0\/2\.0/.test(cPageops.timingsText("2026-10-16", [a, e, b])), cPageops.timingsText("2026-10-16", [a, e, b]))
+    // (its first word streamed before its call; handed again, as they went on: from then)
+    const [w] = cPageops.timings([{ seq: 7, t: 0, kind: "ask" }], [{ t: 100, as: "C", op: "handed", seqs: [7] }, { t: 400, as: "C", op: "again", seqs: [7] }, { t: 500, as: "C", op: "done" },
+      { t: 600, as: "C", op: "handed", seqs: [7] }, { t: 1500, as: "C", op: "word" }, { t: 3000, as: "C", op: "edit" }, { t: 3500, as: "C", op: "done" }])
+    check("companion timings: the first word shown, from its last handing", w.handoff === 600 && w.word === 900 && w.think === 2400 && w.op === "edit" && w.total === 3500 &&
+      /think 2\.4\/2\.4, word 0\.9\/0\.9/.test(cPageops.timingsText("2026-11-02", [w])), [w, cPageops.timingsText("2026-11-02", [w])])
+    // Where an edit ends: its cursor stays there.
+    const doc = "# A\n\nCall Alice\n"
+    check("companion: an edit's end, its last line and words", JSON.stringify(cEdits.endOf(doc, { after: "Call Alice", text: "- one\n- two\n" })) === '{"line":5,"find":"- two"}' &&
+      JSON.stringify(cEdits.endOf(doc, { find: "Alice", text: "Ben\nand Cy" })) === '{"line":4,"find":"and Cy"}' && cEdits.endOf(doc, { append: true, text: "End" })?.line === 4 &&
+      cEdits.endOf(doc, { find: "Nobody", text: "x" }) === null, [cEdits.endOf(doc, { after: "Call Alice", text: "- one\n- two\n" }), cEdits.endOf(doc, { find: "Alice", text: "Ben\nand Cy" }), cEdits.endOf(doc, { append: true, text: "End" })])
+    // What the user changed, as hunks: theirs alone, never what an agent wrote between them.
+    const { hunksIn } = await import("../../../plugins/core/companion/live.ts")
+    const was = ["# Trip", "", "Ask?", "", "End"], now = ["# Trip!", "", "Ask?", "Its line", "Its other", "", "Mine", "End"]
+    check("companion: an edit moment has the user's hunks alone, an agent's lines between them in neither",
+      JSON.stringify(hunksIn(was, now, [[1, 1, 1, 1], [4, 4, 6, 7]])) === JSON.stringify([{ line: 1, removed: ["# Trip"], added: ["# Trip!"] }, { line: 7, removed: [], added: ["Mine"] }]) &&
+      JSON.stringify(hunksIn(was, ["# Trip", "", "Ask? yes", "", "End"], [[3, 3, 3, 3], [3, 3, 3, 3]])) === JSON.stringify([{ line: 3, removed: ["Ask?"], added: ["Ask? yes"] }]), hunksIn(was, now, [[1, 1, 1, 1], [4, 4, 6, 7]]))
+    // A tool's input as it's written: whole keys, and the string being written (never half an escape).
+    const { partialArgs } = await import("../../../plugins/core/companion/partial.ts")
+    const json = JSON.stringify({ path: "N.md", line: 3, text: 'say "hi"\nthen 😀' }), texts: string[] = []
+    for (let n = 0; n <= json.length; n++) { const r = partialArgs(json.slice(0, n)); texts.push(typeof r.whole.text === "string" ? r.whole.text : r.open?.key === "text" ? r.open.text : "") }
+    {
+      // Its words: a block with a tag is said as it's written; one with none waits: dropped when a tool call follows
+      // (narration between its steps), said when the turn ends on it.
+      const { wordsGate } = await import("../../../plugins/core/companion/summoned.ts")
+      const said: string[] = [], dropped: string[] = []
+      const g = wordsGate((use, text, end) => said.push(`${use}:${text}${end ? `/${end}` : ""}`), (t) => dropped.push(t))
+      g("m1:0", "[point a1] Sounds"); g("m1:0", "[point a1] Sounds broken.", "done"); g("", "", "tool")
+      g("m2:0", "Handoff without"); g("m2:0", "Handoff without cwd, so it runs there.", "done"); g("", "", "tool")
+      g("m3:0", "Sent it to"); g("m3:0", "Sent it to a job.", "done"); g("", "", "stop")
+      g("m4:0", "Your chats are down the left [frame"); g("m4:0", "Your chats are down the left [frame 0,60,260,700]. Then", "done"); g("", "", "tool")
+      check("companion: words with a tag are said as written; narration before a tool call never; a last word with none, at its end",
+        said.join("|") === "m1:0:[point a1] Sounds|m1:0:[point a1] Sounds broken./done|m3:0:Sent it to a job./done|m4:0:Your chats are down the left [frame 0,60,260,700]. Then/done" &&
+        dropped.join() === "Handoff without cwd, so it runs there.", { said, dropped })
+    }
+    check("companion: a tool's input read as it's written, each text a start of the next", texts.every((t, i) => i === 0 || t.startsWith(texts[i - 1])) && texts.at(-1) === 'say "hi"\nthen 😀' &&
+      JSON.stringify(partialArgs('{"path":"N.md","line":3').whole) === '{"path":"N.md"}' && partialArgs('{"path":"N.md","line":3,"te').keys.join() === "path,line", texts.slice(-6))
+  }
+
+  {
+    // Its cursor: every state shows by itself, unhovered, long after it began (its name, and dots, a wave or a tick).
+    const { presence } = await import("../../../core/desktop/cursor.ts")
+    const at = (state: Any, o: Any = {}, a: Any = {}) => presence({ state, ...a }, { age: 3, ...o })
+    const sign = (x: ReturnType<typeof presence>) => `${x.flag ? "flag" : "-"} ${x.mark ?? "-"}${x.bob ? " bob" : ""}${x.dim ? " dim" : ""}${x.words ? ` ${x.words}` : ""}`
+    const got = {
+      reading: sign(at("reading")), thinking: sign(at("thinking")), starting: sign(at("starting")), listening: sign(at("listening")), writing: sign(at("writing")),
+      watching: sign(at("watching")), asks: sign(at("thinking", {}, { asks: { event: "e", text: "Run it?" } })), saying: sign(at("watching", { bubble: true })),
+      held: sign(at("watching", { held: true })), heldListening: sign(at("listening", { held: true })), passed: sign(at("watching", { age: 2 }, { seen: true, why: "not for me" })),
+      looked: sign(at("reading", { looked: true })),
+    }
+    const want = {
+      reading: "flag dots", thinking: "flag dots bob", starting: "flag dots starting", listening: "flag wave", writing: "flag -", watching: "- - dim",
+      asks: "flag - bob needs you", saying: "flag -", held: "flag dots", heldListening: "flag dots", passed: "flag tick dim", looked: "flag dots reading",
+    }
+    check("companion: each state of its cursor shows unhovered (dots working, a wave listening, its words waiting as dots)", JSON.stringify(got) === JSON.stringify(want), got)
+  }
+
+  await api("PATCH", "config/plugin/companion", { mode: "quiet" })
+  // (asks earlier blocks left waiting, as their Talk key's session took them or not: handed out first, not this check's)
+  await api("POST", "ops/companion.next", { timeout: 0 })
+  check("companion: quiet hears asks, not what the user writes", cIntake.addMoment({ kind: "edit", path: "Notes/A.md", hunks: [] }) === null &&
+    cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 3, text: "what's this?" })?.kind === "ask")
+  let [st, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+  check("companion: next answers the ask waiting, as the companion (Claude)", st === 200 && r.moments.length === 1 && r.moments[0].text === "what's this?" && r.mode === "quiet", [st, r])
+  ;[, r] = await api("POST", "ops/companion.timings", {})
+  check("companion: next and what it handed are logged, for timings", r.rows.some((x: Any) => x.kind === "ask" && x.handoff !== undefined), r)
+  ;[st, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+  check("companion: and not again", st === 200 && r.moments.length === 0, r)
+  {
+    const { localDate } = await import("../../../core/plugins.ts")
+    const later = Date.now() + 3 * 86_400_000, top = cState.seq + 500
+    cState.log.append(later, [{ seq: top, t: later, kind: "open", path: "Notes/A.md" }])
+    cState.numberOn()
+    const next = cIntake.addMoment({ kind: "ask", path: "Notes/B.md", line: 2, text: "numbered on from the log?" })
+    cState.log.rewrite(localDate(later), [])
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: after a restart, an exchange's number goes on from the last one kept, so it's never used twice", next?.seq === top + 1, next)
+  }
+  {
+    // An ask they go on writing after it went (a pause mid-dictation): before it's handed, the same ask as it reads now;
+    // after, a new one with the whole line, that says so.
+    const said = "One more thing, on the margin comments, color the agent's name. The \""
+    const one = cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 7, text: said, waited: 2000 })
+    const two = cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 7, text: `${said}You" can stay gray` })
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: an ask written on before it's handed is one ask, as it reads now", one === two && r.moments.length === 1 && r.moments[0].text.endsWith("stay gray") && r.moments[0].waited === 2000, r.moments)
+    cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 7, text: `${said}You" can stay gray, and the dots too` })
+    cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 7, text: "Something else entirely" })
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: the same ask again (Enter on its line after a restart) isn't asked twice", cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 7, text: "Something else entirely" }) === null)
+    check("companion: once handed, a new ask with the whole line, that says it goes on; another ask is its own", r.moments.length === 2 && r.moments[0].more === one!.seq &&
+      !r.moments[1].more && cMoments.momentsText(r.moments, "quiet", null).includes("went on writing it"), r.moments)
+    // Busy on an ask: its cursor keeps thinking after a first word, until it's back for more (no seen tick: it acted).
+    await api("POST", "ops/companion.say", { text: "On it", path: "Notes/A.md" })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: a word while it works on an ask, and it still shows thinking", r.agents.some((a: Any) => a.name === "Claude" && a.state === "thinking"), r.agents)
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: back for more, it's done: watching, no seen tick", r.agents.some((a: Any) => a.name === "Claude" && a.state === "watching" && !a.seen), r.agents)
+  }
+
+  await api("PATCH", "config/plugin/companion", { mode: "pair" })
+  write("Notes/A.md", "# A\n\nCall Alice friday\n")
+  const waiting = api("POST", "ops/companion.next", { timeout: 5 })
+  await $.sleep(50)
+  cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 2, hunks: [{ line: 2, added: ["Call Alice friday"], removed: [] }] })
+  ;[st, r] = await waiting
+  check("companion: a waiting next wakes on what the user writes (pair)", st === 200 && r.moments[0]?.kind === "edit" && r.moments[0].hunks[0].added[0] === "Call Alice friday", r)
+  check("companion: with the note's lines around what they wrote", r.notes[0]?.path === "Notes/A.md" && r.notes[0].lines.includes("Call Alice friday"), r.notes)
+  const edited = r.moments
+  ;[, r] = await api("POST", "ops/companion.status", {})
+  check("companion: handed an edit, its cursor reads it there", r.agents.some((a: Any) => a.name === "Claude" && a.state === "reading" && a.path === "Notes/A.md" && a.line === 2), r.agents)
+  ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+  const seen = r.moments
+  ;[, r] = await api("POST", "ops/companion.status", {})
+  check("companion: back for more without acting, it let it pass: seen, there", !seen.length && r.agents.some((a: Any) => a.name === "Claude" && a.state === "watching" && a.seen && a.path === "Notes/A.md"), r.agents)
+  cIntake.addMoment({ kind: "open", path: "Notes/A.md", line: 1 })
+  await api("POST", "ops/companion.next", { timeout: 0 })
+  await api("POST", "ops/companion.look", { path: "Notes/A.md", line: 1 })
+  await api("POST", "ops/companion.next", { timeout: 0 })
+  ;[, r] = await api("POST", "ops/companion.status", {})
+  check("companion: after acting, next is no seen tick", r.agents.some((a: Any) => a.name === "Claude" && a.state === "watching" && !a.seen), r.agents)
+  {
+    // Going to another note wakes no one: the cursor follows there at once, and the open comes with the next moment.
+    const waiting = api("POST", "ops/companion.next", { timeout: 1 })
+    await $.sleep(50)
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    const acted = r.agents.find((a: Any) => a.name === "Claude")?.t
+    cIntake.addMoment({ kind: "open", path: "Notes/B.md", line: 1 })
+    cIntake.addMoment({ kind: "open", path: "Notes/C.md", line: 4 })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: an open moves the cursor there, no turn needed", r.agents.some((a: Any) => a.name === "Claude" && a.path === "Notes/C.md" && a.line === 4 && a.state === "watching"), r.agents)
+    check("companion: …as a move, not an act: it rests (no cursor shown for it), when it last acted kept", r.agents.some((a: Any) => a.name === "Claude" && a.rests && a.t === acted), [acted, r.agents])
+    ;[, r] = await waiting
+    check("companion: an open alone wakes no one", r.moments.length === 0, r.moments)
+    const next = api("POST", "ops/companion.next", { timeout: 3 })
+    await $.sleep(50)
+    cIntake.addMoment({ kind: "edit", path: "Notes/C.md", line: 4, hunks: [{ line: 4, removed: [], added: ["New thought"] }] })
+    ;[, r] = await next
+    check("companion: it comes with the next moment, the last note they went to only", r.moments.map((m: Any) => `${m.kind} ${m.path}`).join() === "open Notes/C.md,edit Notes/C.md", r.moments)
+  }
+  {
+    // Typing on, before the agent saw it: one moment, from what the line was to what it is.
+    const one = cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 3, hunks: [{ line: 3, removed: ["Hi"], added: ["Hi or a"] }] })
+    const two = cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 3, hunks: [{ line: 3, removed: ["Hi or a"], added: ["Hi or an", "x"] }] })
+    cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 5, hunks: [{ line: 5, removed: [], added: ["y"] }] })
+    const [, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: edits of the same lines before the agent saw them are one moment", one === two && got.moments.length === 1 &&
+      JSON.stringify(got.moments[0].hunks) === JSON.stringify([{ line: 3, removed: ["Hi"], added: ["Hi or an", "x", "y"] }]), got.moments)
+    check("companion: an edit of spaces alone isn't a moment", cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 4, hunks: [{ line: 4, removed: ["Hi."], added: ["Hi. ", ""] }] }) === null)
+    check("companion: an edit elsewhere stays its own", cIntake.mergeHunks([{ line: 3, removed: [], added: ["a"] }], [{ line: 9, removed: ["b"], added: ["c"] }]) === null)
+  }
+  check("companion: moments read as lines for an agent", cMoments.momentsText(edited, "pair", { path: "Notes/A.md", line: 2 }).includes("+ Call Alice friday"))
+  {
+    // Its timeline and chat read moments back from its messages (moments.ts): what momentsText writes, read again.
+    const { readMoments } = await import("../../../plugins/core/companion/moments.ts")
+    const { turnsOf, noteOf } = await import("../../../plugins/core/companion/turns.ts")
+    const ms: Moment[] = [
+      { seq: 1, t: 0, kind: "ask", path: "Notes/My plans.md", line: 7, text: "is this \"right\"?\nsure", selection: "the basil" },
+      { seq: 2, t: 0, kind: "edit", path: "Notes/My plans.md", hunks: [{ line: 3, removed: ["- old: a"], added: ["+ new", ""] }, { line: 9, removed: [], added: ["x"] }] },
+      { seq: 3, t: 0, kind: "reply", item: "n12", path: "Notes/My plans.md", line: 4, text: "ok" },
+      { seq: 4, t: 0, kind: "accept", item: "n7", path: "Notes/A.md", line: 5, to: "Call Ben" },
+      { seq: 5, t: 0, kind: "point", path: "Notes/A.md", line: 2 }, { seq: 6, t: 0, kind: "ask", text: "no note" }, { seq: 7, t: 0, kind: "open", path: "Notes/B.md" },
+    ]
+    const text = `Read ME.md first.\n\n${cMoments.momentsText(ms, "pair", { path: "Notes/My plans.md", line: 7 }, [{ path: "Notes/My plans.md", from: 1, to: 2, of: 9, lines: ["a", "  b"] }])}`
+    const m = readMoments(text)
+    check("companion: its moments read back from what it was sent, whatever's in their text and paths", !!m && m.before === "Read ME.md first." && m.mode === "pair" &&
+      m.focus?.path === "Notes/My plans.md" && m.focus.line === 7 && m.moments.length === 7 &&
+      m.moments[0].text === ms[0].text && m.moments[0].path === "Notes/My plans.md" && m.moments[0].line === 7 && m.moments[0].selection === "the basil" &&
+      JSON.stringify(m.moments[1].hunks) === JSON.stringify(ms[1].hunks) && m.moments[2].item === "n12" && m.moments[2].text === "ok" &&
+      m.moments[3].kind === "accept" && m.moments[3].item === "n7" && m.moments[3].to === "Call Ben" && m.moments[4].kind === "point" && m.moments[4].line === 2 &&
+      m.moments[5].text === "no note" && !m.moments[5].path && m.moments[6].kind === "open" && JSON.stringify(m.notes) === JSON.stringify([{ path: "Notes/My plans.md", from: 1, to: 2, of: 9, lines: ["a", "  b"] }]), m)
+    check("companion: a message that isn't moments isn't read as them", readMoments("Time for a fresh session: this one has grown long.") === null)
+    // (asked over another app with a note open in Vaultite: they're in that app, the note only behind it)
+    const chrome = { seq: 3, t: 0, kind: "ask" as const, for: "Claude", text: "It's internal.example.com", app: "com.google.Chrome", window: 7, title: "New Tab", sx: 5, sy: 5, summoned: true }
+    const away = cMoments.momentsText([chrome], "pair", { path: "Notes/My plans.md", line: 7 }), awayRead = readMoments(away)
+    check("companion: an ask over another app says they're there, not in Vaultite (its note only behind), read back as such",
+      away.startsWith("Mode: pair. The user is in com.google.Chrome, not Vaultite (Vaultite shows Notes/My plans.md at line 7).") && !/^Mode: pair\. The user is in Notes/.test(away) &&
+      awayRead?.away === "com.google.Chrome" && awayRead.focus?.path === "Notes/My plans.md" && awayRead.focus.line === 7 && awayRead.moments[0]?.text === "It's internal.example.com" &&
+      cMoments.momentsText([{ ...chrome, app: "private" }], "quiet", null).startsWith("Mode: quiet. The user is in a private app, not Vaultite.") &&
+      readMoments(cMoments.momentsText([{ ...chrome, app: undefined, path: "Notes/A.md", line: 2 }], "pair", { path: "Notes/A.md", line: 2 }))?.away === undefined, [away, awayRead])
+    const moved = readMoments(cMoments.momentsText([{ seq: 1, t: 0, kind: "reply", bubble: true, item: "n3", path: "Notes/A.md", line: 2, text: "yes" },
+      { seq: 2, t: 0, kind: "dismiss", bubble: true, item: "n4", path: "Notes/A.md", line: 3, text: "Hi: there" },
+      { seq: 3, t: 0, kind: "move", into: "note", item: "n5", path: "Notes/A.md", line: 6, text: "Kept" }, { seq: 4, t: 0, kind: "move", into: "bubble", path: "Notes/A.md", line: 9, text: "Back" }], "pair", null))
+    check("companion: replies to its bubbles, closing them and moving its words read back too", JSON.stringify(moved?.moments.map((x) => [x.kind, x.bubble ?? x.into, x.item ?? "", x.line, x.text])) ===
+      JSON.stringify([["reply", true, "n3", 2, "yes"], ["dismiss", true, "n4", 3, "Hi: there"], ["move", "note", "", 6, "Kept"], ["move", "bubble", "", 9, "Back"]]), moved?.moments)
+    const at = "2026-11-02T10:00:00.000Z", tool = (id: string, name: string, input: Any, result?: string, error?: boolean): Entry => ({ k: "tool", id, name, summary: "", input, result, error, at })
+    const ts = turnsOf([
+      { k: "user", id: "u1", text: cMoments.momentsText([ms[0]], "pair", null), at },
+      tool("t1", "mcp__vaultite-app__say", { text: "On it" }, "Said."),
+      tool("t2", "Bash", { command: "vau read Notes/A.md" }, "…"), tool("t3", "Bash", { command: "vau search basil" }, "…"),
+      tool("t4", "mcp__vaultite-app__suggest", { find: "basil", replace: "thyme", path: "Notes/A.md" }, "Suggested (n7uaz)."),
+      tool("t5", "mcp__vaultite-app__edit", { text: "a\nb\nc", after: "## Plan" }, "Typed into Notes/My plans.md."),
+      tool("t6", "Bash", { command: "vau terminal open claude_default --prompt \"Fix the test\"" }, "Opened claude_default-ab12cd34 (claude_default)."),
+      tool("t7", "mcp__vaultite-app__comment", { text: "x" }, "there's no note", true),
+      { k: "user", id: "u2", text: cMoments.momentsText([{ seq: 8, t: 0, kind: "reject", item: "n7uaz", path: "Notes/A.md", line: 1 }], "pair", null), at },
+      { k: "user", id: "u3", text: cMoments.momentsText([{ seq: 9, t: 0, kind: "edit", path: "Notes/B.md", hunks: [{ line: 1, removed: [], added: ["hi"] }] }], "pair", null), at },
+    ])
+    const acts = ts[0]?.acts ?? []
+    check("companion: its session reads as turns: what the user did, then what it did, reads folded, sessions it started, an item's answer on it",
+      ts.length === 3 && acts.map((a) => a.k).join() === "say,read,suggest,edit,session,comment" && acts[1].k === "read" && acts[1].what.length === 2 &&
+      acts[2].item === "n7uaz" && acts[2].outcomes?.[0]?.kind === "reject" && acts[3].path === "Notes/My plans.md" && acts[3].find === "## Plan" &&
+      acts[4].k === "session" && acts[4].terminal === "claude_default-ab12cd34" && acts[4].title === "Fix the test" && !!acts[5].error &&
+      noteOf(ts[0]) === "Notes/My plans.md" && noteOf(ts[2]) === "Notes/B.md" && !ts[2].acts.length, ts)
+  }
+  {
+    // Private notes: a folder of the setting's, or `companion: private` in a note's properties; nothing comes from them.
+    const t = await import("../../../plugins/core/companion/text.ts")
+    check("companion: a note is private by its folder or its properties", t.isPrivate("Journal/a.md", "", ["Journal/"]) && !t.isPrivate("Journals/a.md", "", ["Journal"]) &&
+      t.isPrivate("a.md", "---\ntitle: A\ncompanion: private\n---\nhi", []) && !t.isPrivate("a.md", "companion: private\n", []))
+    write("Notes/Secret.md", "---\ncompanion: private\n---\nDear diary @claude what now?\n")
+    await api("PATCH", "config/plugin/companion", { private: ["Journal"] })
+    check("companion: nothing of a private note reaches it, asks neither", cIntake.addMoment({ kind: "ask", path: "Notes/Secret.md", line: 4, text: "what now?" }) === null &&
+      cIntake.addMoment({ kind: "edit", path: "Journal/Day.md", line: 1, hunks: [{ line: 1, removed: [], added: ["Today"] }] }) === null &&
+      !!cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 1, hunks: [{ line: 1, removed: [], added: ["# A!"] }] }))
+    await api("PATCH", "config/plugin/companion", { private: null })
+    await api("POST", "ops/companion.next", { timeout: 0 })
+
+    // Silence made visible: pass shows why by its seen tick.
+    cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 3, hunks: [{ line: 3, removed: [], added: ["Note to self"] }] })
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    ;[st, r] = await api("POST", "ops/companion.pass", { reason: "Not for me." })
+    const [, stat] = await api("POST", "ops/companion.status", {})
+    check("companion: pass is a seen tick with its few words", st === 200 && stat.agents.some((a: Any) => a.name === "Claude" && a.state === "watching" && a.seen && a.why === "Not for me"), [r, stat.agents])
+
+    // Bubbles: a question, a reply in it, closing one (which rides along), Put in note, folding back.
+    write("Notes/B.md", "# B\n\nHow do modes work?\nStill that question.\n\nLater text\n")
+    ;[, r] = await api("POST", "ops/companion.say", { text: "For you, or a note to yourself?", ask: true, path: "Notes/B.md", find: "How do modes" })
+    const q = r
+    check("companion: a say with ask is a question bubble, longer words show longer", q.question === true && cSettings.sayMs("a b c") === 12_000 && cSettings.sayMs("w ".repeat(60)) > 12_000 && cSettings.sayMs("w ".repeat(900)) === 45_000, q)
+    cComments.answer(q.id, "reply", "for you")
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: a reply in a bubble is a reply moment, that quotes it", r.moments.some((m: Any) => m.kind === "reply" && m.bubble && m.item === q.id && m.text === "for you") &&
+      cMoments.momentsText(r.moments, "pair", null).includes('reply to your bubble') && cMoments.momentsText(r.moments, "pair", null).includes("note to yourself"), r.moments)
+    ;[, r] = await api("POST", "ops/companion.say", { text: "Modes: quiet and pair.", path: "Notes/B.md", find: "How do modes" })
+    const said = r
+    const waiting = api("POST", "ops/companion.next", { timeout: 1 })
+    await $.sleep(50)
+    cComments.answer(said.id, "dismiss")
+    ;[, r] = await waiting
+    check("companion: a bubble closed wakes no one", r.moments.length === 0, r.moments)
+    ;[st, r] = await api("POST", "ops/companion.place", { id: said.id })
+    check("companion: Put in note is the user's", st === 403, [st, r])
+    ;[st, r] = await api("POST", "ops/companion.place", { id: said.id }, $.sentBy("app/desktop"))
+    check("companion: Put in note writes its words after the paragraph it was said by", st === 200 && read("Notes/B.md") === "# B\n\nHow do modes work?\nStill that question.\n\nModes: quiet and pair.\n\nLater text\n", [st, r, read("Notes/B.md")])
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: closing and moving ride along with the next, as hints", r.moments.map((m: Any) => m.kind).join() === "dismiss,move" && r.moments[1].into === "note" &&
+      /closed it/.test(cMoments.momentsText(r.moments, "pair", null)) && /put your bubble in the note/.test(cMoments.momentsText(r.moments, "pair", null)), r.moments)
+    check("companion: and it's marked in the cursor's history", cState.recentSays().some((n: Any) => n.id === said.id && n.placed && n.seen))
+    ;[st, r] = await api("POST", "ops/companion.fold", { as: "Claude", path: "Notes/B.md", line: 4, text: "Modes: quiet and pair." }, $.sentBy("app/desktop"))
+    const folded = r
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: folded back, its words are a bubble by its cursor, and a hint", st === 200 && cState.recentSays().some((n: Any) => n.id === folded.id && n.text === "Modes: quiet and pair.") &&
+      r.moments.some((m: Any) => m.kind === "move" && m.into === "bubble") && /folded what you wrote/.test(cMoments.momentsText(r.moments, "pair", null)), [folded, r.moments])
+  }
+  {
+    // The eval (tools/evals/companion.ts): a session's turns against the contract; its fixture, and the check itself.
+    const e = await import("../../evals/companion/score.ts")
+    const fx = JSON.parse(fs.readFileSync(new URL("../../evals/companion/2026-11-02.json", import.meta.url), "utf8"))
+    const ideals: Record<Outcome, string[]> = { silent: [], bubble: ["say"], note: ["edit", "look"], comment: ["comment"] }
+    const ideal = fx.steps.map((s: Step) => ideals[s.expect[0]])
+    check("companion eval: a turn is silent, a bubble, the note or a comment, the note first", e.outcomeOf([]) === "silent" && e.outcomeOf(["look", "pass"]) === "silent" &&
+      e.outcomeOf(["say", "edit"]) === "note" && e.outcomeOf(["say"]) === "bubble" && e.outcomeOf(["comment", "say"]) === "comment")
+    const best = e.score(fx.steps, ideal), base = e.score(fx.steps, fx.baseline)
+    check("companion eval: the fixture's steps each have moments and what they expect; turns as expected score all", fx.steps.length === fx.baseline.length && best.right === best.of &&
+      fx.steps.every((s: Any) => s.moments.length && s.expect.length && Object.keys(s.notes).length), best.rows.filter((r: Any) => !r.ok))
+    check("companion eval: the session it comes from misses where it hedged and wrote what was for a bubble", base.right === 26 && !base.rows[19].ok && !base.rows[6].ok, scoreText(base))
+    function scoreText(r: Any) { return e.scoreText("baseline", r) }
+    // (a summoned answer is read aloud: today's real ones as heard, and as they'd be said)
+    const bad = ['Yes. Rooms page in Lighthouse Architecture, Office room: you and Bob are connected. Tab is recording the mic ("Microphone recording", Transcribe, Audio on). Muted shows in the presence list.',
+      '#changelog: Lighthouse Agents bot posts a daily draft for the "What\'s new" page at ~2-3 AM, covering the previous day. Recent: Oct 30 document search, Oct 31 search/filing comparison.',
+      "Same channel: an automated deploy log, latest v0.1.209 today 11:11 AM.", "- **Left**: nav\n- **Middle**: Office room"]
+    const good = ["Yep, you're in the Office room with Bob. Your mic is muted, but this tab is still recording, so transcription is on.",
+      "This is where the bot drops a draft of each day's changelog, every night around two. The latest one is about chat improvements. Want me to read it to you?"]
+    const sp = e.spokenScore([...bad, ...good]), summ = JSON.parse(fs.readFileSync(new URL("../../evals/companion/summoned-2026-11-05.json", import.meta.url), "utf8"))
+    check("companion eval: as speech, labels in quotes, brackets, lists, versions and times in digits are faults; a friend's two sentences are clean",
+      sp.rows.slice(0, 4).every((r) => r.faults.length) && sp.rows.slice(4).every((r) => !r.faults.length) && sp.clean === 2 && e.spokenStyle("Sure, let me look. It's the Wi-Fi.").faults.includes("preamble"), sp.rows)
+    check("companion eval: the summoned fixture's asks each have their window's text and a point", summ.asks.length >= 10 &&
+      summ.asks.every((a: Any) => a.screen && Number.isFinite(a.sx) && (a.text || a.kind === "point")))
+  }
+  {
+    // The old notice mode is pair now (core/migrations.ts), as a vault had it.
+    const { DONE, migrate } = await import("../../../core/migrations.ts")
+    $.vault.patchConfig("plugins/companion/data", { mode: "notice" })
+    $.vault.patchConfig("migrations", { done: DONE.filter((d) => d !== "companion-notice-pair-2026-11") })
+    await migrate($.vault, false)
+    check("companion: a vault's notice mode becomes pair", $.vault.readConfig("plugins/companion/data")?.mode === "pair", $.vault.readConfig("plugins/companion/data"))
+    // Summoned: no resting cursor's setting, and double Control a key of neither (the companion's is ⌃⌥ for it).
+    const comp = $.vault.readConfig("plugins/companion/data") ?? {}, dict = $.vault.readConfig("plugins/dictation/data") ?? {}
+    $.vault.setConfig("plugins/companion/data", { ...comp, screen_cursor: "dock", keys: ["double_control", "fn"] })
+    $.vault.setConfig("plugins/dictation/data", { ...dict, keys: ["double_control"] })
+    $.vault.patchConfig("migrations", { done: DONE.filter((d) => d !== "summoned-keys-2026-11") })
+    await migrate($.vault, false)
+    const c2 = $.vault.readConfig("plugins/companion/data"), d2 = $.vault.readConfig("plugins/dictation/data")
+    check("companion: a vault's double Control becomes ⌃⌥ to talk, goes from dictation, and the resting cursor's setting goes",
+      JSON.stringify(c2?.keys) === '["control_option","fn"]' && !("screen_cursor" in (c2 ?? {})) && !("keys" in (d2 ?? {})), { c2, d2 })
+    $.vault.setConfig("plugins/companion/data", comp)
+    $.vault.setConfig("plugins/dictation/data", dict)
+  }
+  {
+    // A drawing's moments: what changed, the scene as its window saw it (the last one), the user's pointer.
+    const ms: Moment[] = [{ seq: 1, t: 0, kind: "edit", path: "D.excalidraw", x: 5, y: 9, changes: ["+ r1 rectangle at 0,0"], scene: "old" },
+      { seq: 2, t: 1, kind: "ask", path: "D.excalidraw", find: "t1", text: "why?", scene: "1 items:\n- t1 text \"@claude why?\"" }]
+    const ex = await cMoments.excerpts({ api: async () => { throw new Error("not asked") } }, ms), text = cMoments.momentsText(ms, "pair", { path: "D.excalidraw", x: 5, y: 9 }, ex)
+    check("companion: a drawing's moments read with what changed and its scene, at the user's pointer", ex.length === 1 && !!ex[0].scene?.startsWith("1 items") &&
+      text.includes("The user is in D.excalidraw at 5,9.") && text.includes("  + r1 rectangle at 0,0") && text.includes('- ask D.excalidraw (in t1): "why?"') && text.endsWith('- t1 text "@claude why?"'), text)
+    ;[st, r] = await api("POST", "ops/companion.draw", { path: "Notes/A.md", actions: [{ op: "delete", id: "x" }] })
+    check("companion: draw is for drawings", st === 400 && /isn't a drawing/.test(r.error), [st, r])
+  }
+  {
+    let n = 0, reads = 0
+    const saved = { api: async () => { n++; return { text: n < 3 ? "a\nb" : "a\n@claude why?" } } }
+    const ex = await cMoments.excerpts(saved, [{ seq: 1, t: 0, kind: "ask", path: "N.md", line: 2, text: "@claude why?", waited: 300 }])
+    const spoken: Moment[] = [{ seq: 2, t: 0, kind: "ask", path: "N.md", line: 2, text: "what does this line mean", waited: 120, summoned: true }]
+    const t0 = Date.now(), ex2 = await cMoments.excerpts({ api: async () => { reads++; return { text: "a\nb" } } }, spoken), took = Date.now() - t0
+    check("companion: a typed ask's note is read once its autosave lands; a spoken ask's at once (never 2 s on the in-note wait)",
+      n === 3 && !!ex[0]?.lines.some((l) => l.includes("@claude why?")) && reads === 1 && took < 150 && ex2.length === 1, { n, reads, took, ex, ex2 })
+  }
+
+  ;[st, r] = await api("POST", "ops/companion.suggest", { path: "Notes/A.md", find: "friday", replace: "Friday", why: "A day's name" })
+  const id = r.id
+  ;[, r] = await api("POST", "ops/companion.status", {})
+  check("companion: a suggestion is kept, by its agent, Claude in orange", st === 200 && r.notes.some((n: Any) => n.id === id && n.kind === "suggestion" && n.agent === "Claude") &&
+    r.agents.some((a: Any) => a.name === "Claude" && a.tint === "orange"), r)
+  cComments.answer(id, "accept")
+  ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+  check("companion: taking it is a moment for the agent, and it's gone", r.moments.some((m: Any) => m.kind === "accept" && m.item === id && m.to === "Friday") &&
+    !(await api("POST", "ops/companion.status", {}))[1].notes.some((n: Any) => n.id === id), r)
+
+  {
+    // Proposals: a large change as tracked changes, taken in part (web/qa/proposals.mjs draws them).
+    const t = await import("../../../plugins/core/companion/proposals.ts")
+    let k = 0
+    const ids = () => `c${k++}`, ch = t.changesOf("a\nb\nc\nd\n", "a\nB\nc\nd\ne\n", ids)
+    check("companion: a proposal is cut into changes found by their lines, one that adds taking the line above along",
+      ch.length === 2 && ch[0].find === "b\n" && ch[0].text === "B\n" && ch[0].line === 2 && ch[1].find === "d\n" && ch[1].text === "d\ne\n" && ch[1].line === 4, ch)
+    const top = t.changesOf("a\n", "x\na\n", ids), tail = t.changesOf("a\nb", "a\nb\nc", ids)
+    check("companion: at the top, the line below it; a last line without its newline keeps it so",
+      top[0].find === "a\n" && top[0].text === "x\na\n" && tail[0].find === "b" && tail[0].text === "b\nc", [top, tail])
+    const P = "Notes/P.md", user = $.sentBy("app/desktop")
+    write(P, "---\ntitle: P\n---\n# Plan\n\nOne\nTwo\nThree\n\n## Risks\n")
+    let [st, r] = await api("POST", "ops/companion.propose", { path: P, pending: "Risks: checking last week", find: "## Risks" })
+    const pid = r.id
+    check("companion: a placeholder is a proposal being written, by the line it comes after", st === 200 && r.kind === "proposal" && r.changes[0].intent === "Risks: checking last week" && r.changes[0].line === 10, [st, r])
+    ;[st, r] = await api("POST", "ops/companion.propose", { id: pid, path: P, text: "# Plan\n\nOne\n2\nThree\n\n## Risks\n- Rain\n", why: "Tighter" })
+    check("companion: proposed with its id, the note (frontmatter left out) fills it: two changes, the file as it was",
+      st === 200 && r.id === pid && r.changes.length === 2 && !r.changes.some((x: Any) => x.intent) && read(P).includes("title: P\n---\n# Plan\n\nOne\nTwo"), [st, r])
+    const [two, rain] = r.changes
+    ;[st, r] = await api("POST", "ops/companion.review", { id: pid, verdict: "accept" })
+    check("companion: an agent can't take its own proposal", st === 403, [st, r])
+    ;[st, r] = await api("POST", "ops/companion.review", { id: pid, verdict: "accept", change: two.id }, user)
+    check("companion: the user takes one change: in the file, the rest still proposed", st === 200 && r.took === 1 && r.open === 1 && read(P).includes("One\n2\nThree") && !read(P).includes("- Rain"), [st, r, read(P)])
+    ;[st, r] = await api("POST", "ops/companion.review", { id: pid, verdict: "reject", change: rain.id }, user)
+    ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: the last one left closes it, and its agent hears what was taken, once",
+      r.moments.filter((m: Any) => m.item === pid).length === 1 && r.moments.some((m: Any) => m.item === pid && m.kind === "accept" && /took 1 of 2 changes/.test(m.text)) &&
+      !(await api("POST", "ops/companion.status", {}))[1].notes.some((n: Any) => n.id === pid) && !read(P).includes("- Rain"), r)
+    // A big edit is never typed over the note: it's proposed.
+    write(P, "# Plan\n\n1\n2\n3\n4\n5\n6\n7\n8\n")
+    ;[st, r] = await api("POST", "ops/companion.edit", { path: P, find: "1\n2\n3\n4\n5\n6\n7\n", text: "Seven steps, in short.\n" })
+    check("companion: an edit replacing more than 6 lines comes as a proposal, the note untouched", st === 200 && r.how === "proposed" && read(P).includes("1\n2\n3") &&
+      (await api("POST", "ops/companion.status", {}))[1].notes.some((n: Any) => n.id === r.id && n.kind === "proposal"), [st, r])
+    const big = r.id
+    write(P, "# Plan\n\nOne, by hand\n2\n3\n4\n5\n6\n7\n8\n")
+    cComments.loadAll()
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: a change whose text the user has since changed is stale (it can only be left)", r.notes.find((n: Any) => n.id === big)?.changes?.[0]?.stale === true, r.notes.find((n: Any) => n.id === big))
+    ;[st, r] = await api("POST", "ops/companion.review", { id: big, verdict: "accept" }, user)
+    check("companion: accepting all takes none that's stale; leaving all closes it", st === 200 && r.took === 0 && r.open === 1 && read(P).includes("One, by hand"), [st, r])
+    await api("POST", "ops/companion.review", { id: big, verdict: "reject" }, user)
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: closed", !(await api("POST", "ops/companion.status", {}))[1].notes.some((n: Any) => n.id === big))
+  }
+
+  ;[st, r] = await api("POST", "ops/companion.comment", { path: "Notes/A.md", find: "Alice", text: "Alice is away until Monday." })
+  cComments.answer(r.id, "reply", "Then Tuesday")
+  ;[, r] = await api("POST", "ops/companion.next", { timeout: 0 })
+  check("companion: a reply to a comment comes back with its words", r.moments.some((m: Any) => m.kind === "reply" && m.text === "Then Tuesday"), r)
+
+  ;[st, r] = await api("POST", "ops/companion.edit", { path: "Notes/A.md", find: "friday", text: "Tuesday" })
+  check("companion: with no window showing the note, an edit is written to the file", st === 200 && r.how === "written" && read("Notes/A.md") === "# A\n\nCall Alice Tuesday\n", [st, r])
+  {
+    // Three at once: one at a time, none lost or mixed.
+    write("Notes/B.md", "# B\n\nOne\n")
+    const all = await Promise.all(["Two", "Three", "Four"].map((t, i) => api("POST", "ops/companion.edit", { path: "Notes/B.md", after: ["One", "Two", "Three"][i], text: t })))
+    check("companion: quick edits of a note go one at a time, each where the last left it", all.every(([s]) => s === 200) && read("Notes/B.md") === "# B\n\nOne\nTwo\nThree\nFour\n", [all, read("Notes/B.md")])
+    check("companion: after anchors new lines to a line's text, wherever it moved", cEdits.editText("a\nb\nc", { after: "b", line: 1, text: "x" }) === "a\nb\nx\nc")
+  }
+  {
+    const noWindow = (st: number, r: Any) => st === 200 && /window/.test(r.unshown)
+    const windows = app.ui
+    app.ui = null
+    let [s1, r1] = await api("POST", "ops/companion.open", { path: "Notes/Lisbon trip", new: true })
+    check("companion: open with new makes the note (a .md path) before opening it", noWindow(s1, r1) && read("Notes/Lisbon trip.md").endsWith("\n# Lisbon trip\n"), [s1, r1, read("Notes/Lisbon trip.md")])
+    ;[s1, r1] = await api("POST", "ops/companion.edit", { path: "Notes/Lisbon trip.md", append: true, text: "\n## Day one\n\nThe castle in the morning." })
+    ;[s1, r1] = await api("POST", "ops/companion.open", { path: "Notes/Lisbon trip.md", new: true })
+    check("companion: open with new over a note that's there leaves it as it was, a blank line before each section",
+      noWindow(s1, r1) && read("Notes/Lisbon trip.md").endsWith("\n# Lisbon trip\n\n## Day one\n\nThe castle in the morning.\n"), [s1, r1, read("Notes/Lisbon trip.md")])
+    app.ui = windows
+    const C = await import("../../../plugins/core/companion/opening.ts")
+    check("companion: open's text tells it to write in a new note, or to read one that was there",
+      /write it with edit/.test(C.openText({ path: "N.md", pane: "p1", fresh: "made" })) && /read it before/.test(C.openText({ path: "N.md", pane: "p1", fresh: "there" })) &&
+      /write it all the same/.test(C.openText({ path: "N.md", pane: null, fresh: "made", unshown: "no window" })))
+    const unseen = C.openText({ path: "https://example.com/doc" })
+    check("companion: an open no pane was seen showing never says it opened, nor names a pane", !/^Opened|\(pane/.test(unseen) && /don't say it's open/.test(unseen), unseen)
+    check("companion: an open seen says the pane and what it shows now", /\(pane p2, showing "Doc"\)/.test(C.openText({ path: "https://example.com/doc", pane: "p2", shows: "Doc" })))
+    ;[s1, r1] = await api("POST", "ops/companion.open", { path: "https://example.com", new: true })
+    check("companion: open with new only makes a note in the vault", s1 === 400 && /in the vault/.test(r1.error), [s1, r1])
+  }
+  ;[st, r] = await api("POST", "ops/companion.highlight", { path: "Notes/A.md", find: "Tuesday", keep: true })
+  check("companion: a kept highlight is in the file in its colour", st === 200 && read("Notes/A.md").includes("==🟠Tuesday=="), [st, read("Notes/A.md")])
+  ;[st, r] = await api("POST", "ops/companion.edit", { path: "Notes/A.md", find: "Wednesday", text: "x" })
+  check("companion: an edit of text that isn't there says so", st >= 400 && /isn't in the file/.test(JSON.stringify(r)), [st, r])
+
+  {
+    // Comments and suggestions kept: a sidecar per note, read again when the server starts or another machine writes it.
+    const side = (p: string) => `.vaultite/plugins/companion/comments/${p}.json`
+    const kept = (p: string) => (exists(side(p)) ? JSON.parse(read(side(p))).comments : null)
+    const status = async (): Promise<Any[]> => (await api("POST", "ops/companion.status", {}))[1].notes
+    check("companion: an item's line follows its text, or its line's text; gone, null",
+      cComments.anchorLine("x\na\nb\n", { find: "b", line: 2 }) === 3 && cComments.anchorLine("x\ny\na\n", { anchor: "a", line: 1 }) === 3 &&
+      cComments.anchorLine("x\n", { find: "b", line: 1 }) === null && cComments.anchorLine("x\ny\n", { line: 9 }) === 2)
+    write("Kept/K.md", "# K\n\nMeet Bob\nPlan the trip\n")
+    let [, cm] = await api("POST", "ops/companion.comment", { path: "Kept/K.md", find: "Bob", text: "Bob is in Lisbon." })
+    const [, ln] = await api("POST", "ops/companion.comment", { path: "Kept/K.md", line: 4, text: "Which trip?" })
+    const [, sg] = await api("POST", "ops/companion.suggest", { path: "Kept/K.md", find: "Plan", replace: "Book" })
+    await api("POST", "ops/companion.comment", { id: cm.id, text: "Back on Friday." })
+    cComments.answer(cm.id, "reply", "Thanks")
+    let k = kept("Kept/K.md")
+    check("companion: comments and suggestions are kept in the note's sidecar, replies too", k?.length === 3 && !("path" in k[0]) &&
+      k.find((n: Any) => n.id === cm.id)?.replies?.map((r: Any) => r.text).join() === "Back on Friday.,Thanks" && k.find((n: Any) => n.id === ln.id)?.anchor === "Plan the trip", k)
+    cComments.loadAll(true)
+    check("companion: and read again as the server starts", (await status()).filter((n) => n.path === "Kept/K.md").map((n) => n.id).sort().join() === [cm.id, ln.id, sg.id].sort().join())
+    write("Kept/K.md", "# K\n\nNew line\nAnother\nMeet Bob\nPlan the trip\n")
+    cComments.loadAll()
+    k = kept("Kept/K.md")
+    check("companion: lines written above move them with their text", k.find((n: Any) => n.id === cm.id).line === 5 && k.find((n: Any) => n.id === ln.id).line === 6, k)
+    write("Kept/K.md", "# K\n\nNew line\nAnother\nMeet\n")
+    cComments.loadAll()
+    k = kept("Kept/K.md")
+    check("companion: their text gone, a comment stays by its last line, orphaned, a suggestion goes", k.length === 2 && k.find((n: Any) => n.id === cm.id).line === 5 &&
+      k.find((n: Any) => n.id === cm.id).orphaned && k.find((n: Any) => n.id === ln.id).line === 5 && !(await status()).some((n) => n.id === sg.id), k)
+    write("Kept/K.md", "# K\n\nNew line\nMeet Bob\n")
+    cComments.loadAll()
+    k = kept("Kept/K.md")
+    check("companion: its text back (an undo), it's found again", k.find((n: Any) => n.id === cm.id).line === 4 && !k.find((n: Any) => n.id === cm.id).orphaned, k)
+    write("Kept/K.md", "# K\n\nNew line\nAnother\nMeet\n")
+    cComments.loadAll()
+    k = kept("Kept/K.md")
+
+    write(side("Kept/K.md"), JSON.stringify({ comments: [...k, { id: "nzz1", kind: "comment", agent: "Claude", t: 1, text: "From the phone", line: 1 }] }))
+    $.app.changed([side("Kept/K.md")])
+    check("companion: a sidecar another machine wrote is read again", (await status()).some((n) => n.id === "nzz1" && n.path === "Kept/K.md"))
+
+    await api("POST", "ops/file.move", { from: "Kept/K.md", to: "Kept/Sub/L.md" })
+    check("companion: moved or renamed, the sidecar follows its note", !exists(side("Kept/K.md")) && kept("Kept/Sub/L.md")?.length === 3 &&
+      (await status()).filter((n) => n.path === "Kept/Sub/L.md").length === 3)
+    await api("POST", "ops/file.move", { from: "Kept/Sub", to: "Kept/Moved" })
+    check("companion: and with its folder", kept("Kept/Moved/L.md")?.length === 3 && !exists(side("Kept/Sub/L.md")))
+    const [, del] = await api("DELETE", "file", { path: "Kept/Moved/L.md" })
+    check("companion: deleted, it goes into the trash with it", kept(del.trashed)?.length === 3 && !exists(side("Kept/Moved/L.md")), del)
+    await api("POST", "file/restore", { path: del.trashed })
+    check("companion: and comes back with it", kept("Kept/Moved/L.md")?.length === 3 && !exists(side(del.trashed)))
+    for (const n of await status()) if (n.path === "Kept/Moved/L.md") cComments.answer(n.id, "dismiss")
+    const sc = JSON.parse(read(side("Kept/Moved/L.md")))
+    check("companion: dismissed comments stay in the note's history, in its sidecar", sc.comments.length === 0 && sc.past.length === 3 && sc.past.every((n: Any) => n.dismissed), sc)
+    let [, h] = await api("POST", "ops/companion.history", { path: "Kept/Moved/L.md" })
+    check("companion: history lists them", h.open.length === 0 && h.past.length === 3 && h.past.some((n: Any) => n.id === cm.id && n.replies?.length === 2), h)
+    cComments.reopen(cm.id)
+    ;[, h] = await api("POST", "ops/companion.history", { path: "Kept/Moved/L.md" })
+    check("companion: one reopened is back in the margin, as it was", h.open.some((n: Any) => n.id === cm.id && n.replies?.length === 2 && !n.dismissed) && h.past.length === 2, h)
+    cComments.loadAll(true)
+    ;[, h] = await api("POST", "ops/companion.history", { path: "Kept/Moved/L.md" })
+    check("companion: history is read again as the server starts", h.open.length === 1 && h.past.length === 2, h)
+    const back = h.past[0].id
+    await api("POST", "ops/companion.comment", { id: back, text: "One more thing" })
+    ;[, h] = await api("POST", "ops/companion.history", { path: "Kept/Moved/L.md" })
+    check("companion: its agent's word in a dismissed thread brings it back", h.open.some((n: Any) => n.id === back && n.replies?.at(-1)?.text === "One more thing") && h.past.length === 1, h)
+    await api("POST", "ops/companion.clear", {})
+    await api("DELETE", "file", { path: "Kept/Moved/L.md" })
+    const left = (await status()).filter((n) => n.path?.endsWith("Kept/Moved/L.md"))
+    check("companion: a note deleted takes its history to the trash", left.length === 0 && !exists(side("Kept/Moved/L.md")), [left, exists(side("Kept/Moved/L.md"))])
+    await api("POST", "ops/companion.next", { timeout: 0 }) // (its replies and dismissals, for the replay's below)
+  }
+
+  {
+    // The harness: recorded moments sent again, spaced as they came (faster with speed).
+    const fs = await import("node:fs"), file = `${$.tmp}/moments.jsonl`
+    fs.writeFileSync(file, [{ kind: "ask", text: "first", t: 1000 }, { kind: "ask", text: "second", t: 1400 }].map((m) => JSON.stringify(m)).join("\n"))
+    ;[st, r] = await api("POST", "ops/companion.replay", { file, speed: 10 })
+    await $.sleep(200)
+    const [, got] = await api("POST", "ops/companion.next", { timeout: 2 })
+    check("companion replay: recorded moments come again, in order", st === 200 && r.replaying === 2 && got.moments.map((m: Any) => m.text).join() === "first,second", [r, got])
+  }
+  {
+    // Several agents: an ask goes to the one named after @, an answer to its item's agent, edit and open to the companion.
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    await api("POST", "ops/companion.look", { path: "Notes/A.md", line: 1 })
+    await api("POST", "ops/companion.next", { timeout: 0, as: "Ada" })
+    const ada = api("POST", "ops/companion.next", { timeout: 5, as: "ada" })
+    await $.sleep(50)
+    cIntake.addMoment({ kind: "ask", for: "ADA", path: "Notes/A.md", line: 3, text: "for Ada" })
+    let [, got] = await ada
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: @ada is an ask for Ada alone, who shows thinking (any case)", got.moments.length === 1 && got.moments[0].text === "for Ada" &&
+      r.agents.find((a: Any) => a.name === "Ada")?.state === "thinking" && r.agents.find((a: Any) => a.name === "Claude")?.state !== "thinking", [got, r.agents])
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: and the companion doesn't get it", !got.moments.some((m: Any) => m.text === "for Ada"), got)
+    cIntake.addMoment({ kind: "ask", for: "bob", text: "who?" })
+    cIntake.addMoment({ kind: "ask", text: "plain" })
+    cIntake.addMoment({ kind: "edit", path: "Notes/A.md", hunks: [] })
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    const [, adaGot] = await api("POST", "ops/companion.next", { timeout: 0, as: "Ada" })
+    check("companion: an unknown name and no name go to the companion, edits too; Ada gets none", got.moments.map((m: Any) => m.text ?? m.kind).join() === "who?,plain,edit" &&
+      adaGot.moments.length === 0, [got, adaGot])
+    await api("POST", "ops/companion.next", { timeout: 0, as: "Ada", watch: true })
+    cIntake.addMoment({ kind: "edit", path: "Notes/A.md", hunks: [] })
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0, as: "Ada", watch: true })
+    check("companion: an agent with watch gets edits too", got.moments.some((m: Any) => m.kind === "edit"), got)
+    ;[, r] = await api("POST", "ops/companion.comment", { path: "Notes/A.md", find: "Alice", text: "From Ada", as: "Ada" })
+    cComments.answer(r.id, "reply", "Thanks Ada")
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0, as: "Ada" })
+    const [, mainGot] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: a reply goes to the agent whose comment it is", got.moments.some((m: Any) => m.kind === "reply" && m.text === "Thanks Ada") &&
+      !mainGot.moments.some((m: Any) => m.kind === "reply"), [got, mainGot])
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: status lists Ada, joined, in a colour of its own", r.agents.some((a: Any) => a.name === "Ada" && a.live && a.tint !== "orange") &&
+      (await api("POST", "ops/companion.status", {}))[1].agents.length === 2, r.agents)
+    const kept = JSON.parse(fs.readFileSync(`${c.plugin.localDir()}/tints.json`, "utf8"))
+    check("companion: each agent's colour is kept, for after a restart", kept.ada === r.agents.find((a: Any) => a.name === "Ada")?.tint && kept.claude === "orange", kept)
+    check("companion: an agent's name is one word", (await api("POST", "ops/companion.start", { as: "two words" }))[0] >= 400)
+    // Started from the @ picker: Claude Code runs Sonnet at medium unless told; an ask while it boots waits for its first next.
+    check("companion: a new Claude Code session runs Sonnet at medium, Codex its own, either what it's given",
+      JSON.stringify([cSettings.howOf("claude"), cSettings.howOf("claude_work"), cSettings.howOf("codex"), cSettings.howOf("codex", "gpt-5", "high"), cSettings.howOf("claude", "opus")]) ===
+      JSON.stringify([{ model: "sonnet", effort: "medium" }, { model: "sonnet", effort: "medium" }, { model: "", effort: "" }, { model: "gpt-5", effort: "high" }, { model: "opus", effort: "medium" }]))
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    cAlwayson.starting("Bob", { path: "Notes/A.md", line: 3, model: "opus", effort: "high" })
+    cIntake.addMoment({ kind: "ask", for: "bob", path: "Notes/A.md", line: 3, text: "for Bob" })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    const bob = r.agents.find((a: Any) => a.name === "Bob")
+    check("companion: an agent starting shows so, where it was called, with its model, and an ask to it is its own", bob?.state === "starting" && bob.path === "Notes/A.md" &&
+      bob.model === "opus" && bob.effort === "high" && r.moments.some((m: Any) => m.text === "for Bob" && m.for === "Bob"), [bob, r.moments])
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: the companion doesn't get it meanwhile", !got.moments.some((m: Any) => m.text === "for Bob"), got)
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0, as: "Bob" })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: up, its first next gets the ask that waited, and it thinks on it", got.moments.length === 1 && got.moments[0].text === "for Bob" &&
+      r.agents.find((a: Any) => a.name === "Bob")?.state === "thinking", [got, r.agents])
+    // A name's first part picks what it runs (the setting profiles, the user's lines on the defaults); an ask to one not
+    // around is its own, to start it; @claude stays the companion's while it runs Claude Code.
+    const { parseProfiles, profileOf } = await import("../../../plugins/core/companion/profiles.ts")
+    const table = parseProfiles(["opus: claude opus", "sol: codex gpt-6.1-sol medium", "nonsense", "opus: claude opus high"])
+    check("companion: profiles are name: agent model effort, a later line replacing a name, a name's first part picking one",
+      JSON.stringify([profileOf("Opus-review", table), profileOf("sol", table), profileOf("bob", table), profileOf("opus2", table)]) ===
+      JSON.stringify([{ agent: "claude", model: "opus", effort: "high" }, { agent: "codex", model: "gpt-6.1-sol", effort: "medium" }, null, null]), table)
+    check("companion: a new agent runs its name's profile, else the settings; an agent given drops the profile's model",
+      JSON.stringify([cSettings.howFor("Opus-review"), cSettings.howFor("Luna"), cSettings.howFor("Bob"), cSettings.howFor("Opus-x", "codex"), cSettings.howFor("Claude")]) ===
+      JSON.stringify([{ agent: "claude", model: "opus", effort: "medium" }, { agent: "codex", model: "gpt-6-luna", effort: "medium" }, { agent: "claude", model: "sonnet", effort: "medium" },
+        { agent: "codex", model: "", effort: "" }, { agent: "claude", model: "sonnet", effort: "medium" }]))
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    cIntake.addMoment({ kind: "ask", for: "opus-review", path: "Notes/A.md", line: 3, text: "for Opus" })
+    cIntake.addMoment({ kind: "ask", for: "claude", path: "Notes/A.md", line: 3, text: "for the companion" })
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    const opus = r.agents.find((a: Any) => a.name === "Opus-review")
+    check("companion: @opus-review, not around, is its own (Claude Code, in Claude Code's colour unless taken), @claude the companion's",
+      got.moments.map((m: Any) => m.text).join() === "for the companion" && opus?.state === "thinking" && opus.runs === "claude" && opus.tint !== "orange" &&
+      r.moments.some((m: Any) => m.text === "for Opus" && m.for === "Opus-review"), [got, opus])
+    // An ask that finds the companion's session not running starts it: the ask waits for its first next.
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    const woke = cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 3, text: "are you there" })!
+    cAlwayson.starting("Claude", { path: "Notes/A.md", line: 3 }, woke.seq - 1)
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: started by an ask, its first next gets that ask", got.moments.some((m: Any) => m.text === "are you there"), got)
+  }
+  {
+    // The cursor: dropped on a line, a point (an ask without words); its says kept, a few per agent; one pinned, a comment.
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    write("Notes/P.md", "# P\n\nPlant the basil\nWater it\n")
+    cIntake.addMoment({ kind: "point", path: "Notes/P.md", line: 3, find: "basil", selection: "the basil" })
+    let [, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: a dropped cursor is a point for it, with the note's lines, and it thinks there", got.moments.some((m: Any) => m.kind === "point" && m.line === 3 && m.selection === "the basil") &&
+      got.notes[0]?.lines.includes("Plant the basil") && r.agents.some((a: Any) => a.name === "Claude" && a.state === "thinking" && a.find === "basil"), [got, r.agents])
+    check("companion: and reads as look at this", /- point Notes\/P\.md:3: .*look at this[^\n]*\n  on the selection: "the basil"/.test(cMoments.momentsText(got.moments, "pair", null)), cMoments.momentsText(got.moments, "pair", null))
+    for (let i = 1; i <= 12; i++) await api("POST", "ops/companion.say", { text: `Say ${i}`, path: "Notes/P.md", find: "Water" })
+    const mine = cState.recentSays().filter((n: Any) => n.agent === "Claude" && n.kind === "say")
+    check("companion: an agent's last ten says are kept", mine.length === 10 && mine[0].text === "Say 3" && mine[9].text === "Say 12", mine.map((n: Any) => n.text))
+    cIntake.addMoment({ kind: "ask", for: "Claude", path: "Notes/P.md", line: 4, text: "Can you water it" })
+    cIntake.addMoment({ kind: "ask", for: "Claude", path: "Notes/P.md", line: 4, text: "Can you water it tomorrow too" })
+    const asked = cState.recentSays().filter((n: Any) => n.kind === "ask" && n.agent === "Claude" && n.text.startsWith("Can you water it"))
+    check("companion: what the user asks it is kept with its says (an ask going on, one row), not costing a say",
+      asked.length === 1 && asked[0].text === "Can you water it tomorrow too" && asked[0].by === "user" && asked[0].seen &&
+      cState.recentSays().filter((n: Any) => n.kind === "say" && n.agent === "Claude").length === 10, cState.recentSays())
+    const pinned = cComments.pin(mine[9].id)
+    ;[, r] = await api("POST", "ops/companion.status", {})
+    check("companion: a say pinned is a comment, same words, same line, and no longer a bubble", pinned?.kind === "comment" && pinned.text === "Say 12" && pinned.line === 4 &&
+      !r.notes.some((n: Any) => n.id === mine[9].id) && cState.recentSays().find((n: Any) => n.id === mine[9].id)?.pinned === pinned.id && cComments.pin(mine[9].id) === null, [pinned, r.notes])
+    const old = cComments.pin(mine[0].id)
+    check("companion: an old say, gone from the screen, can be pinned too", old?.kind === "comment" && old.text === "Say 3", old)
+    await api("POST", "ops/companion.clear", {})
+  }
+  {
+    // Its edits are its own in Activity and History (by its name, not Claude Code's), and the user restores what was.
+    const { whoOf } = await import("../../../core/ops.ts")
+    const { service } = await import("../../../core/plugins.ts")
+    const code = whoOf("cli", "claude-code"), user = whoOf("app/desktop", null)
+    const call = async (id: string, params: Any, who = code): Promise<Any> => { await $.sleep(3); return (await $.app.callOp(id, params, who, { report: `cli ${id}` })).result }
+    const R = "Rev/Companion.md"
+    await api("PUT", "file", { path: R, text: "# Plans\n\nCall Alice friday\n" })
+    await $.sleep(20)
+    await call("companion.edit", { path: R, find: "friday", text: "on Friday", as: "Ada" })
+    let [, h] = await api("GET", `history?path=${R}`)
+    const first = h.versions.find((v: Any) => !v.by || v.by !== "Ada")
+    check("companion: its edit is the current version, by its name, the text just before kept", h.now?.by === "Ada" && !!first, h)
+    const [, acts] = await api("GET", "activity?actor=agent&limit=10")
+    check("companion: and in Activity as Ada", acts.events.some((e: Any) => e.actor.name === "Ada" && e.paths?.includes(R)), acts.events.slice(0, 3))
+    await $.sleep(20)
+    await call("companion.edit", { path: R, find: "Alice", text: "Alice Park", as: "Ada" })
+    ;[, h] = await api("GET", `history?path=${R}`)
+    check("companion: a version it wrote names it in History", h.versions.some((v: Any) => v.by === "Ada"), h.versions)
+    await call("history.restore", { path: R, t: first.t }, user)
+    check("companion: the user restores the version before its edits", read(R) === "# Plans\n\nCall Alice friday\n", read(R))
+    // A comment or a suggestion leaves the note as it is: Review keeps no version of it first.
+    await $.sleep(20)
+    await api("PUT", "file", { path: R, text: read(R) + "\nMore\n", base: read(R) }, $.sentBy("app/desktop"))
+    const versions = async () => (await api("GET", `history?path=${R}`))[1].versions.length
+    const was = await versions()
+    await call("companion.comment", { path: R, find: "More", text: "Why?", as: "Ada" })
+    await call("companion.suggest", { path: R, find: "More", replace: "Less", as: "Ada" })
+    await call("companion.clear", { as: "Ada" })
+    check("companion: a comment or a suggestion keeps no version of the note", await versions() === was, [was, await versions()])
+    // Typed into a window: the app's save of that note is the agent's while it types, and the user's again after.
+    const typing: (p: string, name: string, ms: number) => boolean = service($.app.plugins, "activity:typing")!
+    const save = async (text: string) => {
+      await $.sleep(3)
+      const end = $.app.requestStarted({ t: Date.now(), method: "PUT", route: "file", query: {}, client: "app/desktop", agent: null, command: null, ua: "", remote: "", port: 1, forwarded: false })
+      const r = await api("PUT", "file", { path: R, text, base: read(R) }, $.sentBy("app/desktop"))
+      end({ status: r[0], ms: 1, body: { path: R } })
+    }
+    typing(R, "Ada", 3000)
+    await save("# Plans\n\nCall Alice Friday\n")
+    typing(R, "Ada", 0)
+    await save("# Plans\n\nCall Alice Friday!\n")
+    const [, ev] = await api("GET", `activity?path=${R}&limit=5`)
+    check("companion: the app's save of what it typed is Ada's, the user's next one theirs",
+      ev.events[0]?.actor.name === "You" && ev.events.find((e: Any) => e.actor.kind === "agent")?.actor.name === "Ada", ev.events.slice(0, 3).map((e: Any) => [e.actor.name, e.text]))
+  }
+  {
+    // A fresh session: past fresh_after moments, an idle next asks the session to hand over (once a minute), and the
+    // new one is told its summary, its open threads and the last asks. (Starting one is the QA's: it runs an agent.)
+    const fs = await import("node:fs")
+    const file = `${c.plugin.localDir()}/session.json`
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    fs.writeFileSync(file, JSON.stringify({ id: "claude-test0001", name: "Claude", t: Date.now(), handed: 5 }))
+    cIntake.addMoment({ kind: "ask", path: "Notes/A.md", line: 3, text: "one" })
+    let [, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: moments handed are counted on its session", got.moments.length === 1 && JSON.parse(fs.readFileSync(file, "utf8")).handed === 6, got)
+    let [st, txt] = await api("POST", "ops/companion.next?as=text", { timeout: 0 })
+    check("companion: under fresh_after, next is as ever", st === 200 && !/fresh session/.test(String(txt)), txt)
+    fs.writeFileSync(file, JSON.stringify({ id: "claude-test0001", name: "Claude", t: Date.now(), handed: 150 }))
+    ;[st, txt] = await api("POST", "ops/companion.next?as=text", { timeout: 0 })
+    check("companion: past it, an idle next asks for a handover", st === 200 && /Time for a fresh session/.test(String(txt)) && /vau companion handover "/.test(String(txt)), txt)
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0 })
+    check("companion: and only once a minute", !got.handover, got)
+    check("companion: Start fresh needs a running session", (await api("POST", "ops/companion.fresh", {}))[0] === 404)
+    // A permission its session asks (Claude Code's folder trust, a tool's) shows by its cursor, until its terminal no
+    // longer waits (here none runs, so at the first look).
+    const t = await import("../../../plugins/core/terminal/plugin.ts")
+    const ib = await import("../../../plugins/core/inbox/plugin.ts")
+    ib.plugin.emit("inbox.event", { id: "e-trust", kind: "session", state: "open", source: "claude", title: "Claude Code is waiting for you", terminal: "claude-test0001",
+      ask: "permission", body: "Trust this folder? It can read, edit and run files in it" })
+    let [, s1] = await api("POST", "ops/companion.status", {})
+    const asks = s1.agents.find((a: Any) => a.name === "Claude")?.asks
+    check("companion: a permission its session asks is on its cursor", asks?.event === "e-trust" && asks.text.startsWith("Trust this folder?"), s1.agents)
+    ib.plugin.emit("inbox.event", { id: "e-other", kind: "waiting", source: "claude", title: "x", terminal: "claude-elsewhere", ask: "permission", body: "x" })
+    await $.sleep(2300)
+    ;[, s1] = await api("POST", "ops/companion.status", {})
+    check("companion: another terminal's isn't, and it goes once its terminal doesn't wait", !s1.agents.some((a: Any) => a.asks), s1.agents)
+    // Its terminal ended (closed, killed): its cursor goes, the companion's too.
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    t.plugin.emit("terminal.ended", { id: "claude-test0001", code: 0, signal: 1 })
+    let [, s2] = await api("POST", "ops/companion.status", {})
+    check("companion: a session that ended takes its cursor away", s2.agents.find((a: Any) => a.name === "Claude")?.state === "away", s2.agents)
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    ;[, s2] = await api("POST", "ops/companion.status", {})
+    check("companion: and it's back at its next", s2.agents.find((a: Any) => a.name === "Claude")?.state === "watching", s2.agents)
+    // Stopped while its next waits (the bug: an edit then woke the dead session's next, and the cursor came back for good).
+    const claude = () => api("POST", "ops/companion.status", {}).then(([, r]) => r.agents.find((a: Any) => a.name === "Claude"))
+    fs.writeFileSync(file, JSON.stringify({ id: "claude-test0002", name: "Claude", t: Date.now() }))
+    const dying = api("POST", "ops/companion.next", { timeout: 5, terminal: "claude-test0002" })
+    await $.sleep(50)
+    const t0 = Date.now()
+    await api("POST", "ops/companion.stop", {})
+    cIntake.addMoment({ kind: "edit", path: "Notes/A.md", line: 8, hunks: [{ line: 8, removed: [], added: ["More on this"] }] })
+    cIntake.addMoment({ kind: "open", path: "Notes/B.md", line: 1 })
+    ;[, got] = await dying
+    check("companion: stopped, its waiting next is answered at once, as ended", got.ended && !got.moments.length && Date.now() - t0 < 2000, got)
+    check("companion: and no edit or open brings its cursor back", (await claude())?.state === "away", await claude())
+    ;[, got] = await api("POST", "ops/companion.next", { timeout: 0, terminal: "claude-test0002" })
+    check("companion: a next still on its way from the ended session brings no one back", got.ended && (await claude())?.state === "away", [got, await claude()])
+    // Back by any other way (a word sent before it ended): not live, no session, the watchdog takes it away, companion or not.
+    await api("POST", "ops/companion.say", { text: "Late" })
+    await api("POST", "ops/companion.say", { text: "Late", as: "Zed" })
+    await cChatturns.tend()
+    ;[, s2] = await api("POST", "ops/companion.status", {})
+    check("companion: the watchdog takes a cursor with no session away, the companion's too", ["Claude", "Zed"].every((n) => s2.agents.find((a: Any) => a.name === n)?.state === "away"), s2.agents)
+    await api("POST", "ops/companion.next", { timeout: 0, terminal: "claude-hand0001" })
+    await cChatturns.tend()
+    check("companion: one started by hand (another terminal, or none) is back at its next, and stays", (await claude())?.state === "watching", await claude())
+    await api("POST", "ops/companion.next", { timeout: 0 })
+    fs.rmSync(file, { force: true })
+    check("companion: no session, no handover", (await api("POST", "ops/companion.handover", { summary: "x", as: "Nobody" }))[0] === 404)
+    const items: Note[] = [{ id: "n1", kind: "comment", agent: "Claude", t: 0, path: "A.md", line: 3, text: "Alice is away", replies: [{ by: "user", text: "Then Tuesday" }] },
+      { id: "n2", kind: "say", agent: "Claude", t: 0, path: "A.md", line: 4, text: "Done" },
+      { id: "n3", kind: "suggestion", agent: "Ada", t: 0, path: "A.md", find: "x", replace: "y" }]
+    const h = cAlwayson.handoverText("Claude", "Working on the Lisbon trip.", items, [{ seq: 1, t: 0, kind: "ask", path: "A.md", line: 2, text: "budget?" }])
+    check("companion: the fresh one is told the summary, its own open threads and the last asks", h.includes("Working on the Lisbon trip.") &&
+      h.includes("- n1 comment in A.md:3") && h.includes("the user: \"Then Tuesday\"") && !h.includes("n2") && !h.includes("n3") && h.includes("budget?") && /don't greet/.test(h), h)
+  }
+  {
+    // Places beyond notes (panes, the app's UI), what it follows and its watches, as moments.
+    const pl = await import("../../../core/desktop/places.ts"), tx = await import("../../../plugins/core/companion/text.ts")
+    check("companion: a pane says what it shows", pl.paneSource("view:terminal/claude-k3").terminal === "claude-k3" && pl.paneSource("view:web/https://a.com/x").url === "https://a.com/x" &&
+      pl.paneSource("file:N.md").path === "N.md" && pl.paneSource("settings").kind === "view")
+    check("companion: private sites cover their subdomains; the setting's lines are folders, sites, containers and apps",
+      pl.siteIn("www.secure.chase.com", ["chase.com"]) && !pl.siteIn("notchase.com", ["chase.com"]) && !tx.isPrivate("bank.com/a.md", "", ["site: bank.com"]) &&
+      JSON.stringify(tx.privateOf(["Journal", "site: bank.com", "container: work", "app: com.x"])) === JSON.stringify({ folders: ["Journal"], sites: ["bank.com"], containers: ["work"], apps: ["com.x"] }))
+    check("companion: the starting list keeps password managers and banks from it, not Mail or Messages", cSettings.privatePage("https://my.1password.com/vault") && cSettings.privatePage("https://www.itau.com.br/") &&
+      !cSettings.privatePage("https://mail.google.com/") && !cSettings.privates().apps.some((a: string) => /mail|messages|mobilesms/i.test(a)))
+    const t = cMoments.momentsText([{ seq: 1, t: 0, kind: "change", pane: "t3", title: "zsh", what: "a command ended", changes: ["  ok"] },
+      { seq: 2, t: 0, kind: "watch", item: "Watches/Order", title: "Order", what: "it changed", text: "tell me when it ships", changes: ["+ Shipped"] },
+      { seq: 3, t: 0, kind: "point", ui: "panel:files:files", text: "Notes" }], "pair", null, [], `They're looking at "zsh" (pane t3, a terminal).`)
+    check("companion: a follow's change, a watch's hit and a point on the app read as moments", t.includes(`- change in "zsh" (pane t3): a command ended\n    ok`) &&
+      t.includes(`- watch Watches/Order "Order": it changed`) && t.includes(`they asked: "tell me when it ships"`) && t.includes("- point (panel:files:files): they pointed you here") &&
+      t.split("\n")[1].startsWith("They're looking at"), t)
+    const onPane = cMoments.momentsText([{ seq: 4, t: 0, kind: "ask", pane: "t3", title: "zsh", row: 4, text: "what's this?", under: "error: no such file" }], "quiet", null)
+    check("companion: a Talk key's ask on a pane says the pane, its row and what was under the pointer, never a note's line",
+      onPane.includes(`- ask "zsh" (pane t3), row 4: "what's this?"`) && onPane.includes("under their pointer: error: no such file") && !onPane.includes("follow"), onPane)
+    const back = (await import("../../../plugins/core/companion/moments.ts")).readMoments(t)
+    check("companion: and read back for its timeline", back?.moments.map((m) => m.kind).join() === "change,watch,point" && back.moments[0].changes?.[0] === "  ok", back)
+    const me = () => api("POST", "ops/companion.status", {}).then(([, r]) => r.agents.find((a: Any) => a.name === "Claude"))
+    let [st2, r2] = await api("POST", "ops/companion.look", { ui: "tab:t3" })
+    const at = await me()
+    check("companion: look points at the app's UI by its id, its note's place gone", st2 === 200 && at?.ui === "tab:t3" && !at.path && !at.line, [st2, r2, at])
+    ;[st2] = await api("POST", "ops/companion.look", { path: "Notes/A.md", line: 2 })
+    check("companion: and back in a note, the UI's place gone", st2 === 200 && !(await me())?.ui)
+    ;[st2] = await api("POST", "ops/companion.look", { pane: "nope" })
+    check("companion: a pane no window has is a 404", st2 === 404)
+    ;[st2] = await api("POST", "ops/companion.comment", { text: "x", ui: "tab:t3" })
+    check("companion: comments are for notes", st2 === 400)
+    ;[st2, r2] = await api("POST", "ops/companion.follow", { group: "s1", as: "Claude" })
+    const f = r2?.follows?.[0]
+    ;[, r2] = await api("POST", "ops/companion.status", {})
+    check("companion: it follows a tab group, listed in its status, until it stops", st2 === 200 && f?.group === "s1" && r2.follows.some((x: Any) => x.id === f.id) &&
+      (await api("POST", "ops/companion.unfollow", { id: f.id }))[1]?.stopped === 1, [st2, r2])
+    ;[st2] = await api("POST", "ops/companion.follow", { tab: "tnope", as: "Claude" })
+    check("companion: a tab no window has can't be followed", st2 === 404)
+  }
+  {
+    // Drawings over the screen (companion draw --marks): to the helper's socket, the app's places found by the window,
+    // gone at the next ask, Clear or companion clear; Keep saves an .excalidraw. web/qa/screendraw.mjs draws them.
+    const { EventEmitter } = await import("node:events")
+    const live = c.plugin.sockets.find((x: Any) => x.pattern.join("/") === "companion/live")!
+    const fake = (answer?: (m: Any, ws: Any) => void) => {
+      const got: Any[] = []
+      const ws: Any = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, got, close() {}, send(t: string) { const m = JSON.parse(t); got.push(m); answer?.(m, ws) } })
+      return ws
+    }
+    const req: Any = { headers: {}, socket: { remoteAddress: "127.0.0.1" } }
+    const helper = fake(), last = () => helper.got.filter((m: Any) => m.t === "drawing").at(-1)
+    live.fn(helper, req, { query: { screen: "1" }, wild: [] })
+    const rects: Any = { "ui:tab:t1": { x: 40, y: 60, w: 120, h: 28 } }
+    const win = fake((m, ws) => { if (m.t === "locate") setImmediate(() => ws.emit("message", JSON.stringify({ t: "done", rid: m.rid, ok: true, rects: Object.fromEntries(Object.keys(rects).filter((p) => m.places.includes(p) || (p.startsWith("page:") && m.places.includes("pages"))).map((p) => [p, rects[p]])) }))) })
+    live.fn(win, req, { query: {}, wild: [] })
+    let [st3, r3] = await api("POST", "ops/companion.draw", { say: "Share is here. Then pick who.", marks: [{ type: "ring", at: [900, 40, 96, 32], label: "Share" }, { type: "connect", from: [900, 40, 96, 32], to: { ui: "tab:t1" }, beat: 1 },
+      { type: "paper", title: "Login flow", items: [{ type: "rect", x: 10, y: 10, w: 100, h: 40, label: "Log in" }] }] })
+    const d1 = last()?.drawing
+    const said = (await api("POST", "ops/companion.status", {}))[1]
+    check("companion: draw --marks sends the drawing to the helper: checked, in its colour, timed with its words, the app's places found by the window",
+      st3 === 200 && d1?.id === r3.screen && d1.agent === "Claude" && d1.tint === "orange" && d1.caption === "Share is here. Then pick who." && d1.marks[0].at.w === 96 &&
+      JSON.stringify(d1.places["ui:tab:t1"]) === JSON.stringify(rects["ui:tab:t1"]), [st3, r3, d1])
+    check("companion: its words are said, its cursor at its first mark", said.notes.some((n: Any) => n.kind === "say" && n.text === "Share is here. Then pick who." && n.sx === 948 && n.sy === 56), said.notes.filter((n: Any) => n.kind === "say"))
+    // (its voice turned off or on: the helper told at once, and every say after carries it, so that answer follows it)
+    {
+      const n0 = helper.got.length
+      const [sv, rv] = await api("POST", "ops/companion.voice", { mode: "off" })
+      await api("POST", "ops/companion.say", { text: "Voice off." })
+      const after = helper.got.slice(n0)
+      check("companion: voice off is set in one step, the helper told, and the say after it carries off",
+        sv === 200 && rv.voice === "off" && c.plugin.settings().voice === "off" && after.some((m: Any) => m.t === "voice" && m.voice === "off") &&
+        after.some((m: Any) => m.t === "note" && m.note.text === "Voice off." && m.voice === "off"), [rv, after])
+      const n1 = helper.got.length
+      const [sv2, rv2] = await api("POST", "ops/companion.voice", { mode: "on" })
+      await api("POST", "ops/companion.say", { text: "Voice on." })
+      const on = helper.got.slice(n1)
+      check("companion: voice on is the default again (auto), and the say after it carries auto",
+        sv2 === 200 && rv2.voice === "auto" && c.plugin.settings().voice === undefined && on.some((m: Any) => m.t === "note" && m.note.text === "Voice on." && m.voice === "auto"), [rv2, on])
+    }
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "check", at: [5, 5] }] })
+    check("companion: another draw adds to the drawing up", st3 === 200 && last()?.drawing.id === d1.id && last()?.drawing.marks.length === 4, last())
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "blob", at: [1, 2] }] })
+    check("companion: a wrong mark says which and how it's written", st3 === 400 && r3.error.startsWith("marks[0] (blob): type is one of"), r3)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "frame", at: { pane: "tnope" } }] })
+    check("companion: a pane the window doesn't show is refused", st3 === 409 && /pane:tnope/.test(r3.error), r3)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", {})
+    check("companion: draw takes marks or actions", st3 === 400, r3)
+    // (Keep, pressed on the screen: an .excalidraw by its pad's title; the helper told where)
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: d1.id, kind: "keep", places: {} }))
+    // (the overlay's word of where can come a moment after the file: both waited for)
+    await waitFor(() => (exists("Drawings/Login flow.excalidraw") && last()?.drawing.kept) || null, 5000, 20)
+    const kept = JSON.parse(read("Drawings/Login flow.excalidraw"))
+    check("companion: Keep saves the scratch pad as Excalidraw's JSON in Drawings/, by its title, and the overlay hears where",
+      kept.type === "excalidraw" && kept.elements.some((e: Any) => e.type === "text" && e.text === "Log in" && e.containerId) && last()?.drawing.kept === "Drawings/Login flow.excalidraw", last())
+    ;[st3, r3] = await api("POST", "ops/companion.save-drawing", { path: "Drawings/Marks", all: true })
+    const all = st3 === 200 ? JSON.parse(read("Drawings/Marks.excalidraw")) : null
+    check("companion: save-drawing keeps it where asked, its marks too with all", r3.path === "Drawings/Marks.excalidraw" && all?.elements.some((e: Any) => e.type === "ellipse") && all.elements.some((e: Any) => e.type === "arrow"), [st3, r3])
+    // (a new drawing after Keep; gone at companion clear, at the next ask, at Clear)
+    await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [1, 1] }] })
+    const d2 = last()?.drawing
+    check("companion: a kept drawing isn't added to: the next is a new one", !!d2 && d2.id !== d1.id && d2.marks.length === 1, d2)
+    ;[st3, r3] = await api("POST", "ops/companion.clear", {})
+    check("companion: companion clear takes its drawing down", st3 === 200 && last()?.drawing === null, last())
+    await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [1, 1] }] })
+    cIntake.addMoment({ kind: "ask", text: "and this?", app: "com.example.mail", sx: 5, sy: 5 })
+    check("companion: the next ask takes what the last answer pointed with down (nothing else up: its layer)", last()?.drawing === null, last())
+    await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [1, 1] }] })
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: last()?.drawing.id, kind: "clear" }))
+    check("companion: Clear on the screen takes it down", last()?.drawing === null, last())
+    // (layers: each session's own; cards stay past the next ask, changed in place by id; a card dismissed; hidden and shown)
+    const layerOf = (agent: string) => helper.got.filter((m: Any) => m.t === "drawing" && m.agent === agent).at(-1)?.drawing
+    const png = Buffer.alloc(33); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(640, 16); png.writeUInt32BE(400, 20)
+    fs.mkdirSync(c.plugin.vault.abs("Pics"), { recursive: true }); fs.writeFileSync(c.plugin.vault.abs("Pics/Shot.png"), png)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [1, 1] }, { type: "paper", id: "flow", items: [{ type: "rect", id: "a", x: 10, y: 10, label: "A" },
+      { type: "rect", id: "b", x: 200, y: 10, label: "B" }, { type: "arrow", from: "a", to: "b" }] }, { type: "image", id: "pic", src: "Pics/Shot.png", at: "top-right" }] })
+    let L = layerOf("Claude")
+    check("companion: an image card from a vault file loads as the app shows it, its pixels read; every mark and item named",
+      st3 === 200 && L?.marks[2].url === "api/raw/Shot.png?path=Pics%2FShot.png" && L.marks[2].px.join() === "640,400" && !!L.marks[0].id && !!L.marks[1].items[2].id, [st3, r3, L?.marks])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "image", src: "Pics/Nope.png" }] })
+    check("companion: a picture that isn't there draws nothing, and says so", st3 === 409 && /no Pics\/Nope\.png in the vault.*nothing was drawn/.test(r3.error), r3)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "image", src: "/etc/hosts" }, { type: "video", src: "~/.ssh/id.mp4" }] })
+    check("companion: a file outside where it may read is refused", st3 === 409 && /isn't where you may read/.test(r3.error), r3)
+    if (process.platform === "darwin") {
+      ;[st3, r3] = await api("POST", "ops/companion.draw", { as: "Icons", marks: [{ type: "image", src: "/System/Applications/Calendar.app" }] })
+      const icon = layerOf("Icons")?.marks[0]
+      check("companion: an app as a picture card shows its icon, as Finder does", st3 === 200 && /^api\/companion\/media\/\w+\/\w+\.png$/.test(icon?.url) && icon.px?.[0] >= 256, [st3, r3, icon])
+      await api("POST", "ops/companion.clear", { as: "Icons" })
+    }
+    cIntake.addMoment({ kind: "ask", text: "make B blue", app: "com.example.mail", sx: 5, sy: 5 })
+    L = layerOf("Claude")
+    const told = cMoments.momentsText([{ seq: 1, t: 0, kind: "ask", for: "Claude", text: "make B blue" }], "pair", null)
+    check("companion: at the next ask its cards stay (what pointed goes), and the ask lists them by id to change in place",
+      L?.past === true && L.marks.map((m: Any) => m.id).join() === "flow,pic" && told.includes("Still on their screen, your layer") && told.includes("b rect \"B\" at 200,10"), [L?.marks, told])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { actions: [{ op: "change", id: "b", fill: "blue" }, { op: "delete", id: "a" }, { op: "move", id: "pic", at: "bottom-left" }] })
+    L = layerOf("Claude")
+    const items = L?.marks[0].items
+    check("companion: draw actions without a path change the screen's drawing in place: recoloured, erased (with what's bound to it), a card moved",
+      st3 === 200 && r3.changed.join() === `b,a,${items?.[2].id},pic` && items.find((i: Any) => i.id === "b").fill === "blue" && items.find((i: Any) => i.id === "a").gone > 0 && items[2].gone > 0 &&
+      L.marks[1].at.area === "bottom-left" && L.past === false, [st3, r3, items])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { as: "Ada", marks: [{ type: "sticky", id: "note", text: "Ada's" }] })
+    check("companion: another session draws on its own layer, the first one's left as it was", st3 === 200 && layerOf("Ada")?.marks[0].text === "Ada's" && layerOf("Claude")?.marks[0].id === "flow", [st3, r3])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { as: "Ada", actions: [{ op: "delete", id: "b" }] })
+    check("companion: a session can't change another's marks", st3 === 400 && /no "b" up now/.test(r3.error) && !layerOf("Claude").marks[0].items.find((i: Any) => i.id === "b").gone, [st3, r3])
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: L.id, kind: "dismiss", mark: "pic" }))
+    check("companion: a card dismissed on the screen goes from its layer", layerOf("Claude")?.marks.every((m: Any) => m.id !== "pic"), layerOf("Claude"))
+    // (a video card: muted till asked, its sound and play changed in place, what the user did on it kept and listed)
+    fs.writeFileSync(c.plugin.vault.abs("Pics/Clip.mp4"), Buffer.alloc(64))
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "video", id: "clip", src: "Pics/Clip.mp4" }] })
+    const clipOf = () => layerOf("Claude")?.marks.find((m: Any) => m.id === "clip")
+    check("companion: a video card plays muted unless asked", st3 === 200 && clipOf() && !clipOf().sound && !clipOf().paused, [st3, r3, clipOf()])
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: layerOf("Claude").id, kind: "media", mark: "clip", paused: true }))
+    const toldClip = cMoments.momentsText([{ seq: 2, t: 0, kind: "ask", for: "Claude", text: "play it" }], "pair", null)
+    check("companion: what the user did on a video card is kept, and the next ask says it (paused, muted), to change in place, not in a player",
+      clipOf()?.paused === true && toldClip.includes("clip video Clip.mp4 (paused, muted)") && toldClip.includes("never opened again in a player"), [clipOf(), toldClip])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { actions: [{ op: "change", id: "clip", sound: true, paused: false }] })
+    check("companion: \"unmute it\", \"play it\": the card heard and playing, in place", st3 === 200 && clipOf()?.sound === true && clipOf()?.paused === undefined && !!clipOf()?.url, [st3, r3, clipOf()])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { actions: [{ op: "change", id: "clip", sound: false }] })
+    check("companion: muted again: its sound is gone, not left on", st3 === 200 && clipOf()?.sound === undefined, clipOf())
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { actions: [{ op: "change", id: "pic2", sound: true }, { op: "add", mark: { type: "image", id: "pic2", src: "Pics/Shot.png", sound: true } }] })
+    check("companion: sound is a video's", st3 === 400 && /sound: true or false, a video's|no "pic2"/.test(r3.error), r3)
+    // (a choice: its question said and shown with its answers, never buttons alone; answered or asked past, they go)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "button", label: "Lighthouse", do: { ask: "Hand it to Lighthouse" } }, { type: "button", label: "Alice", do: { ask: "Alice" } }] })
+    check("companion: buttons that ask, without their question, are refused", st3 === 400 && /question/.test(r3.error) && !layerOf("Claude")?.marks.some((m: Any) => m.type === "button"), r3)
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "button", id: "lh", label: "Lighthouse", do: { ask: "Hand it to Lighthouse" } }, { type: "button", label: "Alice", do: { ask: "Alice" } }], say: "Two can take it. Which one?" })
+    const askedQ = (await api("POST", "ops/companion.status", {}))[1].notes.filter((n: Any) => n.kind === "say" && n.text === "Two can take it. Which one?")
+    check("companion: a choice's question goes with its answers, and is asked as a question", st3 === 200 && layerOf("Claude")?.question === "Which one?" && askedQ.at(-1)?.question === true, [layerOf("Claude")?.question, askedQ])
+    const toldQ = cMoments.momentsText([{ seq: 3, t: 0, kind: "ask", for: "Claude", text: "what are these?" }], "pair", null)
+    check("companion: what's up says a choice's answers and what each sends", toldQ.includes("lh button \"Lighthouse\" (an answer: sends \"Hand it to Lighthouse\")"), toldQ)
+    cIntake.addMoment({ kind: "ask", text: "Hand it to Lighthouse", app: "com.example.mail", sx: 5, sy: 5 })
+    check("companion: answered (or asked past), a choice goes; the other cards stay", !layerOf("Claude")?.marks.some((m: Any) => m.type === "button") && !!clipOf(), layerOf("Claude")?.marks)
+    ;[st3, r3] = await api("POST", "ops/companion.layer", { hide: true })
+    const hidden = layerOf("Claude")
+    const [, shownR] = await api("POST", "ops/companion.layer", { show: true })
+    check("companion: its layer hidden and shown again, as it was (another session's untouched)", st3 === 200 && r3.shown === false && hidden?.hidden === true && shownR.shown === true && !layerOf("Claude").hidden &&
+      layerOf("Claude").marks[0].id === "flow" && !layerOf("Ada").hidden, [r3, shownR])
+    const [, readR] = await api("POST", "ops/companion.layer", {})
+    check("companion: companion layer reads its layer by id", readR.layer === L.id && readR.text.includes("flow paper"), readR)
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: layerOf("Ada").id, kind: "settle" }))
+    check("companion: its exchange over, a layer keeps its cards", layerOf("Ada")?.marks[0].id === "note", layerOf("Ada"))
+    await api("POST", "ops/companion.clear", {})
+    await api("POST", "ops/companion.draw", { marks: [{ type: "ring", id: "r", at: [100, 100, 40, 20] }, { type: "check", id: "k", at: [300, 300] }, { type: "sticky", id: "s", text: "Stays" }] })
+    const W = layerOf("Claude")
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: W.id, kind: "moved", moves: [{ mark: "r", dx: 10, dy: -20 }] }))
+    const glided = layerOf("Claude")
+    helper.emit("message", JSON.stringify({ t: "drawing-act", id: W.id, kind: "changed", marks: ["r", "s"] }))
+    const faded = layerOf("Claude")
+    check("companion: a mark whose thing the helper saw move follows it; one whose screen changed goes, a card stays",
+      JSON.stringify(glided?.marks[0].at) === '{"x":110,"y":80,"w":40,"h":20}' && faded?.marks.map((m: Any) => m.id).join() === "k,s", [glided?.marks, faded?.marks])
+    await api("POST", "ops/companion.clear", { as: "Ada" }); await api("POST", "ops/companion.clear", {})
+    check("companion: each session's clear takes its own layer down", layerOf("Ada") === null && layerOf("Claude") === null)
+    // (words in web pages: each page shown asked where it says them now, in its own px and zoom; the one at their pointer wins)
+    Object.assign(rects, { "page:p1": { x: 100, y: 50, w: 600, h: 800 }, "page:p2": { x: 700, y: 50, w: 600, h: 800 } })
+    const wasDesktop = c.plugin.desktop, asked: Any[] = []
+    c.plugin.desktop = async (name: string, ...args: Any[]) => {
+      asked.push([name, ...args])
+      if (name === "agent:tabs") return [1, 2, 3].map((n) => ({ tab: n, pane: `p${n}`, shown: n < 3, access: "read", url: `https://${n}.example.com`, title: `Page ${n}`, container: null }))
+      if (name === "agent:find") return { tab: args[0], zoom: args[0] === 2 ? 1.25 : 1, found: args[1] === "No model, no internet" ? [{ x: 10, y: 20, w: 100, h: 20, q: 2 }] : [] }
+      throw new Error("no such call")
+    }
+    try {
+      cIntake.addMoment({ kind: "ask", text: "cut this", pane: "p2", sx: 760, sy: 80 })
+      ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { find: "No model, no internet" } }] })
+      const right = last()?.drawing?.places?.["find:No model, no internet"]
+      cIntake.addMoment({ kind: "ask", text: "and here?", pane: "p1", sx: 150, sy: 60 })
+      await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { find: "No model, no internet" } }] })
+      const left = last()?.drawing?.places?.["find:No model, no internet"]
+      check("companion: words a web page shows are found there, as it is now, mapped by its zoom; of two pages saying them, the one at their pointer",
+        st3 === 200 && JSON.stringify(right) === '{"x":713,"y":75,"w":125,"h":25}' && JSON.stringify(left) === '{"x":110,"y":70,"w":100,"h":20}' &&
+        !asked.some((a) => a[0] === "agent:find" && a[1] === 3), [st3, r3, right, left, asked])
+      ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { find: "Nowhere at all" } }] })
+      check("companion: words nothing shows draw nothing, and it says they saw no mark", st3 === 409 && /nothing on the user's screen says "Nowhere at all".*saw no mark/.test(r3.error), r3)
+      // (over Vaultite's window, a panel saying one of the words by their pointer: a mark by words lands only where all of them are)
+      cScreen.screenMoment({ kind: "ask", text: "what are these tags?", pane: "p1", sx: 900, sy: 400, near: [{ id: "a3", role: "group", label: "Agents", frame: { x: 1052, y: 65, width: 269, height: 416 } }] })
+      ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "underline", at: { find: "4:24 PM · Agents" } }] })
+      const partly = last()?.drawing?.places?.["find:4:24 PM · Agents"]
+      check("companion: words only partly said by an element near them (Agents of 4:24 PM · Agents) draw nothing, and it says to aim by id or words shown",
+        st3 === 409 && !partly && /nothing on the user's screen says "4:24 PM · Agents".*all those words.*element's id.*never a guessed box/.test(r3.error), [st3, r3, partly])
+      ;[st3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { find: "Agents" } }] })
+      check("companion: words an element near them says whole land on it", st3 === 200 && last()?.drawing?.places?.["find:Agents"]?.x === 1052, last()?.drawing?.places)
+    } finally { c.plugin.desktop = wasDesktop; await api("POST", "ops/companion.clear", {}) }
+    ;[st3] = await api("POST", "ops/companion.save-drawing", {})
+    check("companion: nothing up, nothing to keep", st3 === 404)
+    // (the elements a summoned ask came with: {el} spots snap to them on the server too)
+    cScreen.screenMoment({ kind: "ask", text: "what's this?", app: "com.example.mail", sx: 5, sy: 5, near: [{ id: "a1", role: "AXButton", label: "Share", frame: { x: 100, y: 200, width: 80, height: 30 } }] })
+    ;[st3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { el: "a1" } }] })
+    const els = last()?.drawing?.places?.["el:a1"], me3 = (await api("POST", "ops/companion.status", {}))[1].agents.find((a: Any) => a.name === "Claude")
+    check("companion: an ask's elements are the drawing's places, its cursor at the one ringed", st3 === 200 && els?.w === 80 && els.label === "Share" && me3?.sx === 140 && me3.sy === 215, [els, me3])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: { el: "a9" } }] })
+    check("companion: a mark on an element the ask didn't list draws nothing, and says they saw no mark", st3 === 409 && /a9 isn't an element.*saw no mark/.test(r3.error), r3)
+    // (only marks on a display are drawn, and counted: "Drew N" is what showed)
+    cScreen.screenMoment({ kind: "ask", text: "here?", app: "com.example.mail", sx: 5, sy: 5, displays: [{ x: 0, y: 0, width: 1470, height: 956 }, { x: 1470, y: -200, width: 1920, height: 1080 }] })
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [100, 100, 40, 20] }, { type: "check", at: [5000, 100] }, { type: "num", at: [2000, 100], n: 1 }] })
+    const shownNow = last()?.drawing?.marks ?? []
+    check("companion: of its marks, one off every display isn't drawn and the answer says so; one on another display is",
+      st3 === 200 && r3.marks === 2 && r3.unshown?.length === 1 && /check at 5000,100 is off their screen/.test(r3.unshown[0]) && shownNow.length === 2 && !shownNow.some((m: Any) => m.type === "check"), [r3, shownNow])
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "frame", at: [-900, -900, 40, 20] }] })
+    check("companion: a drawing with every mark off their screen is refused: nothing drawn, they saw no mark", st3 === 409 && /off their screen.*saw no mark/.test(r3.error), r3)
+    // (what it showed is in its next asks, where it landed, in the ask's own points: it never denies a mark they saw)
+    await api("POST", "ops/companion.look", { sx: 700, sy: 40 })
+    const next: Moment = { kind: "ask", text: "why did you draw up there?", for: "Claude", seq: 900, t: Date.now() }
+    const was = cMoments.momentsText([next], "pair", null), inPic = cMoments.momentsText([{ ...next, origin: { x: 100, y: 20 } }], "pair", null)
+    check("companion: its next ask says what it showed lately and where each landed, a mark left out not among them, in the picture's pixels when its points are",
+      /What you showed on their screen lately[^\n]*\n(.*\n)*.*your ring at 100,100 40×20\n(.*\n)*.*your cursor pointed at 700,40/.test(was) && !/your check at 5000/.test(was) &&
+      /your ring at 0,80 40×20/.test(inPic) && /your cursor pointed at 600,20/.test(inPic), [was, inPic])
+    await api("POST", "ops/companion.clear", {})
+    helper.emit("close"); win.emit("close")
+    ;[st3, r3] = await api("POST", "ops/companion.draw", { marks: [{ type: "ring", at: [1, 1] }] })
+    check("companion: with no helper to draw on, nothing is drawn nor said to be", st3 === 409 && /no screen to draw on/.test(r3.error), r3)
+    fs.rmSync($.vault.abs("Drawings"), { recursive: true, force: true })
+  }
+  // Guides (type: guide, Guides/): the user's note on an app or site goes with a summoned ask there, cut when long.
+  {
+    write("Guides/Figma.md", "---\ntype: guide\napp: [com.figma.Desktop]\nsite: figma.com\n---\nFrames are on the left. I name layers in kebab-case.\n")
+    write("Guides/Mail.md", `---\ntype: guide\nsite: mail.example.com\n---\n${"Labels, not folders. ".repeat(120)}\n`)
+    write("Guides/Broken.md", "---\ntype: guide\n---\nFor nothing.\n")
+    const [, vault] = await api("GET", "vault")
+    const at = (m: Any) => cMoments.momentsText([{ seq: 1, t: 0, kind: "ask", for: "Claude", text: "how?", summoned: true, ...m }], "quiet", null)
+    const figma = at({ app: "com.figma.Desktop", title: "Design" }), web = at({ app: "com.google.Chrome", screen: "Inbox\nhttps://www.figma.com/file/abc\nmore" })
+    const mail = at({ app: "com.google.Chrome", screen: "mail.example.com/u/0\n" }), none = at({ app: "com.example.notes" })
+    check("guides: a summoned ask in an app (or on its site, by the address its window shows) carries the user's guide to it",
+      /their guide to it \(Guides\/Figma\.md\):\n {4}Frames are on the left/.test(figma) && /Guides\/Figma\.md/.test(web), [figma, web])
+    check("guides: a long one is cut, saying where the rest is; none, the ask says so (it may offer to write one)",
+      mail.split("\nWhat you showed")[0].length < 2200 && /… \(the rest: vau read "Guides\/Mail\.md"\)/.test(mail) && /no guide to com\.example\.notes yet/.test(none) &&
+      !/guide/.test(cMoments.momentsText([{ seq: 2, t: 0, kind: "ask", for: "Claude", text: "x", app: "com.figma.Desktop" }], "quiet", null)), [mail.length, none])
+    check("guides: one naming no app nor site says so", JSON.stringify(vault).includes("a guide names its app"), vault)
+    const [, doc] = await api("POST", "ops/docs.read", { topic: "guides" })
+    check("guides: vau docs guides has their format", /type: guide/.test(JSON.stringify(doc)), doc)
+  }
+
+  {
+    await api("PATCH", "config/plugin/companion", { mode: "pair" })
+    const { EventEmitter } = await import("node:events")
+    const cPropose = await import("../../../plugins/core/companion/propose.ts")
+    const live = c.plugin.sockets.find((x: Any) => x.pattern.join("/") === "companion/live")!
+    const req: Any = { headers: {}, socket: { remoteAddress: "127.0.0.1" } }
+    const fake = (answer?: (m: Any, ws: Any) => void) => {
+      const got: Any[] = []
+      const ws: Any = Object.assign(new EventEmitter(), { OPEN: 1, readyState: 1, got, close() {}, send(t: string) { const m = JSON.parse(t); got.push(m); answer?.(m, ws) } })
+      return ws
+    }
+    const win = fake((m, ws) => { if (m.t === "edit") setImmediate(() => ws.emit("message", JSON.stringify({ t: "done", rid: m.rid, ok: true }))) })
+    live.fn(win, req, { query: {}, wild: [] })
+    const helper = fake()
+    live.fn(helper, req, { query: { screen: "1" }, wild: [] })
+    write("Notes/K.md", "# K\n\nCall Alice friday\nBuy basil\n")
+    write("Notes/K2.md", "# K2\n\nUnshown\n")
+    win.emit("message", JSON.stringify({ t: "where", open: ["Notes/K.md"], shown: ["Notes/K.md"], focus: { path: "Notes/K.md", line: 3 }, active: true }))
+    const kit = { as: "Kit" }, next = () => api("POST", "ops/companion.next", { timeout: 0, watch: true, ...kit })
+    const shown = async (f: () => void) => {
+      const from = win.got.length
+      await f()
+      await $.sleep(20)
+      const s = win.got.slice(from).flatMap((m: Any) => (m.t === "agent" && m.agent.name === "Kit" ? [`${m.agent.state}${m.agent.seen ? " seen" : ""}${m.agent.rests ? " rests" : ""}`] : []))
+      return s.filter((x: string, i: number) => x !== s[i - 1]).join(", ")
+    }
+    const got: Record<string, string> = {}
+    got.joins = await shown(() => api("POST", "ops/companion.next", { timeout: 0, watch: true, after: cState.seq, ...kit }))
+    got.asked = await shown(() => cIntake.addMoment({ kind: "ask", for: "Kit", path: "Notes/K.md", line: 3, text: "what's this?" }))
+    got.handed = await shown(next)
+    got.says = await shown(() => api("POST", "ops/companion.say", { text: "On it", ...kit }))
+    got.looks = await shown(() => api("POST", "ops/companion.look", { path: "Notes/K.md", line: 4, ...kit }))
+    got.backForMore = await shown(next)
+    cIntake.addMoment({ kind: "edit", path: "Notes/K.md", line: 4, hunks: [{ line: 4, removed: ["Buy basil"], added: ["Buy basil today"] }] })
+    got.readsEdit = await shown(next)
+    got.letItPass = await shown(next)
+    got.passes = await shown(() => api("POST", "ops/companion.pass", { reason: "not mine", ...kit }))
+    got.editsShown = await shown(() => api("POST", "ops/companion.edit", { path: "Notes/K.md", find: "Buy basil today", text: "Buy basil and mint", ...kit }))
+    got.editsUnshown = await shown(() => api("POST", "ops/companion.edit", { path: "Notes/K2.md", find: "Unshown", text: "Written", ...kit }))
+    got.pending = await shown(() => api("POST", "ops/companion.propose", { path: "Notes/K.md", find: "Call Alice friday", pending: "More to come", ...kit }))
+    got.afterPending = await shown(next)
+    got.keepsHighlight = await shown(() => api("POST", "ops/companion.highlight", { path: "Notes/K.md", find: "Call Alice", keep: true, ...kit }))
+    got.afterHighlight = await shown(next)
+    got.comments = await shown(() => api("POST", "ops/companion.comment", { path: "Notes/K.md", find: "Alice", text: "Hm", ...kit }))
+    got.suggests = await shown(() => api("POST", "ops/companion.suggest", { path: "Notes/K.md", find: "mint", replace: "Mint", ...kit }))
+    const [, bubble] = await api("POST", "ops/companion.say", { text: "Words to keep", path: "Notes/K.md", line: 3, ...kit })
+    await next()
+    got.userPlaces = await shown(() => cComments.place(bubble.id))
+    got.afterPlace = await shown(next)
+    got.userFolds = await shown(() => cComments.fold("Kit", "Notes/K.md", 3, "Folded words"))
+    const [, proposal] = await api("POST", "ops/companion.propose", { path: "Notes/K.md", find: "# K", replace: "# Kay", ...kit })
+    await next()
+    got.userTakes = await shown(() => cPropose.review(proposal.id, "accept"))
+    await next()
+    got.helperFlies = await shown(async () => { helper.emit("message", JSON.stringify({ t: "takeover-at", agent: "Kit", sx: 300, sy: 200 })); await $.sleep(50) })
+    got.afterFly = await shown(next)
+    got.follows = await shown(() => cIntake.addMoment({ kind: "open", path: "Notes/K.md", line: 2 }))
+    got.stops = await shown(() => api("POST", "ops/companion.stop", kit))
+    got.backAtNext = await shown(next)
+    got.starts = await shown(() => cAlwayson.starting("Kit"))
+    got.askedStarting = await shown(() => cIntake.addMoment({ kind: "ask", for: "Kit", path: "Notes/K.md", line: 3, text: "still there?" }))
+    got.upAtNext = await shown(next)
+    await next()
+    cState.seen.set("kit", Date.now() - 11 * 60_000)
+    got.quietAway = await shown(() => cChatturns.tend())
+    const want = {
+      joins: "watching",
+      asked: "thinking",
+      handed: "watching, thinking",
+      says: "thinking",
+      looks: "thinking",
+      backForMore: "watching",
+      readsEdit: "reading",
+      letItPass: "watching seen",
+      passes: "watching seen",
+      editsShown: "writing, watching",
+      editsUnshown: "writing, watching",
+      pending: "writing",
+      afterPending: "watching",
+      keepsHighlight: "watching, writing, watching",
+      afterHighlight: "",
+      comments: "watching",
+      suggests: "watching",
+      userPlaces: "writing, watching",
+      afterPlace: "reading",
+      userFolds: "watching",
+      userTakes: "writing, watching",
+      helperFlies: "writing",
+      afterFly: "watching",
+      follows: "watching rests",
+      stops: "away",
+      backAtNext: "watching, reading",
+      starts: "starting",
+      askedStarting: "",
+      upAtNext: "watching, thinking",
+      quietAway: "away",
+    }
+    check("companion: its cursor's state, as each thing that moves it leaves it", JSON.stringify(got) === JSON.stringify(want), Object.fromEntries(Object.entries(want).flatMap(([k, v]) => (got[k] === v ? [] : [[k, got[k]]]))))
+    {
+      const w = await import("../../../plugins/core/companion/livewire.ts")
+      const SERVER_ONLY = new Set(["anchor", "writer", "share", "answers"])
+      const lost: Any[] = [], seen = { agents: 0, notes: 0, edits: 0 }
+      const same = (kind: string, sent: Any, read: Any) => {
+        const keys = Object.keys(sent).filter((k) => !SERVER_ONLY.has(k) && !(kind === "edit" && k === "t"))
+        if (!read || keys.some((k) => JSON.stringify(read[k]) !== JSON.stringify(sent[k]))) lost.push({ kind, sent, read })
+      }
+      for (const m of win.got) {
+        const agents = m.t === "state" ? m.agents : m.t === "agent" ? [m.agent] : [], notes = m.t === "state" ? [...m.notes, ...m.said] : m.t === "note" ? [m.note] : m.t === "said" ? m.said : []
+        for (const a of agents) { seen.agents++; same("agent", a, w.agentOf(a)) }
+        for (const n of notes) { seen.notes++; same("note", n, w.noteOf(n)) }
+        if (m.t === "edit" || m.t === "stream") { seen.edits++; same("edit", m, w.editAskOf(m)) }
+      }
+      check("companion: the window reads whole each agent, note and edit the server sends it", !lost.length && seen.agents > 0 && seen.edits > 0, { seen, lost: lost.slice(0, 3) })
+    }
+    helper.emit("close"); win.emit("close")
+  }
+  {
+    const n = "Una", k = "una", now: string[] = [], at = () => now.push(cState.stateOf(n))
+    at()
+    cState.atWork.add(k); at()
+    cState.handed.add(k); at()
+    cState.asking.add(k); at()
+    cState.life.set(k, "starting"); at()
+    cState.handed.delete(k); at()
+    cState.life.set(k, "away"); at()
+    const done = cState.writingAt(n, {}); at()
+    done(); at()
+    cState.asking.delete(k); at()
+    cState.forget(n)
+    check("companion: its state from what it's doing: busy, handed, asked, booting, gone, at an act (which ends gone and busy)",
+      now.join() === "watching,thinking,reading,thinking,thinking,starting,away,writing,thinking,watching", now)
+  }
+
+  await api("PATCH", "config/plugin/companion", { mode: "off" })
+  check("companion: off hears nothing", cIntake.addMoment({ kind: "ask", text: "hello?" }) === null)
+}

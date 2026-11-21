@@ -1,0 +1,9 @@
+{
+  "id": "notebooks",
+  "icon": "pen-tool",
+  "category": "writing",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "name": "Handwriting & Notebooks",
+  "description": "GoodNotes-inspired multi-page vector handwriting notebooks (.notebook) with Apple Pencil palm rejection, fountain pen, highlighter, vector eraser, lasso tool, re-editable text boxes, and PDF annotation."
+}

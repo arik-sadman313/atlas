@@ -1,0 +1,197 @@
+# Every push to main and pull request: build, check and the tests on Linux, macOS and Windows (windows.yml: Arm and the
+# app itself), and the web demo; transfer.yml measures what it moves. Nightly: every UI QA script too, so they don't rot (`-f scripts="a b"`: only those).
+# A try/ branch (tools/try.ts: a change tried before it lands) runs the tests only, and never counts as main's; one
+# marked -skip-<os> leaves that OS's out (a machine of the user's runs it), all three: none (windows.yml's surfaces only).
+name: CI
+on:
+  push:
+    branches: [main, "try/**", "!try/*-skip-linux-skip-macos-skip-windows*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scripts:
+        description: QA scripts to run (all when empty)
+        required: false
+  schedule:
+    - cron: "17 5 * * *" # (off the hour: GitHub delays, and may drop, runs on it)
+# A pull request's (or try branch's) newer push cancels its older run; main's runs finish, the newest push waiting while
+# one runs (GitHub drops the ones queued between), so main's head is always tested and a run's failure names its commit.
+# The nightly and runs by hand (QA) queue apart, so a push never drops one.
+concurrency:
+  group: ci-${{ github.ref }}${{ github.event_name == 'schedule' && '-nightly' || github.event_name == 'workflow_dispatch' && '-qa' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/try/') }}
+jobs:
+  # Each OS's tests in two parts on runners of their own: test_vault (its areas in 8 processes, which mostly wait; 4 on
+  # macOS's 3 cores, where 8 failed its timing checks) and every other suite with check and smoke, about as long. Their recorded times (tools/.runs, cached) fill test_vault's
+  # processes evenly; the first run without them splits its areas by count.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15, windows-2025]
+        part: [vault, rest]
+        exclude:
+          - runner: ${{ contains(github.ref, '-skip-linux') && 'ubuntu-24.04' || 'none' }}
+          - runner: ${{ contains(github.ref, '-skip-macos') && 'macos-15' || 'none' }}
+          - runner: ${{ contains(github.ref, '-skip-windows') && 'windows-2025' || 'none' }}
+    runs-on: ${{ matrix.runner }}
+    # (a try's, tools/try.ts JOB_MIN: its bounds are said there)
+    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/try/') && 15 || 45 }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1 # (nothing here starts the desktop app: windows.yml and the nightly QA do)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # First: the rules most pushes break, in seconds
+      - if: ${{ matrix.part == 'rest' }}
+        run: npm run check
+      # Playwright's Chromium, cached by its version, so its CDN being down fails nothing (each step after check runs
+      # whatever check said, so one push shows every failure)
+      - if: ${{ !cancelled() }}
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('node_modules/playwright-core/package.json') }}
+      - if: ${{ !cancelled() && runner.os == 'Linux' }}
+        uses: ./.github/actions/apt-cache
+        with:
+          name: test
+      # (its system libraries only on Linux: on Windows Server --with-deps adds Media Foundation, minutes the tests never use)
+      - if: ${{ !cancelled() }}
+        run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      # (Linux's thumbnails are what's on PATH: core/thumbs.ts' converters, tested only where they're installed)
+      - if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: sudo apt-get install -y --no-install-recommends imagemagick poppler-utils ffmpeg
+      - if: ${{ !cancelled() && runner.os == 'Linux' }}
+        uses: ./.github/actions/apt-cache
+        with:
+          name: test
+          save: "true"
+      - if: ${{ !cancelled() }}
+        run: npm run build
+      - if: ${{ !cancelled() }}
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: tools/.runs
+          key: test-runs-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: test-runs-${{ runner.os }}-${{ matrix.part }}-
+      - if: ${{ !cancelled() && matrix.part == 'vault' }}
+        run: node tools/test_vault.ts --jobs ${{ runner.os == 'macOS' && 4 || 8 }}
+      - if: ${{ !cancelled() && matrix.part == 'rest' }}
+        run: npm test -- --except test_vault
+      - if: ${{ !cancelled() && matrix.part == 'rest' }}
+        run: npm run smoke
+      - if: ${{ !cancelled() }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: tools/.runs
+          key: test-runs-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+  # The web demo as the site builds it (Vaultite's own plugins at their main), in Chrome and WebKit: a demo that can't
+  # start is caught on the push that broke it, not at a release.
+  # A change adds no more of a lint rule's patterns than its files had before it (tools/ratchet.ts): against the push's
+  # previous tip on main, else a pull request's base (a try's is verify's: it runs the ratchet too).
+  ratchet:
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/try/')) || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.ref == 'refs/heads/main' && github.event.before || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: |
+          if [ -n "$BASE" ] && [ "${BASE//0/}" != "" ]; then node tools/ratchet.ts --base "$BASE"
+          else git fetch -q origin main && node tools/ratchet.ts; fi
+  demo:
+    if: ${{ !startsWith(github.ref, 'refs/heads/try/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1 # (no desktop app here)
+    # (the plugins beside the app, as vaultite/ and vaultite-plugins/: their tsconfigs and packages are the app's)
+    defaults:
+      run:
+        working-directory: vaultite
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: vaultite
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Vaultite/plugins
+          path: vaultite-plugins
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: vaultite/package-lock.json
+      - run: npm ci && ln -s ../vaultite/node_modules ../vaultite-plugins/node_modules
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vaultite/node_modules/playwright-core/package.json') }}
+      - uses: ./vaultite/.github/actions/apt-cache
+        with:
+          name: demo
+      - run: npx playwright-core install --with-deps chromium webkit
+      - uses: ./vaultite/.github/actions/apt-cache
+        with:
+          name: demo
+          save: "true"
+      # (tools/qa.ts builds the demo, then runs web/qa/demo.mjs on it; the plugins at their main, not QA's pin)
+      - run: npm run qa -- demo
+        env:
+          VAULTITE_PLUGINS: ../vaultite-plugins
+  qa:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('node_modules/playwright-core/package.json') }}
+      # (WebKit: what only iOS's engine draws, in paneswipe and textselect)
+      - uses: ./.github/actions/apt-cache
+        with:
+          name: qa
+      - run: npx playwright-core install --with-deps chromium webkit
+      - run: sudo apt-get install -y xvfb ffmpeg
+      - uses: ./.github/actions/apt-cache
+        with:
+          name: qa
+          save: "true"
+      - run: npm run build
+      - run: node tools/qa.ts --lint
+      # The desktop scripts run Electron, which needs a display
+      - run: xvfb-run -a npm run qa -- $SCRIPTS
+        env:
+          SCRIPTS: ${{ inputs.scripts }}
+      # Soaks on a budget: what a short session leaves behind (the server's sockets and files, the page's heap and DOM)
+      - if: ${{ !cancelled() && !inputs.scripts }}
+        run: node tools/perf/serversoak.ts --minutes 12 --scale 10 --idle 3 --budget
+      - if: ${{ !cancelled() && !inputs.scripts }}
+        run: node tools/perf/soak.ts --minutes 10 --scale 3 --idle 1 --phases still,hidden --budget

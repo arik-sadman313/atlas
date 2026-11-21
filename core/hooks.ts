@@ -1,0 +1,306 @@
+import { spawn } from "node:child_process"
+import fs from "node:fs"
+import path from "node:path"
+import { vauDir, vauEntry } from "./appentry.ts"
+import { settingsOf } from "./blocks.ts"
+import { matching, typeMatches, type VaultEvent } from "./events.ts"
+import { defineOp, ID, type Op, OpError, opProblems, type Param, whoOf } from "./ops.ts"
+import { LOCAL, type Plugin, serverUrl, vaultHere } from "./plugins.ts"
+import { hashed, inside } from "./rules.ts"
+import { atSetting, type Job, resolvedAt, type When, whenProblems } from "./schedule.ts"
+import type { Item, Vault } from "./vault.ts"
+import { messageOf } from "./values.ts"
+
+export type Command = string[]
+type Declared = { id: string; dir: string; manifest: Item }
+export type Run = { t: string; what: string; command: string[]; exit: number | null; signal: string | null; ms: number; stderr: string; error?: string }
+
+const OP_TIMEOUT = 60, HOOK_TIMEOUT = 120, MAX_TIMEOUT = 600
+const PER_MINUTE = 30, KEEP = 50, MAX_OUT = 4 << 20
+
+// Plain Node's, for what commands start themselves (#!/usr/bin/env node): launchd's PATH has no Homebrew.
+const NODE_DIR = /^node(\.exe)?$/i.test(path.basename(process.execPath)) ? path.dirname(process.execPath) : ""
+
+/** `node` and `vau` in a command are this runtime, as Node in the desktop app: its PATH has no node, nor a shell for a .cmd. */
+export function runtimeOf(prog: string, args: string[], env: Record<string, string>, electron = Boolean(process.versions.electron)) {
+  if (prog !== "node" && prog !== "vau") return { prog, args }
+  if (electron) env.ELECTRON_RUN_AS_NODE = "1"
+  return { prog: process.execPath, args: prog === "vau" ? [vauEntry(), ...args] : args }
+}
+
+function commandProblems(c: unknown, dir: string, where: string): string[] {
+  if (!Array.isArray(c) || !c.length || !c.every((x) => typeof x === "string" && x.length && !x.includes("\0"))) {
+    return [`${where}: command must be an argv array of strings, like ["node", "run.mjs"] (no shell)`]
+  }
+  const prog = c[0] as string
+  const unhashed = (c as string[]).slice(1).find((a) => !path.isAbsolute(a) && inside(dir, path.resolve(dir, a)) && !hashed(dir, path.resolve(dir, a)))
+  if (unhashed) return [`${where}: '${unhashed}' is hidden or in node_modules (not part of the plugin's version, so this machine couldn't approve it)`]
+  if (path.isAbsolute(prog) || !prog.includes("/")) return []
+  const abs = path.resolve(dir, prog)
+  if (!inside(dir, abs)) return [`${where}: '${prog}' is outside the plugin's folder`]
+  if (!hashed(dir, abs)) return [`${where}: '${prog}' is hidden or in node_modules (not part of the plugin's version, so this machine couldn't approve it)`]
+  if (!fs.existsSync(abs)) return [`${where}: '${prog}' isn't in the plugin's folder`]
+  return []
+}
+
+const timeoutProblems = (t: unknown, where: string) =>
+  t === undefined || (typeof t === "number" && t > 0 && t <= MAX_TIMEOUT) ? [] : [`${where}: timeout is seconds, at most ${MAX_TIMEOUT}`]
+
+export function inArea(opId: string, pluginId: string, kinds: string[] = []) {
+  const area = opId.split(".")[0]
+  return area === pluginId || area === pluginId.replace(/ies$/, "y") || area === pluginId.replace(/s$/, "") || kinds.includes(area)
+}
+
+const jobName = (s: Item, i: number) => (typeof s.name === "string" ? s.name : typeof s.op === "string" ? s.op : `schedule-${i}`)
+
+export function scheduleOf(manifest: Item, value?: (key: string) => string | undefined): (When & { name: string; entry: Item })[] {
+  const list = Array.isArray(manifest.schedule) ? manifest.schedule as Item[] : []
+  return list.map((s, i) => ({ name: jobName(s, i), every: s.every, ...(s.at ? { at: value ? resolvedAt(s.at, value) : s.at } : {}), ...(s.machine ? { machine: s.machine } : {}), entry: s }))
+}
+
+export function hookProblems(m: Item, dir: string, where = "manifest.json"): string[] {
+  const out: string[] = []
+  const id = String(m.id ?? path.basename(dir))
+  const list = (k: string) => {
+    if (m[k] === undefined) return []
+    if (!Array.isArray(m[k])) { out.push(`${where}: ${k} must be a list`); return [] }
+    return m[k] as unknown[]
+  }
+  const seen = new Set<string>()
+  list("ops").forEach((o, i) => {
+    const at = `${where}: ops[${i}]`
+    if (!o || typeof o !== "object") return void out.push(`${at} must be an object`)
+    const op = o as Item
+    const known = new Set(["id", "summary", "help", "kind", "params", "args", "cli", "mcp", "owner", "command", "timeout", "result", "action", "did"])
+    for (const k of Object.keys(op)) if (!known.has(k)) out.push(`${at}: '${k}' isn't a key of an op (${[...known].join(", ")})`)
+    if (op.params !== undefined && (!op.params || typeof op.params !== "object" || Array.isArray(op.params))) out.push(`${at}: params is an object of parameters`)
+    if (op.args !== undefined && (!Array.isArray(op.args) || !op.args.every((a: unknown) => typeof a === "string"))) out.push(`${at}: args is a list of parameter names`)
+    if (op.mcp !== undefined && typeof op.mcp !== "boolean" && typeof op.mcp !== "string") out.push(`${at}: mcp is true or a tool name`)
+    if (op.action !== undefined && (!op.action || typeof op.action !== "object" || Array.isArray(op.action))) out.push(`${at}: action is an object ({"on": ["person"], "param": "person", "from": "name", "label": "..."})`)
+    if (op.owner !== undefined && (typeof op.owner !== "string" || !op.owner.trim())) out.push(`${at}: owner names what only this machine's owner may do ("the backup")`)
+    if (op.did !== undefined && (typeof op.did !== "string" || !op.did.trim())) out.push(`${at}: did is what a call did, for Activity, its params in braces ("Synced {account}")`)
+    out.push(...opProblems({ ...op, run: () => null } as unknown as Op).map((p) => `${at}: ${p}`))
+    if (typeof op.id === "string") {
+      if (!inArea(op.id, id)) out.push(`${at}: '${op.id}' should start with '${id}.' (a plugin's ops are in its own area)`)
+      if (seen.has(op.id)) out.push(`${at}: '${op.id}' is there twice`)
+      seen.add(op.id)
+    }
+    out.push(...commandProblems(op.command, dir, at), ...timeoutProblems(op.timeout, at))
+  })
+  list("events").forEach((h, i) => {
+    const at = `${where}: events[${i}]`
+    if (!h || typeof h !== "object") return void out.push(`${at} must be an object`)
+    const e = h as Item
+    if (typeof e.on !== "string" || !/^([a-z][a-z0-9-]*)(\.([a-z][a-z0-9-]*|\*))*$/.test(e.on)) out.push(`${at}: on is an event type or area (file.changed, op.done, file)`)
+    if (e.path !== undefined && typeof e.path !== "string") out.push(`${at}: path is a vault path prefix`)
+    out.push(...commandProblems(e.command, dir, at), ...timeoutProblems(e.timeout, at))
+  })
+  list("startup").forEach((h, i) => {
+    const at = `${where}: startup[${i}]`
+    if (!h || typeof h !== "object" || Array.isArray(h)) return void out.push(`${at} must be {"command": [...]}`)
+    out.push(...commandProblems((h as Item).command, dir, at), ...timeoutProblems((h as Item).timeout, at))
+  })
+  const names = new Set<string>()
+  list("schedule").forEach((h, i) => {
+    const at = `${where}: schedule[${i}]`
+    if (!h || typeof h !== "object" || Array.isArray(h)) return void out.push(`${at} must be {"every": "1h", "command": [...]} or {"every": "1h", "op": "...", "params": {...}}`)
+    const s = h as Item
+    const known = new Set(["name", "every", "at", "machine", "command", "op", "params", "timeout"])
+    for (const k of Object.keys(s)) if (!known.has(k)) out.push(`${at}: '${k}' isn't a key of a schedule (${[...known].join(", ")})`)
+    if (s.name !== undefined && (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9.-]*$/.test(s.name))) out.push(`${at}: name is lowercase letters, digits, . and -`)
+    if (names.has(jobName(s, i))) out.push(`${at}: '${jobName(s, i)}' is there twice (give it a name)`)
+    names.add(jobName(s, i))
+    out.push(...whenProblems(s, at))
+    const key = atSetting(s.at)
+    if (key && settingsOf(m)[key]?.type !== "string") out.push(`${at}: at names the setting ${key}, so declare it in settings, a string ("07:00")`)
+    if ((s.command === undefined) === (s.op === undefined)) out.push(`${at}: give it a command or an op, one of them`)
+    else if (s.op !== undefined) {
+      if (typeof s.op !== "string" || !ID.test(s.op)) out.push(`${at}: op is an operation's id (dispatch.run)`)
+      if (s.params !== undefined && (!s.params || typeof s.params !== "object" || Array.isArray(s.params))) out.push(`${at}: params is an object`)
+      if (s.timeout !== undefined) out.push(`${at}: timeout is a command's`)
+    } else out.push(...commandProblems(s.command, dir, at), ...timeoutProblems(s.timeout, at))
+  })
+  return out
+}
+
+const fillIn = (did: string, params: Item) => did.replace(/\{(\w+)\}/g, (_, k: string) => (params[k] == null || typeof params[k] === "object" && !Array.isArray(params[k]) ? "" : String(params[k])))
+const tail = (s: string, lines = 12) => s.replace(/\s+$/, "").split("\n").slice(-lines).join("\n").slice(-2000)
+
+export class Hooks {
+  vault: Vault
+  logs = new Map<string, Run[]>()
+  private started = new Set<string>()
+  private busy = new Map<string, { pending: VaultEvent | null }>()
+  private rate = new Map<string, number[]>()
+
+  allowed: (p: Declared) => boolean = () => true
+
+  constructor(vault: Vault) {
+    this.vault = vault
+  }
+
+  stateDir(id: string) {
+    const d = path.join(LOCAL, "plugin-state", vaultHere(this.vault.path).key, id)
+    fs.mkdirSync(d, { recursive: true })
+    return d
+  }
+
+  run(p: Declared, command: Command, o: { what: string; env: Record<string, string>; stdin: string; timeout: number }) {
+    const t0 = performance.now()
+    const env: Record<string, string> = {}
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== "ELECTRON_RUN_AS_NODE" && k !== "VAULTITE_TERMINAL") env[k] = v
+    const bin = vauDir(LOCAL)
+    Object.assign(env, {
+      VAULTITE: "1", VAULTITE_URL: serverUrl(), VAULTITE_VAULT: this.vault.path, VAULTITE_BIN: path.join(bin, "vau"),
+      VAULTITE_PLUGIN_ID: p.id, VAULTITE_PLUGIN_DIR: p.dir, VAULTITE_PLUGIN_STATE: this.stateDir(p.id),
+      PYTHONDONTWRITEBYTECODE: "1",
+      PATH: [bin, NODE_DIR, process.env.PATH].filter(Boolean).join(path.delimiter), ...o.env,
+    })
+    const { prog, args } = runtimeOf(command[0].includes("/") && !path.isAbsolute(command[0]) ? path.resolve(p.dir, command[0]) : command[0], command.slice(1), env)
+    return new Promise<{ exit: number | null; stdout: string; stderr: string; error?: string; timedOut: boolean }>((resolve) => {
+      let stdout = "", stderr = "", timedOut = false, error: string | undefined, ended = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+        if (ended) return
+        ended = true
+        clearTimeout(timer)
+        const run: Run = { t: new Date().toISOString(), what: o.what, command, exit: code, signal, ms: Math.round(performance.now() - t0), stderr: tail(stderr),
+          ...(error ? { error } : timedOut ? { error: `timed out after ${o.timeout} s` } : {}) }
+        const log = this.logs.get(p.id) ?? []
+        log.push(run)
+        if (log.length > KEEP) log.splice(0, log.length - KEEP)
+        this.logs.set(p.id, log)
+        resolve({ exit: code, stdout, stderr, error, timedOut })
+      }
+      let child: ReturnType<typeof spawn>
+      if (!this.allowed(p)) {
+        error = "its files changed since this machine allowed it: it runs again once allowed (vau plugin allow)"
+        return finish(null, null)
+      }
+      try {
+        child = spawn(prog, args, { cwd: p.dir, env, stdio: ["pipe", "pipe", "pipe"] })
+      } catch (e) {
+        error = messageOf(e)
+        return finish(null, null)
+      }
+      timer = setTimeout(() => {
+        timedOut = true
+        child.kill("SIGTERM")
+        setTimeout(() => child.kill("SIGKILL"), 2000).unref()
+      }, o.timeout * 1000)
+      child.stdout!.setEncoding("utf8").on("data", (s: string) => { if (stdout.length < MAX_OUT) stdout += s })
+      child.stderr!.setEncoding("utf8").on("data", (s: string) => { stderr = (stderr + s).slice(-8000) })
+      child.stdin!.on("error", () => {})
+      child.stdin!.end(o.stdin)
+      // (a program that couldn't start: no close may follow)
+      child.on("error", (e) => { error = e.message; if (child.pid === undefined) finish(null, null) })
+      child.on("close", (code, signal) => finish(code, signal))
+    })
+  }
+
+  opsOf(p: Declared): Op[] {
+    const ops = Array.isArray(p.manifest.ops) ? p.manifest.ops as Item[] : []
+    return ops.map((d): Op => (defineOp({
+      id: d.id, summary: d.summary, help: d.help, kind: d.kind, params: d.params as Record<string, Param> | undefined, args: d.args,
+      cli: d.cli, mcp: d.mcp, result: d.result, owner: d.owner, action: d.action, lock: false,
+      ...(typeof d.did === "string" ? { did: (params: Item) => ({ text: fillIn(d.did, params) }) } : {}),
+      run: async (params) => {
+        const json = JSON.stringify(params)
+        const timeout = typeof d.timeout === "number" ? d.timeout : OP_TIMEOUT
+        const r = await this.run(p, d.command, { what: d.id, stdin: json, timeout, env: { VAULTITE_OP: d.id, VAULTITE_PARAMS_JSON: json } })
+        if (r.timedOut) throw new OpError(`${d.id}: its command took longer than ${timeout} s and was ended`, 504)
+        if (r.error && r.exit === null) throw new OpError(`${d.id}: its command couldn't run: ${r.error}`, 500)
+        if (r.exit !== 0) throw new OpError(`${d.id}: its command failed (exit ${r.exit})${r.stderr.trim() ? `: ${tail(r.stderr, 6)}` : ""}`, 500)
+        const out = r.stdout.trim()
+        try { return out ? JSON.parse(out) : null } catch { return out }
+      },
+    })))
+  }
+
+  jobsOf(p: Declared, plugin: Plugin): Job[] {
+    return scheduleOf(p.manifest).map(({ name, entry: s, ...when }): Job => {
+      if (s.op) return { ...when, name, run: () => plugin.runOp(s.op, s.params ?? {}, whoOf("schedule", null)) }
+      return { ...when, name, run: async () => {
+        const timeout = typeof s.timeout === "number" ? s.timeout : HOOK_TIMEOUT
+        const r = await this.run(p, s.command, { what: `schedule ${name}`, stdin: "", timeout, env: { VAULTITE_PLUGIN_EVENT: "schedule", VAULTITE_SCHEDULE: name, VAULTITE_ACTOR: p.id } })
+        if (r.timedOut) throw new Error(`took longer than ${timeout} s and was ended`)
+        if (r.exit !== 0) throw new Error(r.error ?? `exit ${r.exit}${r.stderr.trim() ? `: ${tail(r.stderr, 3)}` : ""}`)
+      } }
+    })
+  }
+
+  startup(p: Declared) {
+    if (this.started.has(p.id)) return
+    this.started.add(p.id)
+    for (const h of Array.isArray(p.manifest.startup) ? p.manifest.startup as Item[] : []) {
+      void this.run(p, h.command, { what: "startup", stdin: "", timeout: typeof h.timeout === "number" ? h.timeout : HOOK_TIMEOUT, env: { VAULTITE_PLUGIN_EVENT: "startup", VAULTITE_ACTOR: p.id } })
+    }
+  }
+
+  stopped(id: string) {
+    this.started.delete(id)
+  }
+
+  heard(ev: VaultEvent, plugins: Declared[]) {
+    for (const p of plugins) {
+      const hooks = Array.isArray(p.manifest.events) ? p.manifest.events as Item[] : []
+      hooks.forEach((h, i) => {
+        if (!typeMatches(ev.type, [h.on])) return
+        const seen = matching(ev, { path: typeof h.path === "string" ? h.path : undefined })
+        if (seen) this.fire(p, h, `${p.id}#${i}`, seen)
+      })
+    }
+  }
+
+  private fire(p: Declared, h: Item, key: string, ev: VaultEvent) {
+    const b = this.busy.get(key)
+    if (b) { b.pending = ev; return }
+    const now = Date.now()
+    const recent = (this.rate.get(key) ?? []).filter((t) => now - t < 60_000)
+    if (recent.length >= PER_MINUTE) {
+      const log = this.logs.get(p.id) ?? []
+      if (log.at(-1)?.what !== `event ${ev.type}` || !log.at(-1)?.error?.startsWith("skipped")) {
+        log.push({ t: new Date().toISOString(), what: `event ${ev.type}`, command: h.command, exit: null, signal: null, ms: 0, stderr: "",
+          error: `skipped: more than ${PER_MINUTE} runs a minute (a hook that triggers itself?)` })
+        this.logs.set(p.id, log.slice(-KEEP))
+      }
+      return
+    }
+    recent.push(now)
+    this.rate.set(key, recent)
+    const state = { pending: null as VaultEvent | null }
+    this.busy.set(key, state)
+    const json = JSON.stringify(ev)
+    void this.run(p, h.command, { what: `event ${ev.type}`, stdin: json, timeout: typeof h.timeout === "number" ? h.timeout : HOOK_TIMEOUT,
+      env: { VAULTITE_PLUGIN_EVENT: ev.type, VAULTITE_EVENT_JSON: json, VAULTITE_ACTOR: p.id } }).then(() => {
+      this.busy.delete(key)
+      if (state.pending) this.fire(p, h, key, state.pending)
+    })
+  }
+
+  close() {
+    this.started.clear()
+  }
+}
+
+export function hookOps(hooks: () => Hooks): Op[] {
+  return [defineOp({
+    id: "vault-plugin.log",
+    summary: "What a vault plugin's commands did lately (its manifest's ops, events, startup and schedule): each run's command, exit, time and stderr.",
+    help: "Without an id, every vault plugin's. Kept in memory since the server started, the last 50 runs a plugin.",
+    kind: "read",
+    params: {
+      id: { type: "string", description: "the vault plugin's id (its folder in .vaultite/plugins/)" },
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 20, description: "how many runs, the newest" },
+    },
+    args: ["id"],
+    run: ({ id, limit }) => {
+      const h = hooks()
+      const ids = id ? [id] : [...h.logs.keys()].sort()
+      return ids.map((p) => ({ id: p, runs: (h.logs.get(p) ?? []).slice(-limit) }))
+    },
+    text: (rows: { id: string; runs: Run[] }[]) => rows.length ? rows.map((r) => [`## ${r.id}`, ...(r.runs.length ? r.runs.map((x) =>
+      `- ${x.t} ${x.what}: \`${x.command.join(" ")}\` ${x.error ? x.error : `exit ${x.exit}`} (${x.ms} ms)${x.stderr ? `\n  ${x.stderr.split("\n").join("\n  ")}` : ""}`) : ["No runs yet."])].join("\n")).join("\n\n")
+      : "No vault plugin has run a command yet.",
+  })]
+}

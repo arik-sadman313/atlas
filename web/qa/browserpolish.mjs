@@ -1,0 +1,178 @@
+// The Browser's error, certificate, crash and loading pages, View page source, Duplicate tab, a tab moved to a window.
+// Needs the desktop app and pages it serves on 127.0.0.1; WRITES only the throwaway vault.
+//   node web/qa/browserpolish.mjs <vault copy>
+// Paths: plugins/core/web-viewer, electron/web.ts
+import { _electron } from "playwright-core"
+import { execFileSync } from "node:child_process"
+import fs from "node:fs"
+import http from "node:http"
+import https from "node:https"
+import os from "node:os"
+import path from "node:path"
+import { ROOT, qa, until, keepAwake, uiAt } from "./lib/qa.mjs"
+
+const { args: [VAULT], check, watch, done } = await qa(import.meta.url, { chrome: false })
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "vau-browserpolish-"))
+keepAwake(600)
+
+const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+<style>body{font:18px/1.5 Georgia,serif;margin:0;padding:40px 60px}</style></head><body>${body}</body></html>`
+const ARTICLE = page("Lighthouse field notes", `<h1>Lighthouse field notes</h1><p>The keeper climbs one hundred and twelve steps.</p>
+<p>Read <a id="next" href="/two">the second part</a>.</p><form><input id="note" aria-label="Note"></form>`)
+const hits = {}
+const handler = (req, res) => {
+  const u = req.url ?? "/"
+  hits[u.split("?")[0]] = (hits[u.split("?")[0]] ?? 0) + 1
+  if (u.startsWith("/forbidden")) return void (res.writeHead(403, { "cf-ray": "8d1f2e3a4b5c-GRU", Server: "cloudflare" }), res.end())
+  if (u.startsWith("/missing")) return void (res.writeHead(404, { "Content-Type": "text/html" }), res.end(page("Not found", "<h1>No such lighthouse</h1>")))
+  if (u.startsWith("/slow")) return void setTimeout(() => { res.writeHead(200, { "Content-Type": "text/html" }); res.end(page("Slow", "<h1>Slow</h1>")) }, 4000)
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+  res.end(u.startsWith("/two") ? page("Second part", "<h1>Second part</h1>") : ARTICLE)
+}
+const listen = (s) => new Promise((ok, fail) => { s.once("error", fail); s.listen(0, "127.0.0.1", () => ok(s.address().port)) })
+const SITE = `http://127.0.0.1:${await listen(http.createServer(handler))}`
+const closed = http.createServer(), DEAD = await listen(closed)
+await new Promise((r) => closed.close(r))
+execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(TMP, "key.pem"), "-out", path.join(TMP, "cert.pem"),
+  "-days", "1", "-subj", "/CN=127.0.0.1"], { stdio: "ignore" })
+const SECURE = `https://127.0.0.1:${await listen(https.createServer({ key: fs.readFileSync(path.join(TMP, "key.pem")), cert: fs.readFileSync(path.join(TMP, "cert.pem")) }, handler))}`
+
+const app = await _electron.launch({
+  executablePath: path.join(ROOT, "node_modules/.bin/electron"), args: [ROOT, "--vault", VAULT],
+  env: { ...process.env, VAULTITE_QUIET: process.env.SHOW ? "" : "1", VAULTITE_USER_DATA: path.join(TMP, "userData"), VAULTITE_LOCAL: path.join(TMP, "local") },
+})
+const win = await app.firstWindow()
+watch(win, { console: true, fail: false })
+await win.waitForSelector("[role=tree]", { timeout: 60000 })
+const origin = new URL(win.url()).origin
+await app.evaluate(({ BaseWindow }) => { const w = BaseWindow.getAllWindows()[0]; w.setBounds({ x: 40, y: 40, width: 1280, height: 800 }); w.focus() })
+const ui = (body) => uiAt(origin)(body)
+const open = (url) => ui({ action: "open", path: url, newTab: true })
+const pages = () => app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().flatMap((w) => w.contentView.children
+  .filter((v) => v.webContents && v.webContents !== w.webContents)
+  .map((v) => ({ win: w.webContents?.getURL().includes("popout=") ? 1 : 0, wc: v.webContents.id, url: v.webContents.getURL(), visible: v.getVisible(), crashed: v.webContents.isCrashed(), back: v.webContents.navigationHistory.canGoBack() }))))
+const shownPage = async () => (await pages()).find((p) => p.visible && p.win === 0)
+const at = async (u) => (await shownPage())?.url === u
+const inPage = (wc, code) => app.evaluate(({ webContents }, [wc, code]) => webContents.fromId(wc).executeJavaScript(code), [wc, code])
+const tabs = () => win.$$eval("[role=tablist] [role=tab]", (els) => els.map((e) => e.textContent?.trim()))
+const tabMenu = async (text, item) => {
+  await win.locator("[role=tablist] [role=tab]", { hasText: text }).first().click({ button: "right" })
+  await win.getByRole("menuitem", { name: item }).first().click()
+}
+
+await open(`http://127.0.0.1:${DEAD}/`)
+const error = win.locator("[data-web-error]:visible")
+check("refused: says so in words, with Try again", !!(await until(() => error.count(), 15000)) && /refused to connect/.test(await win.locator("[data-web-error-title]:visible").innerText())
+  && await win.locator("[data-web-retry]:visible").count() === 1, await error.count() && await error.innerText())
+check("… the code only small, under it", (await error.getAttribute("data-web-error")) === "ERR_CONNECTION_REFUSED", await error.getAttribute("data-web-error"))
+await open("http://nowhere.invalid/")
+check("a name that doesn't resolve: Can't find it", await until(async () => /Can't find nowhere\.invalid/.test(await win.locator("[data-web-error-title]:visible").innerText().catch(() => "")), 15000),
+  await win.locator("[data-web-error]:visible").innerText().catch(() => ""))
+const tries = () => app.evaluate(() => globalThis.__starts ?? 0)
+await app.evaluate(({ webContents }) => { globalThis.__starts = 0; webContents.getAllWebContents().find((w) => w.getURL().includes("nowhere.invalid"))?.on("did-start-loading", () => { globalThis.__starts++ }) })
+await win.evaluate(() => dispatchEvent(new Event("online")))
+check("… tried again on its own once the Mac is back online", await until(async () => (await tries()) > 0, 5000), await tries())
+
+await open(`${SITE}/forbidden?token=secret`)
+const title = () => win.locator("[data-web-error-title]:visible").innerText().catch(() => "")
+check("an empty 403: the error view, naming the site, never a white tab", await until(async () => /127\.0\.0\.1:\d+ denied access/.test(await title()), 15000)
+  && (await win.locator("[data-web-error]:visible").getAttribute("data-web-error")) === "HTTP ERROR 403"
+  && !!(await until(async () => !(await pages()).some((p) => p.visible && p.url.includes("/forbidden")), 3000)), [await title(), await pages()])
+const loads = () => win.evaluate(() => (globalThis.__vauTrace?.browser ?? []).filter((e) => e.ev === "load"))
+const forbidden = (await loads()).filter((e) => /\/forbidden$/.test(e.url))
+check("… its load in the timeline: status, address, server's ip and headers, never the query", forbidden.length === 1 && forbidden[0].status === 403 && forbidden[0].ip === "127.0.0.1"
+  && forbidden[0].cached === false && forbidden[0].ray === "8d1f2e3a4b5c-GRU" && forbidden[0].server === "cloudflare" && !JSON.stringify(forbidden).includes("secret"), await loads())
+await new Promise((r) => setTimeout(r, 1500))
+check("… never tried again on its own", hits["/forbidden"] === 1, hits)
+await win.locator("[data-web-retry]:visible").click()
+check("… Try again loads it again, and says so again", await until(async () => hits["/forbidden"] === 2, 10000) && !!(await until(async () => /denied access/.test(await title()), 10000)), [hits, await title()])
+await open(`${SITE}/missing`)
+check("a 404 with a page of its own: that page, shown", await until(async () => (await shownPage())?.url === `${SITE}/missing`, 15000) && !(await win.locator("[data-web-error]:visible").count()), [await pages(), await title()])
+check("… its 404 in the timeline", await until(async () => (await loads()).some((e) => /\/missing$/.test(e.url) && e.status === 404), 5000), await loads())
+
+await open(`${SECURE}/`)
+const unsafe = win.locator("[data-web-unsafe]:visible")
+check("a self-signed certificate: Your connection isn't private", !!(await until(() => unsafe.count(), 15000)) && /Your connection isn.t private/.test(await unsafe.innerText()), [await unsafe.count(), await win.locator("[data-web-error]:visible").getAttribute("data-web-error").catch(() => null), await pages()])
+check("… the page isn't shown under it", !(await pages()).some((p) => p.visible && p.url.startsWith(SECURE)), await pages())
+check("… nothing to go on with till Advanced", await win.locator("[data-web-unsafe-go]:visible").count() === 0)
+await win.locator("[data-web-unsafe-more]:visible").click()
+await win.locator("[data-web-unsafe-go]:visible").click()
+check("Continue (unsafe): the page, this time", await until(async () => (await pages()).some((p) => p.visible && p.url === `${SECURE}/`), 15000) && !(await unsafe.count()), await pages())
+check("… its address shown", (await win.locator("[data-web-address]:visible").inputValue()).includes(SECURE.replace("https://", "")), await win.locator("[data-web-address]:visible").evaluateAll((els) => els.map((e) => e.value)))
+check("… trusted only for its host: another site's bad certificate still warns (localhost, the same server)",
+  await (async () => { await open(SECURE.replace("127.0.0.1", "localhost") + "/"); return !!(await until(() => unsafe.count(), 15000)) })(), await pages())
+await win.locator("[data-web-unsafe-back]:visible").click()
+check("Back to safety: no page left at it (a blank tab, nothing back to)", await until(async () => !(await unsafe.count()) && await win.locator("[data-web-address]:visible").inputValue() === "", 5000),
+  [await unsafe.count(), await win.locator("[data-web-address]:visible").evaluateAll((els) => els.map((e) => e.value)), await tabs()])
+
+await open(`${SITE}/article`)
+await until(() => at(`${SITE}/article`), 15000)
+const art = await shownPage()
+await app.evaluate(({ webContents }, id) => {
+  const wc = webContents.fromId(id)
+  globalThis.__gone = 0; globalThis.__loads = 0
+  wc.on("render-process-gone", () => { globalThis.__gone++ })
+  wc.on("did-finish-load", () => { globalThis.__loads++ })
+}, art.wc)
+const counts = () => app.evaluate(() => ({ gone: globalThis.__gone, loads: globalThis.__loads }))
+for (let i = 0; i < 4; i++) {
+  const before = await counts()
+  await app.evaluate(({ webContents }, id) => webContents.fromId(id).forcefullyCrashRenderer(), art.wc)
+  await until(async () => (await counts()).gone > before.gone, 10000)
+  if (i < 3) await until(async () => (await counts()).loads > before.loads && !(await pages()).find((p) => p.wc === art.wc)?.crashed, 15000)
+}
+const crashed = win.locator("[data-web-crashed]:visible")
+check("crashing again and again: This page crashed, never a blank tab", !!(await until(() => crashed.count(), 8000)) && /This page crashed/.test(await crashed.innerText()), [await counts(), await pages()])
+await win.locator("[data-web-reload]:visible").click()
+check("… Reload brings it back", await until(async () => !(await crashed.count()) && (await pages()).some((p) => p.wc === art.wc && p.visible && !p.crashed && p.url === `${SITE}/article`), 15000), await pages())
+
+await open(`${SITE}/slow`)
+check("loading: a spinner for its tab's icon", await until(() => win.locator("[role=tablist] [role=tab] [data-web-loading]").count(), 4000))
+check("… and the line under the bar", await win.locator("[data-web-progress=loading]:visible").count() === 1)
+check("loaded: its site's icon again, the line gone", await until(async () => !(await win.locator("[role=tablist] [data-web-loading]").count()) && !(await win.locator("[data-web-progress=loading]").count()), 12000))
+
+await open(`${SITE}/article`)
+await until(() => at(`${SITE}/article`), 15000)
+const typedPage = await shownPage()
+const listed = () => win.evaluate(() => window.vaultite.web.list())
+await app.evaluate(async ({ webContents }, id) => {
+  const wc = webContents.fromId(id)
+  const [x, y] = await wc.executeJavaScript(`(() => { const r = document.querySelector("#note").getBoundingClientRect(); return [Math.round(r.left + 10), Math.round(r.top + 5)] })()`)
+  wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 }); wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 })
+  await new Promise((r) => setTimeout(r, 200))
+  for (const c of "half a thought") wc.sendInputEvent({ type: "char", keyCode: c })
+}, typedPage.wc)
+check("typed and not sent: the page says it holds it (its tab isn't archived)", await until(async () => (await listed()).some((p) => p.id && p.url === `${SITE}/article` && p.typed), 5000), await listed())
+await inPage(typedPage.wc, `document.querySelector("#note").value = ""; document.querySelector("#note").blur(); 1`)
+check("… cleared: it doesn't any more", await until(async () => !(await listed()).some((p) => p.typed), 5000), await listed())
+
+await win.locator("[data-web-more]:visible").click()
+await win.getByRole("menuitem", { name: "View page source" }).click()
+check("View page source: a tab of its own at view-source:", await until(async () => (await shownPage())?.url === `view-source:${SITE}/article`, 10000), await pages())
+check("… named by it", await until(async () => (await tabs()).some((t) => t?.includes("view-source:")), 5000), await tabs())
+
+await open(`${SITE}/article`)
+await until(() => at(`${SITE}/article`), 15000)
+const before = await shownPage()
+await app.evaluate(async ({ webContents }, id) => {
+  const wc = webContents.fromId(id)
+  const [x, y] = await wc.executeJavaScript(`(() => { const r = document.querySelector("#next").getClientRects()[0]; return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })()`)
+  wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 }); wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 })
+}, before.wc)
+await until(() => at(`${SITE}/two`), 10000)
+const n = (await tabs()).length
+await tabMenu("Second part", "Duplicate tab")
+check("Duplicate tab: a tab more, shown, at the same address", await until(async () => (await tabs()).length === n + 1 && (await shownPage())?.wc !== before.wc && await at(`${SITE}/two`), 10000), [await tabs(), await pages()])
+check("… with its Back", await until(async () => (await shownPage())?.back, 5000), await pages())
+check("… right after it", await until(() => win.evaluate(() => { const t = [...document.querySelectorAll("[role=tablist] [role=tab]")], i = t.findIndex((e) => e.getAttribute("aria-selected") === "true"); return t[i - 1]?.textContent?.includes("Second part") }), 3000),
+  await win.evaluate(() => [...document.querySelectorAll("[role=tablist] [role=tab]")].map((e) => `${e.getAttribute("aria-selected")} ${e.textContent}`)))
+
+const moving = before
+await inPage(moving.wc, "window.__kept = 'still here'; 1")
+await tabMenu("Second part", "Move to new window")
+check("moved to a new window: the same page there, shown, never loaded again",
+  await until(async () => (await pages()).some((p) => p.wc === moving.wc && p.win === 1 && p.visible), 20000) && await inPage(moving.wc, "window.__kept") === "still here", await pages())
+check("… and gone from this one", !(await pages()).some((p) => p.wc === moving.wc && p.win === 0), await pages())
+
+await app.close()
+await done()

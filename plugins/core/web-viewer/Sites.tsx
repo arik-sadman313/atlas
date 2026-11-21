@@ -1,0 +1,465 @@
+import { forwardRef, useEffect, useId, useRef, useState } from "react"
+import { ArrowRightLeft, Bot, ChevronDown, ChevronRight, ChevronsUpDown, Copy, Ellipsis, EyeOff, Fingerprint, Globe, LogOut, Pin, Plus, Settings2 } from "lucide-react"
+import {
+  edgeScroller, Button, confirmDialog, dotIcon, FilterField, fmtAgo, Group, HeadingButton, isViewOpen, Loading, LoadingSidebarRows, menuBelow, menuFor, openView, PageHeader, plural, rehit, reorder, scopedState, Section,
+  SettingRow, SidebarHeading, SidebarRow, slotAt, startDrag, useDrag, useDropHit, useDropTarget, useKeptCount, useScopedState, useSlide, webPages,
+  type MenuItem, type SidebarCtx, type WebSite,
+} from "@vaultite"
+import type { LucideIcon, LucideProps } from "lucide-react"
+import { askSites, elsewhere, keep, listed, type MachineSets } from "./accounts"
+import { SiteIcon, siteIcon } from "./icons"
+import { colorOf, containersOf, moveContainer, profileIn, setSiteRule, sitesTitle, sitesTo, useContainers, type Container } from "./containers"
+import { agentsSay, canLockNow, containerItems, newContainer, useCanLock } from "./ContainerButton"
+import { allLogins, allLoginsOn, andList, isIn, loginsOf, loginsOn, moveLogin, nameOf, NEUTRAL, ownLogins, refreshElsewhere, setOrder, signingOut, sitesIn, sitesOf, type Logins } from "./loginsets"
+import { settings } from "./state"
+
+export const manageContainers = () => openView("sites", { newTab: !isViewOpen(sitesTo(null)) })
+
+const PICKED = "web-viewer:sites-in"
+const pickedNow = () => scopedState<string | null>(PICKED, null)
+
+type Open = (url: string, container?: string | null) => void
+
+function useAllLogins(): Logins[] {
+  useContainers()
+  return allLogins()
+}
+
+function useSites(prof: string) {
+  const sites = listed.use((m) => m.get(prof) ?? null)
+  useEffect(() => {
+    const web = webPages
+    if (!web?.sites) return
+    let timer = 0
+    askSites([prof])
+    const off = web.on((m) => {
+      if (m.type === "state" && !m.state.loading) { clearTimeout(timer); timer = window.setTimeout(() => askSites([prof]), 1500) }
+    })
+    return () => { off(); clearTimeout(timer) }
+  }, [prof])
+  const { list, leaving } = signingOut(prof).use(sites, (s) => s.site)
+  return { sites: list?.filter((s) => !s.other) ?? null, others: list?.filter((s) => s.other) ?? [], leaving,
+    refresh: () => void webPages?.sites?.(prof).then((s) => keep(prof, s), () => {}) }
+}
+
+function forget(l: Logins, names: string[], failed: string, done: () => void) {
+  const web = webPages
+  if (!web?.forget) return
+  void signingOut(l.prof).remove(names, () => Promise.all(names.map((n) => web.forget!(l.prof, n))), failed).then(done)
+}
+
+const whoText = (s: WebSite) => [s.account, ...(s.more ?? [])].filter(Boolean).join(", ")
+
+async function signOut(l: Logins, s: WebSite, done: () => void) {
+  const names = sitesOf(s), who = whoText(s)
+  const ok = await confirmDialog({
+    title: `Sign out of ${andList(names)}?`,
+    body: `${who ? `${who} will be signed out` : "Its logins go"} in ${l.name}: ${names.length > 1 ? "their" : "the site's"} cookies and what ${names.length > 1 ? "they keep" : "it keeps"} in the browser are deleted. Open pages of ${names.length > 1 ? "them" : "it"} reload.`,
+    confirm: "Sign out", danger: true,
+  })
+  if (ok) forget(l, names, "Couldn't sign out", done)
+}
+
+async function clearTrackers(l: Logins, others: WebSite[], done: () => void) {
+  const names = others.map((s) => s.site)
+  const ok = await confirmDialog({
+    title: `Clear ${plural(names.length, "tracker")}?`,
+    body: `Cookies these sites left while you were on other sites' pages (ad and analytics networks, not logins of yours): ${names.join(", ")}. Their cookies and storage are deleted.`,
+    confirm: "Clear", danger: true,
+  })
+  if (ok) forget(l, names, "Couldn't clear them", done)
+}
+
+const Dot = ({ color }: { color: string }) => <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: color }} />
+
+const trackersTip = (others: WebSite[]) => `Cookies from sites you didn't open, left by other sites' pages: ${others.map((s) => s.site).join(", ")}`
+
+function SiteList({ logins: l, look, openPage }: { logins: Logins; look: "sidebar" | "settings"; openPage?: Open }) {
+  const { sites, others, leaving, refresh } = useSites(l.prof)
+  const trackersLeaving = others.length && others.every((s) => leaving(s.site) === "") ? "" : undefined
+  const containers = useContainers()
+  const can = useCanLock()
+  const c = l.container ? containers.find((x) => x.id === l.container) : undefined
+  const [unfolded, unfold] = useState(false)
+  if (look === "settings") {
+    const Chevron = unfolded ? ChevronDown : ChevronRight
+    const row = "flex min-h-10 items-center gap-2.5 py-1 pl-4.5 text-[14px]"
+    return (
+      <>
+        <SettingRow label={<span className="flex items-center gap-2"><Dot color={l.color} />{l.name}</span>} onClick={() => unfold(!unfolded)} chevron={Chevron}
+          aria-expanded={unfolded} data-web-logins-group={l.container ?? l.prof} onContextMenu={c ? menuFor(() => containerItems(c, can)) : undefined}
+          value={sites === null ? "" : [sites.length ? plural(sites.length, "site") : "No sites", others.length ? plural(others.length, "tracker") : ""].filter(Boolean).join(", ")} />
+        {unfolded && (
+          <div className="pb-1.5" data-web-sites>
+            {(sites ?? []).map((s) => (
+              <div key={s.site} className={row} data-web-site={s.site} data-leaving={leaving(s.site)}>
+                <SiteIcon host={s.site} className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2"><span className="truncate">{s.site}</span>
+                  {isIn(s) && <span className="min-w-0 truncate text-[13px] text-muted-foreground">{s.account || "Signed in"}</span>}</span>
+                <Button size="small" look="quiet" onClick={() => void signOut(l, s, refresh)}>Sign out</Button>
+              </div>
+            ))}
+            {others.length > 0 && (
+              <div className={row} data-web-trackers={String(others.length)} data-leaving={trackersLeaving}>
+                <EyeOff className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                <span className="min-w-0 flex-1 truncate" data-tip={trackersTip(others)} data-tip-trunc="">{plural(others.length, "tracker")}
+                  <span className="ml-2 text-[13px] text-muted-foreground">cookies other sites' pages left</span></span>
+                <Button size="small" look="quiet" onClick={() => void clearTrackers(l, others, refresh)}>Clear</Button>
+              </div>
+            )}
+            {sites === null && <div className={row}><Loading className="text-[14px]" /></div>}
+            {sites && !sites.length && !others.length && <p className={`${row} text-muted-foreground`}>No sites yet</p>}
+            {c && <div className={row}><Button size="small" look="quiet" onClick={(e) => menuBelow(e, containerItems(c, can))}>{c.name} options</Button></div>}
+          </div>
+        )}
+      </>
+    )
+  }
+  return <SiteRows logins={l} data={{ sites, others, leaving, refresh }} openPage={openPage} />
+}
+
+type Listed = ReturnType<typeof useSites>
+const FEW = 3
+const matches = (s: WebSite, q: string) => sitesOf(s).some((x) => x.includes(q)) || whoText(s).toLowerCase().includes(q)
+
+function SiteRows({ logins: l, data, openPage, filter = "" }: { logins: Logins; data: Listed; openPage?: Open; filter?: string }) {
+  const { sites, leaving, refresh } = data, there = !!l.machine
+  const others = there ? [] : data.others
+  const containers = useContainers()
+  const c = l.container ? containers.find((x) => x.id === l.container) : undefined
+  const [unfolded, unfold] = useState(false)
+  const open = (url: string) => openPage?.(url, l.container)
+  const always = c?.sites ?? []
+  const q = filter.trim().toLowerCase()
+  const all = [...(sites ?? []), ...(sites ? always.filter((a) => !sites.some((s) => sitesOf(s).includes(a))).map((site): WebSite => ({ site })) : [])]
+    .filter((s) => !q || matches(s, q))
+  const pinned = (s: WebSite) => sitesOf(s).some((x) => always.includes(x))
+  const order = settings.use().siteOrder?.[l.prof] ?? []
+  const rank = (s: WebSite) => Math.min(...sitesOf(s).map((x) => order.indexOf(x)).filter((i) => i >= 0))
+  const top = all.filter((s) => isIn(s) || pinned(s))
+    .sort((a, b) => rank(a) - rank(b) || Number(pinned(b)) - Number(pinned(a)) || a.site.localeCompare(b.site))
+  const rest = all.filter((s) => !isIn(s) && !pinned(s))
+  const trackers = q ? others.filter((s) => matches(s, q)) : others
+  const trackersLeaving = trackers.length && trackers.every((s) => leaving(s.site) === "") ? "" : undefined
+  const folds = !q && rest.length + (trackers.length ? 1 : 0) > FEW
+  const shown = !folds || unfolded
+  const signedIn = (s: WebSite) => !!sites?.some((x) => x.site === s.site)
+  const drawn = top.length + (folds ? 1 : 0) + (shown ? rest.length + (trackers.length ? 1 : 0) : 0)
+  const kept = useKeptCount(q ? null : `web-viewer:sites:${l.machine?.id ?? ""}:${l.prof}`, sites ? drawn : undefined, 2)
+  const box = useRef<HTMLDivElement>(null)
+  useSlide(box, useSiteOrder(box, l.prof, q || there ? [] : top.map((s) => s.site)), "y")
+  const lifted = useDrag((d) => (d?.item.site?.logins === l.prof ? d.item.site.site : null))
+  const machines = elsewhere.use()
+  const to = (o: Logins, copy: boolean) => (s: WebSite): MenuItem => ({ label: o.name, icon: dotIcon(o.color), run: () => moveLogin(l, o, s, copy) })
+  const targets = (copy: boolean) => (s: WebSite): MenuItem[] => [
+    ...allLogins().filter((o) => o.prof !== l.prof).map((o) => to(o, copy)(s)),
+    ...(copy && webPages?.seal ? (machines ?? []).flatMap((m) => [
+      { label: m.label, caption: true, sep: true, run: () => {} },
+      ...allLogins().map((o) => to(loginsOn({ id: m.machine, label: m.label }, o), true)(s)),
+    ]) : []),
+  ]
+  const menu = (s: WebSite): MenuItem[] => there ? [{ label: `Open ${s.site}`, icon: Globe, run: () => open(`https://${s.site}/`) }] : [
+    { label: `Open ${s.site}`, icon: Globe, run: () => open(`https://${s.site}/`) },
+    ...(c ? [{ label: `Always open in ${c.name}`, icon: Pin, checked: always.includes(s.site), run: () => setSiteRule(s.site, always.includes(s.site) ? null : c.id) }] : []),
+    ...(signedIn(s) && webPages?.move ? [
+      { label: "Move to", icon: ArrowRightLeft, sep: true, run: () => {}, items: targets(false)(s) },
+      { label: "Copy to", icon: Copy, run: () => {}, items: targets(true)(s) },
+    ] : []),
+    ...(signedIn(s) ? [{ label: "Sign out", icon: LogOut, danger: true, sep: true, run: () => signOut(l, s, refresh) }] : []),
+  ]
+  const row = (s: WebSite) => (
+    <SidebarRow key={s.site} icon={isIn(s) ? accountIcon(s.site, s.avatar) : siteIcon(`https://${s.site}/`)} label={<SiteLabel s={s} />} open
+      tip={[andList(sitesOf(s)), whoText(s), pinned(s) && c ? `always opens in ${c.name}` : ""].filter(Boolean).join(": ")}
+      data-web-site={s.site} data-web-account={isIn(s) ? "" : undefined} data-leaving={pinned(s) ? undefined : leaving(s.site)} onClick={() => open(`https://${s.site}/`)} more
+      swipe={() => signedIn(s) && !there ? [{ label: "Sign out", icon: LogOut, danger: true, run: () => signOut(l, s, refresh) }] : []}
+      onContextMenu={menuFor(() => menu(s))}>
+      {pinned(s) && <Pin aria-hidden data-web-always="" className="mr-1 size-3 shrink-0 text-tertiary group-hover/row:hidden" strokeWidth={2} />}
+      {!isIn(s) && !pinned(s) && s.last ? <span className="mr-1 shrink-0 text-[11px] text-tertiary tabular-nums group-hover/row:hidden">{fmtAgo(s.last, { short: true })}</span> : null}
+    </SidebarRow>
+  )
+  const draggable = (s: WebSite) => there ? <div key={s.site}>{row(s)}</div> : (
+    <div key={s.site} data-slide={s.site} className={lifted === s.site ? "opacity-40" : undefined}
+      onPointerDown={(e) => startDrag(e, { from: "site", site: { logins: l.prof, site: s.site }, label: s.account ? `${s.site} · ${s.account}` : s.site })}>
+      {row(s)}
+    </div>
+  )
+  const Chevron = unfolded ? ChevronDown : ChevronRight
+  return (
+    <div className="flex flex-col gap-px" data-web-sites>
+      {!sites && <LoadingSidebarRows count={kept} right data-web-sites-loading="" />}
+      <div ref={box} className="relative flex flex-col gap-px" data-web-sites-top="">{top.map(draggable)}</div>
+      {folds && (
+        <SidebarRow icon={Chevron} open aria-expanded={unfolded} data-web-more={String(rest.length)} onClick={() => unfold(!unfolded)} tip={null}
+          label={<span className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground">
+            <span className="truncate">{rest.length ? `${plural(rest.length, top.length ? "more site" : "site")}` : plural(trackers.length, "tracker")}</span>
+            {rest.length > 0 && trackers.length > 0 && <span className="min-w-0 truncate text-[12px] text-tertiary">{plural(trackers.length, "tracker")}</span>}
+          </span>} />
+      )}
+      {shown && rest.map(draggable)}
+      {shown && trackers.length > 0 && (
+        <SidebarRow icon={EyeOff} label={plural(trackers.length, "tracker")} open data-web-trackers={String(trackers.length)} data-leaving={trackersLeaving} tip={trackersTip(trackers)}
+          onClick={() => void clearTrackers(l, trackers, refresh)}>
+          <span className="mr-1 text-[11px] text-tertiary">Clear</span>
+        </SidebarRow>
+      )}
+      {sites && !all.length && !trackers.length && <p className="h-7 truncate pl-1.5 text-[13px] leading-7 text-tertiary">{q ? "Nothing matches" : "No sites yet"}</p>}
+    </div>
+  )
+}
+
+function useSiteOrder(box: React.RefObject<HTMLDivElement | null>, prof: string, keys: string[]) {
+  const id = `web-viewer:site-order:${useId()}`
+  useDropTarget<{ order: string[] }>(id, (item, x, y) => {
+    const el = box.current
+    if (item.site?.logins !== prof || !keys.includes(item.site.site) || !el) return null
+    const b = el.getBoundingClientRect()
+    if (x < b.left - 8 || x > b.right + 8 || y < b.top - 14 || y > b.bottom + 14) return null
+    const rows = [...el.querySelectorAll<HTMLElement>(":scope > [data-slide]")]
+    const { order, same } = reorder(keys, [item.site.site], slotAt(el, rows, x, y, "y"))
+    return same ? null : { order }
+  }, (_item, h) => void setOrder(prof, h.order))
+  return useDropHit<{ order: string[] }>(id)?.order ?? null
+}
+
+function SiteLabel({ s }: { s: WebSite }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5">
+      <span className="shrink truncate">{sitesOf(s).join(", ")}</span>
+      {isIn(s) && <span className="min-w-0 shrink-[0.5] truncate text-[12px] text-muted-foreground">{s.account || "Signed in"}</span>}
+      {!!s.more?.length && <span className="shrink-0 text-[11px] text-tertiary" data-web-more-accounts={String(s.more.length)}>+{s.more.length}</span>}
+    </span>
+  )
+}
+
+const accountIcons = new Map<string, LucideIcon>()
+function accountIcon(site: string, avatar?: string): LucideIcon {
+  const key = `${site} ${avatar?.length ?? 0} ${avatar?.slice(-24) ?? ""}`
+  let c = accountIcons.get(key)
+  if (!c) {
+    c = forwardRef<SVGSVGElement, LucideProps>(({ className }, _ref) => avatar
+      ? <span className={`${className ?? ""} relative inline-grid`} data-web-avatar="">
+          <img src={avatar} alt="" draggable={false} className="size-full rounded-full object-cover" />
+          <SiteIcon host={site} className="absolute -right-[3px] -bottom-[3px] size-[9px] rounded-[2px] bg-background" />
+        </span>
+      : <SiteIcon host={site} className={className} />)
+    accountIcons.set(key, c)
+  }
+  return c
+}
+
+function About({ c }: { c: Container }) {
+  const can = useCanLock()
+  const agents = agentsSay(c)
+  if (!c.lock && !agents) return null
+  const says = [c.lock && "Locked with Touch ID", agents].filter(Boolean).join(" · ")
+  return (
+    <button type="button" onClick={(e) => menuBelow(e, containerItems(c, can))} data-web-container-about={c.id}
+      aria-label={says} data-tip={says}
+      className="flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-[4px] px-1 text-tertiary hover:bg-foreground/[0.08] hover:text-muted-foreground">
+      {c.lock && <Fingerprint aria-hidden className="size-3.5" strokeWidth={2} />}
+      {agents && <Bot aria-hidden className="size-3.5" strokeWidth={2} />}
+    </button>
+  )
+}
+
+export function sitesPanelMenu(): MenuItem[] {
+  const c = containersNow().find((x) => x.id === pickedNow().get())
+  return [
+    { label: "New container…", icon: Plus, run: () => newContainer((n) => pickedNow().set(n.id)) },
+    ...(c ? [{ label: c.name, icon: dotIcon(colorOf(c)), run: () => {}, items: containerItems(c, canLockNow()) }] : []),
+  ]
+}
+const containersNow = () => containersOf(settings.get())
+
+export function SitesPanel({ open, openPage, newTab }: Pick<SidebarCtx, "open"> & { openPage: Open; newTab?: (container: string | null) => void }) {
+  const [pickedId, pick] = useScopedState<string | null>(PICKED, null)
+  const own = ownLogins()
+  const containers = useContainers()
+  const can = useCanLock()
+  const inside = containers.find((c) => c.id === pickedId)
+  const logins: Logins = inside ? loginsOf(inside) : own
+  if (!open) return null
+  const add = () => newContainer((c) => pick(c.id))
+  const menu = (e: React.MouseEvent) => menuBelow(e, [
+    { label: "Sites in", caption: true, run: () => {} },
+    { label: own.name, icon: dotIcon(NEUTRAL), checked: !inside, run: () => pick(undefined) },
+    ...containers.map((c) => ({ label: c.name, icon: dotIcon(colorOf(c)), checked: c.id === inside?.id, run: () => pick(c.id) })),
+    { label: "New container…", icon: Plus, sep: true, run: add },
+    { label: "Manage containers…", icon: Settings2, run: manageContainers },
+  ])
+  const picker = webPages?.sites && (<>
+    {inside && <About c={inside} />}
+    <button type="button" onClick={menu} onContextMenu={inside ? menuFor(() => containerItems(inside, can)) : undefined}
+      aria-label={`Sites in ${logins.name}`} data-tip="Whose logins" data-web-logins={logins.container ?? ""}
+      className="flex h-5 max-w-[60%] min-w-0 cursor-pointer items-center gap-1.5 rounded-[4px] px-1.5 text-[11px] font-medium text-tertiary hover:bg-foreground/[0.08] hover:text-muted-foreground">
+      <Dot color={logins.color} />
+      <span className="truncate">{logins.name}</span>
+      <ChevronsUpDown aria-hidden className="-mx-0.5 size-3 shrink-0" strokeWidth={2.25} />
+    </button>
+  </>)
+  return (
+    <div className="flex shrink-0 flex-col" data-web-sites-panel>
+      <SidebarHeading title="Sites" open={open} aside={picker}>
+        {webPages?.sites && newTab && <HeadingButton icon={Plus} label={`New tab in ${logins.name}`} onClick={() => newTab(inside?.id ?? null)} data-web-new-tab="" />}
+      </SidebarHeading>
+      {webPages?.sites
+        ? <SiteList key={logins.prof} logins={logins} look="sidebar" openPage={openPage} />
+        : <p className="px-1.5 py-1 text-[13px] leading-[18px] text-tertiary">Sites and their logins are in Vaultite's desktop app.</p>}
+    </div>
+  )
+}
+
+function LoginsHeading({ l, c, count }: { l: Logins; c?: Container; count: string }) {
+  const can = useCanLock()
+  const own = l.machine ? undefined : c
+  const items = () => (own ? containerItems(own, can) : [])
+  const agents = c ? agentsSay(c) : ""
+  return (
+    <div onContextMenu={own ? menuFor(items) : undefined} data-web-logins-heading={l.container ?? l.prof}
+      onPointerDown={own ? (e) => startDrag(e, { from: "container", container: own.id, label: own.name }) : undefined}
+      className={`group/head mb-1 flex h-8 items-center gap-2 pr-0.5 pl-1.5 select-none ${own ? "cursor-grab" : ""}`}>
+      <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: l.color }} />
+      <span className="min-w-0 truncate text-[14px] font-semibold" data-web-logins-name="">{l.name}</span>
+      {c?.lock && <Fingerprint aria-label="Locked with Touch ID" data-tip="Locked with Touch ID" className="size-3.5 shrink-0 text-tertiary" strokeWidth={2} />}
+      {agents && <Bot aria-label={agents} data-tip={agents} className="size-3.5 shrink-0 text-tertiary" strokeWidth={2} />}
+      <span className="min-w-0 flex-1 truncate text-right text-[12px] text-tertiary">{count}</span>
+      {own && <span data-no-drag="" className="md:opacity-0 md:group-hover/head:opacity-100 md:group-focus-within/head:opacity-100">
+        <HeadingButton icon={Ellipsis} label={`Options for ${own.name}`} tip="Options" onClick={(e) => menuBelow(e, items())} />
+      </span>}
+    </div>
+  )
+}
+
+function LoginsSection(props: { l: Logins; c?: Container; openPage: Open; filter: string }) {
+  return <LoginsCard {...props} data={useSites(props.l.prof)} />
+}
+
+function MachineSection(props: { l: Logins; c?: Container; openPage: Open; filter: string }) {
+  const sites = elsewhere.use(() => sitesIn(props.l) ?? null)
+  return <LoginsCard {...props} data={{ sites: sites?.filter((s) => !s.other) ?? null, others: [], leaving: () => undefined, refresh: () => void refreshElsewhere() }} />
+}
+
+function LoginsCard({ l, c, data, openPage, filter }: { l: Logins; c?: Container; data: Listed; openPage: Open; filter: string }) {
+  const lifted = useDrag((d) => d?.item.container) === c?.id && !!c && !l.machine
+  const card = useRef<HTMLElement>(null)
+  const taking = useLoginDrop(card, l)
+  const q = filter.trim().toLowerCase()
+  if (q && data.sites && !data.sites.some((s) => matches(s, q)) && !data.others.some((s) => matches(s, q)) && !(c?.sites ?? []).some((x) => x.includes(q))) return null
+  const accounts = data.sites?.filter(isIn).length ?? 0
+  const count = accounts ? plural(accounts, "account") : ""
+  return (
+    <section ref={card} data-web-logins-section={l.container ?? l.prof} data-web-machine={l.machine?.id} data-slide={l.machine ? undefined : c?.id} data-web-logins-taking={taking ? (taking.copy ? "copy" : "move") : undefined}
+      className={`rounded-[12px] border px-1.5 pt-1 pb-1.5 transition-[background-color,border-color] ${lifted ? "opacity-40" : ""}`}
+      style={{ background: `color-mix(in srgb, ${l.color} ${taking ? 14 : 6}%, transparent)`, borderColor: `color-mix(in srgb, ${l.color} ${taking ? 60 : 20}%, transparent)` }}>
+      <LoginsHeading l={l} c={c} count={count} />
+      <SiteRows logins={l} data={data} openPage={openPage} filter={filter} />
+    </section>
+  )
+}
+
+let copying = false
+function useCopyKey() {
+  useEffect(() => {
+    const hear = (e: KeyboardEvent | PointerEvent) => { if (e.altKey !== copying) { copying = e.altKey; rehit() } }
+    for (const t of ["keydown", "keyup", "pointermove"] as const) addEventListener(t, hear, true)
+    return () => { for (const t of ["keydown", "keyup", "pointermove"] as const) removeEventListener(t, hear, true) }
+  }, [])
+}
+
+function useLoginDrop(card: React.RefObject<HTMLElement | null>, l: Logins) {
+  const id = `web-viewer:logins:${l.prof}${l.machine ? `@${l.machine.id}` : ""}`
+  const verb = (copy: boolean) => `${copy ? "Copy" : "Move"} to ${nameOf(l)}`
+  useDropTarget<{ copy: boolean }>(id, (item, x, y) => {
+    const from = item.site, el = card.current
+    if (!from || (from.logins === l.prof && !l.machine) || !el || !(l.machine ? webPages?.seal : webPages?.move)) return null
+    if (!listed.get().get(from.logins)?.some((s) => s.site === from.site && !s.other)) return null
+    const b = el.getBoundingClientRect()
+    return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom ? { copy: copying || !!l.machine } : null
+  }, (item, h) => {
+    const from = allLogins().find((o) => o.prof === item.site!.logins)
+    const s = listed.get().get(item.site!.logins)?.find((x) => x.site === item.site!.site)
+    if (from && s) void moveLogin(from, l, s, h.copy)
+  }, { hint: (h) => verb(h.copy) })
+  return useDropHit<{ copy: boolean }>(id)
+}
+
+type Reorder = { before: string | null; order: string[] }
+const DROP = "web-viewer:containers"
+function useContainerDrop(box: React.RefObject<HTMLDivElement | null>) {
+  const [edge] = useState(() => edgeScroller())
+  useDropTarget<Reorder>(DROP, (item, x, y) => {
+    const el = box.current
+    if (!item.container || !el) return null
+    edge.over(el, x, y)
+    const b = el.getBoundingClientRect()
+    if (x < b.left || x > b.right || y < b.top - 40 || y > b.bottom + 40) return null
+    const cards = [...el.querySelectorAll<HTMLElement>(":scope > [data-slide]")]
+    const { order, before, same } = reorder(cards.map((e) => e.dataset.slide!), [item.container], slotAt(el, cards, x, y, "y"))
+    return same ? null : { before, order }
+  }, (item, h) => void moveContainer(item.container!, h.before), { end: edge.stop })
+  return useDropHit<Reorder>(DROP)?.order ?? null
+}
+
+export function SitesView({ openPage, focus = "", setFocus }: { openPage: Open; focus?: string; setFocus?: (container: string) => void }) {
+  const containers = useContainers(), one = containers.find((x) => x.id === focus)
+  const all = useAllLogins().filter((l) => !one || l.container === one.id)
+  const [q, setQ] = useState("")
+  const box = useRef<HTMLDivElement>(null)
+  useSlide(box, useContainerDrop(box), "y")
+  useCopyKey()
+  const machines = useMachines()
+  if (!webPages?.sites) return <div className="mx-auto max-w-[640px] px-4 pt-2 pb-10"><SitesPanel open openPage={openPage} /></div>
+  return (
+    <div className="mx-auto max-w-[640px] px-4 pt-2 pb-10" data-web-sites-view={one?.id ?? ""}>
+      <PageHeader title={sitesTitle(focus)} subtitle={one ? `Who you're signed in as in ${one.name}, here and on your other machines` : "Who you're signed in as, container by container: drag a login to move it"}>
+        {one && setFocus ? <Button size="small" onClick={() => setFocus("")} data-web-all-containers="">All containers</Button> : <Button size="small" onClick={() => newContainer()} data-web-new-container="">New container</Button>}
+      </PageHeader>
+      <FilterField value={q} onChange={setQ} placeholder={one ? `Filter ${one.name}'s sites and accounts` : "Filter sites and accounts"} />
+      <div ref={box} data-size-up="" data-web-logins-list="" className="relative mt-2 flex flex-col gap-3">
+        {all.map((l) => <LoginsSection key={l.prof} l={l} c={containers.find((x) => x.id === l.container)} openPage={openPage} filter={q} />)}
+      </div>
+      {machines.filter((m) => !one || m.sets[profileIn(one.id)]).map((m) => <MachineLogins key={m.machine} m={m} only={one?.id} openPage={openPage} filter={q} />)}
+    </div>
+  )
+}
+
+const ELSEWHERE_MS = 30_000
+
+function useMachines() {
+  const machines = elsewhere.use()
+  useEffect(() => {
+    void refreshElsewhere()
+    const t = window.setInterval(() => { if (document.visibilityState === "visible") void refreshElsewhere() }, ELSEWHERE_MS)
+    return () => window.clearInterval(t)
+  }, [])
+  return (machines ?? []).filter((m) => Object.keys(m.sets).length)
+}
+
+function MachineLogins({ m, only, openPage, filter }: { m: MachineSets; only?: string; openPage: Open; filter: string }) {
+  const containers = useContainers()
+  const sets = allLoginsOn({ id: m.machine, label: m.label }).filter((l) => m.sets[l.prof] && (!only || l.container === only))
+  return (
+    <Section title={`On ${m.label}`} className="mt-6">
+      <div data-size-up="" data-web-machine-logins={m.machine} className="flex flex-col gap-3">
+        {sets.map((l) => <MachineSection key={l.prof} l={l} c={containers.find((x) => x.id === l.container)} openPage={openPage} filter={filter} />)}
+      </div>
+    </Section>
+  )
+}
+
+export function SitesSettings() {
+  const all = useAllLogins()
+  return (
+    <div data-setting="sites">
+    <Section title="Sites and logins">
+      <div data-web-sites-settings>
+        <Group>{all.map((l) => <SiteList key={l.prof} logins={l} look="settings" />)}</Group>
+        <div className="mt-2"><Button size="small" onClick={() => newContainer()}>New container…</Button></div>
+        <p className="mt-1.5 px-1 text-[13px] leading-[18px] text-muted-foreground">
+          Each container signs in to sites on its own. Sign out deletes a site's cookies and what it keeps in the browser there; right-click a container for its options.
+        </p>
+      </div>
+    </Section>
+    </div>
+  )
+}

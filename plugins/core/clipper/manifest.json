@@ -1,0 +1,14 @@
+{
+  "id": "clipper",
+  "icon": "scissors",
+  "category": "writing",
+  "essential": true,
+  "name": "Web clipper",
+  "description": "Saves a web page to your vault as a Markdown note: its main content without menus and ads, with its source, title, author and date. From vau clip, an AI through MCP, or anything that posts a page.",
+  "settings": {
+    "folder": { "type": "string", "folder": true, "default": "Clippings", "label": "Folder", "description": "where clipped pages are saved" },
+    "tags": { "type": "list", "default": ["Clipping"], "label": "Tags", "description": "the tags each clipped page gets" },
+    "inbox": { "type": "boolean", "default": false, "label": "Into the inbox", "description": "to review, in Inbox/ (with the Inbox plugin on)" },
+    "videos": { "type": "boolean", "default": true, "label": "Save videos", "description": "an X post's video, into its clip; by a plugin that saves videos (Videos) while one is on" }
+  }
+}

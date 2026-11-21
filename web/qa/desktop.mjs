@@ -1,0 +1,417 @@
+// The desktop app end to end: window and server, menus, zoom, Finder drops, outside files, vaults' windows, vau dev screenshot.
+// Needs the desktop app; WRITES only the throwaway vault.
+//   node web/qa/desktop.mjs <vault copy> [packaged app binary]
+// Paths: core/coreops/dev.ts, electron/menu.ts, plugins/core/editing/menu.ts, core/filedrop.ts, core/zoom.ts
+import { _electron } from "playwright-core"
+import { execFileSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { app as appOf } from "./lib/app.mjs"
+import { PROMPT, ROOT, SELECT_WORD, desktopApp, qa, terminalText, until } from "./lib/qa.mjs"
+import { pathToFileURL } from "node:url"
+import { gitEnv } from "../../core/gitenv.ts"
+
+const { args: [VAULT, BIN], check, errs, watch, noErrors, done } = await qa(import.meta.url, { chrome: false })
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "vau-desktop-"))
+const OUT = path.join(TMP, "shots")
+const MAC = process.platform === "darwin"
+const CMD = MAC ? "Cmd" : "Ctrl" // (accelerators: Electron's Cmd is Super on Linux, so the menu says Ctrl there)
+fs.mkdirSync(OUT)
+
+const DESKTOP = BIN ? { executablePath: BIN, args: [], env: {} } : await desktopApp()
+const app = await _electron.launch({
+  executablePath: DESKTOP.executablePath, args: [...DESKTOP.args, "--vault", VAULT],
+  env: { ...process.env, ...DESKTOP.env, VAULTITE_QUIET: process.env.SHOW ? "" : "1", VAULTITE_USER_DATA: path.join(TMP, "userData"), VAULTITE_LOCAL: path.join(TMP, "local") },
+})
+const win = await app.firstWindow(), ui = appOf(win)
+watch(win, { console: true })
+await win.waitForSelector("[role=tree]", { timeout: 60000 })
+const origin = new URL(win.url()).origin
+check("the window serves the vault from its own server", /^http:\/\/127\.0\.0\.1:\d+$/.test(origin) &&
+  (await (await fetch(`${origin}/api/vault`)).json()).path === VAULT, origin)
+{
+  const app_ = (await (await fetch(`${origin}/api/ops/app.version`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()).app
+  let built = null
+  try { built = JSON.parse(fs.readFileSync(path.join(ROOT, "electron/build.json"), "utf8")).commit ?? null } catch {}
+  const head = execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8", env: gitEnv() }).trim()
+  check("vau version: the app's own commit (its build's, null from source; a Dev instance's worktree's)", app_ && "commit" in app_
+    && (app_.worktree ? app_.commit === head && app_.worktree.worktree === path.basename(ROOT) : BIN ? /^[0-9a-f]{40}$/.test(app_.commit) : app_.commit === built), app_)
+  await win.evaluate(() => { window.__copied = []; navigator.clipboard.writeText = async (t) => { window.__copied.push(t) }; location.hash = "settings" })
+  await until(async () => { await win.locator('[data-settings-nav="about"]').click().catch(() => {}); return (await win.locator('[data-settings-row="running"]').count()) === 1 }, 8000)
+  const row = win.locator('[data-settings-row="running-app"]')
+  if (app_?.commit) {
+    const text = await until(async () => { const t = await row.textContent().catch(() => ""); return t?.includes(app_.commit.slice(0, 7)) ? t : null }, 8000)
+    check("About's App row: the app's short commit and its update state (a Dev instance's: its branch and worktree)", text && !text.includes(app_.commit.slice(7, 12))
+      && (app_.worktree ? text.includes(`${app_.worktree.branch} in ${app_.worktree.worktree}`) : /No update waiting|Updates off|is ready|…/.test(text)), text)
+    await row.click()
+    check("… a tap copies the whole commit", await until(() => win.evaluate((sha) => window.__copied.includes(sha), app_.commit), 4000), await win.evaluate(() => window.__copied))
+  } else {
+    await ui.idle()
+    check("About's App row: none when the app isn't a build", (await row.count()) === 0)
+  }
+  await win.evaluate(() => { history.back() })
+  await win.waitForSelector("[role=tree]")
+}
+check("the page knows it's in the app", await win.evaluate(() => document.documentElement.hasAttribute("data-electron") && window.vaultite?.desktop === true))
+check("the page knows its platform", await win.evaluate((p) => document.documentElement.dataset.platform === p && window.vaultite?.platform === p, process.platform))
+const toggle = await win.locator("[data-sidebar-toggle='']").boundingBox()
+if (MAC) check("the sidebar toggle sits right of the traffic lights", toggle && toggle.x >= 76, toggle)
+else check("the sidebar toggle sits at the window's edge (its own title bar, no lights)", toggle && toggle.x < 40, toggle)
+check("the sidebar's top row drags the window", await win.evaluate(() => getComputedStyle(document.querySelector("[data-titlebar]")).getPropertyValue("-webkit-app-region") === "drag"))
+await win.screenshot({ path: path.join(OUT, "window.png") })
+{
+  const shot = path.join(TMP, "dev-shot.png"), el = path.join(TMP, "dev-el.png")
+  const vau = (...a) => execFileSync(process.execPath, [path.join(ROOT, "bin/vau"), ...a], { encoding: "utf8", env: { ...process.env, VAULTITE_URL: origin }, stdio: ["ignore", "pipe", "pipe"] })
+  let out = "", out2 = ""
+  try { out = vau("dev", "screenshot", "--out", shot).trim(); out2 = vau("dev", "screenshot", "--selector", "[role=tree]", "--out", el, "--json") } catch (e) { out = String(e.stderr ?? e) }
+  const png = (f) => fs.existsSync(f) && fs.readFileSync(f).subarray(1, 4).toString() === "PNG"
+  const size = (() => { try { return JSON.parse(out2) } catch { return {} } })()
+  check("vau dev screenshot: the window as a PNG, its path printed", out === shot && png(shot) && fs.statSync(shot).size > 5000, out)
+  check("vau dev screenshot --selector: one element, smaller", png(el) && size.width > 0 && size.width < (await win.evaluate(() => innerWidth * devicePixelRatio)), size)
+}
+const bounds = await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].getBounds())
+if (process.env.SHOW) try { execFileSync("screencapture", ["-x", "-o", `-R${bounds.x},${bounds.y},${bounds.width},120`, path.join(OUT, "titlebar.png")], { stdio: "ignore" }) } catch { /* no screen recording permission */ }
+
+const tabs = () => win.locator("[role=tablist] [role=tab]").count()
+const menuClick = (label) => app.evaluate(({ Menu, BaseWindow }, label) => {
+  const find = (items) => { for (const i of items) { if (i.label === label) return i; const s = i.submenu && find(i.submenu.items); if (s) return s } }
+  find(Menu.getApplicationMenu().items).click(undefined, BaseWindow.getAllWindows()[0])
+}, label)
+if (process.env.SHOW) await win.bringToFront()
+await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].focus())
+const before = await tabs()
+await menuClick("New tab")
+check("File > New tab (⌘T) opens a tab", await until(async () => (await tabs()) === before + 1, 10000), await tabs())
+await menuClick("Close tab")
+check("File > Close tab (⌘W) closes it", await until(async () => (await tabs()) === before, 10000), await tabs())
+await win.keyboard.press("ControlOrMeta+P")
+await win.keyboard.type("Close current tab")
+await ui.idle()
+const listed = await win.evaluate(() => document.querySelector("[role=dialog], [role=listbox]")?.closest("div")?.textContent ?? document.body.textContent)
+check(`the palette shows ${MAC ? "⌘W" : "Ctrl W"} on Close current tab`, (MAC ? /Close current tab\s*⌘\s*W/ : /Close current tab\s*Ctrl\s*W/).test(listed), listed.slice(0, 200))
+await win.keyboard.press("Escape")
+
+{
+  const note = fs.readdirSync(path.join(VAULT, "Notes")).find((f) => f.endsWith(".md"))
+  await win.evaluate((h) => { location.hash = h }, `#file/${encodeURIComponent(`Notes/${note}`)}`); await ui.idle()
+  const made = app.waitForEvent("window")
+  await win.keyboard.press("ControlOrMeta+P"); await win.keyboard.type("Move current tab to new window"); await ui.idle(); await win.keyboard.press("Enter")
+  const pop = await made
+  watch(pop, { label: "popout" })
+  await pop.waitForSelector("[data-tab-id]", { timeout: 20000 })
+  check("pop-out: a window of its own, showing the tab", decodeURIComponent(pop.url()).includes(`?popout=`) && decodeURIComponent(pop.url()).includes(note), pop.url())
+  check("pop-out: the app's, no sidebars", await pop.evaluate(() => document.documentElement.hasAttribute("data-electron") && document.documentElement.hasAttribute("data-popout") && !document.querySelector("aside[data-side]")))
+  const pad = await pop.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-corner] > [data-tab-bar]")).paddingLeft))
+  if (MAC) check("pop-out: its tab bar makes room for the traffic lights", pad >= 76, pad)
+  else check("pop-out: its tab bar starts at the edge (no lights)", pad < 40, pad)
+  check("pop-out: a second window, laid out like the vault's", await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length === 2) &&
+    await pop.evaluate((p) => document.documentElement.dataset.platform === p, process.platform))
+  const popTabs = () => pop.locator("[role=tablist] [role=tab]").count()
+  await app.evaluate(({ BaseWindow, Menu }) => {
+    const w = BaseWindow.getAllWindows().find((x) => x.webContents.getURL().includes("?popout="))
+    const find = (items) => { for (const i of items) { if (i.label === "New tab") return i; const s = i.submenu && find(i.submenu.items); if (s) return s } }
+    find(Menu.getApplicationMenu().items).click(undefined, w)
+  })
+  check("pop-out: the menu's New tab opens one there", await until(async () => (await popTabs()) === 2, 10000), await popTabs())
+  const gone = pop.waitForEvent("close", { timeout: 15000 }).then(() => true, () => false)
+  await pop.keyboard.press("ControlOrMeta+W")
+  check("pop-out: ⌘W closes a tab there", await until(async () => (await popTabs()) === 1, 10000), await popTabs())
+  await pop.keyboard.press("ControlOrMeta+W").catch(() => {})
+  check("pop-out: closing its last tab closes it", await gone)
+  if (process.env.SHOW) await win.bringToFront()
+  await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].focus())
+
+  await win.evaluate((h) => { location.hash = h }, `#file/${encodeURIComponent(`Notes/${note}`)}`); await ui.idle()
+  const made2 = app.waitForEvent("window")
+  await win.keyboard.press("ControlOrMeta+P"); await win.keyboard.type("Move current tab to new window"); await ui.idle(); await win.keyboard.press("Enter")
+  const pop2 = await made2
+  await pop2.waitForSelector("[data-tab-id]", { timeout: 20000 })
+  const shut = pop2.waitForEvent("close", { timeout: 5000 }).catch(() => {})
+  await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().find((x) => x.webContents.getURL().includes("?popout="))?.close())
+  await shut
+  await ui.idle()
+  await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].focus())
+  const made3 = app.waitForEvent("window", { timeout: 10000 }).catch(() => null)
+  await win.keyboard.press("ControlOrMeta+Shift+T")
+  const pop3 = await made3
+  check("pop-out: closed as a window, ⇧⌘T opens it again with its tab", !!pop3 && await pop3.waitForSelector("[data-tab-id]", { timeout: 20000 }).then(() => true, () => false)
+    && decodeURIComponent(pop3.url()).includes(note), pop3?.url())
+  if (pop3) { const end = pop3.waitForEvent("close", { timeout: 5000 }).catch(() => {}); await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().find((x) => x.webContents.getURL().includes("?popout="))?.close()); await end }
+  await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].focus())
+}
+
+{
+  fs.writeFileSync(path.join(VAULT, "Notes/Qa spelling.md"), "Look this up please.\n")
+  await win.evaluate((h) => { location.hash = h }, `#file/${encodeURIComponent("Notes/Qa spelling.md")}`)
+  await win.waitForSelector("[data-pane] .cm-content"); await ui.idle()
+  const said = []
+  await app.evaluate(({ BaseWindow }) => { globalThis.__said = 0; BaseWindow.getAllWindows()[0].webContents.on("context-menu", () => { globalThis.__said++ }) })
+  const first = win.locator("[data-pane] .cm-line").first()
+  await first.click(); await win.keyboard.press("Home"); await win.keyboard.press(SELECT_WORD)
+  const b = await first.boundingBox()
+  await win.mouse.click(b.x + 8, b.y + b.height / 2, { button: "right" })
+  const items = await until(async () => (await win.locator("[role=menu] [role=menuitem]").count()) > 0, 2000) ? await win.locator("[role=menu] [role=menuitem]").allTextContents() : []
+  said.push(await app.evaluate(() => globalThis.__said))
+  check("editor: right-click opens the app's menu after Electron's context-menu", said[0] >= 1 && items.some((i) => i.startsWith("Format")), { said, items })
+  if (MAC) {
+    check("editor: Look up the selection", items.some((i) => i.startsWith("Look up “Look”")), items)
+    const looked = () => app.evaluate(() => globalThis.vaultiteQuiet?.lookUps ?? 0)
+    const was = await looked()
+    await win.getByRole("menuitem", { name: /^Look up/ }).click()
+    if (!process.env.SHOW) check("editor: … and a quiet copy doesn't show macOS's popover", await until(async () => (await looked()) === was + 1, 4000), await looked())
+    else await ui.idle()
+    check("editor: Look up asks the window without an error", !errs.length, errs)
+  } else check("editor: no Look up off a Mac", !items.some((i) => i.startsWith("Look up")), items)
+  await win.keyboard.press("Escape")
+  await menuClick("Close tab"); await ui.idle()
+}
+
+const zoomKeys = await app.evaluate(({ Menu }) => {
+  const all = []; const walk = (items, at) => { for (const i of items) { if (/^(Zoom in|Zoom out|Actual size|Bigger|Smaller)$/.test(i.label)) all.push(`${at}${i.label}:${i.accelerator}`); if (i.submenu) walk(i.submenu.items, i.label === "Interface size" ? "Interface size > " : at) } }
+  walk(Menu.getApplicationMenu().items, ""); return all
+})
+check("View menu: zoom in on ⌘= and ⌘+, out on ⌘-, actual size on ⌘0", [`Zoom in:${CMD}+=`, `Zoom in:${CMD}+Plus`, `Zoom out:${CMD}+-`, `Actual size:${CMD}+0`].every((k) => zoomKeys.includes(k)), zoomKeys)
+check("View > Interface size: bigger on ⌥⌘=, smaller on ⌥⌘-, actual size on ⌥⌘0",
+  [`Interface size > Bigger:${CMD}+Alt+=`, `Interface size > Smaller:${CMD}+Alt+-`, `Interface size > Actual size:${CMD}+Alt+0`].every((k) => zoomKeys.includes(k)), zoomKeys)
+const factor = () => app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].webContents.getZoomFactor())
+await menuClick("Zoom in")
+check("Zoom in on a blank tab: the interface size", await until(async () => Math.abs((await factor()) - 1.1) < 0.01, 10000), await factor())
+check("… and says so", await until(async () => (await win.locator("[data-sonner-toast]", { hasText: "Interface 110%" }).count()) > 0, 4000))
+check("the zoom is kept (vaults.json)", await until(() => JSON.parse(fs.readFileSync(path.join(TMP, "userData/vaults.json"), "utf8")).zoom === 1.1, 10000))
+await win.reload(); await win.waitForSelector("[role=tree]")
+check("a reload keeps the zoom", Math.abs((await factor()) - 1.1) < 0.01, await factor())
+await menuClick("Smaller"); await menuClick("Smaller")
+check("Interface size > Smaller", await until(async () => Math.abs((await factor()) - 0.9) < 0.01, 10000), await factor())
+check("Settings' row follows it", await win.evaluate(async () => { location.hash = "settings"; return true }) &&
+  await until(async () => { await win.locator('[data-settings-nav="appearance"]').click().catch(() => {}); return (await win.locator('[data-settings-row="interface-size"]', { hasText: "90%" }).count()) === 1 }, 8000))
+await win.locator("[data-interface-size]").getByRole("button", { name: "Increase interface size" }).click()
+check("… and sets it", await until(async () => Math.abs((await factor()) - 1) < 0.01, 4000), await factor())
+await menuClick("Zoom in")
+check("Zoom in from Settings (no pane content to zoom): the interface", await until(async () => Math.abs((await factor()) - 1.1) < 0.01, 4000), await factor())
+await menuClick("Actual size")
+check("Actual size", await until(async () => (await factor()) === 1, 4000), await factor())
+await win.evaluate(() => { history.back() })
+await ui.idle()
+
+const menuInfo = () => app.evaluate(({ Menu }) => {
+  const out = {}
+  const walk = (items, at) => { for (const i of items) {
+    if (i.label) out[`${at}${i.label}`] = { key: i.accelerator ?? null, icon: !!i.icon && !i.icon.isEmpty(), enabled: i.enabled, visible: i.visible }
+    if (i.submenu) walk(i.submenu.items, `${at}${i.label} > `)
+  } }
+  walk(Menu.getApplicationMenu().items, ""); return out
+})
+let menu = await menuInfo()
+check("the menu bar has File, Edit, View, Go, Window and Help", ["File", "Edit", "View", "Go", "Window", "Help"].every((m) => menu[m]), Object.keys(menu).filter((k) => !k.includes(">")))
+check("File > New note on ⌘N, with its icon (a Mac's: GTK menus get none)", menu["File > New note"]?.key === `${CMD}+N` && (menu["File > New note"].icon || !MAC), menu["File > New note"])
+check("most items have icons (a Mac's)", !MAC || Object.values(menu).filter((i) => i.icon).length > 40, Object.values(menu).filter((i) => i.icon).length)
+check("Go has Back and Forward, on the app's keys", menu["Go > Back"]?.key === (MAC ? "Cmd+Alt+Left" : "Alt+Left") && menu["Go > Forward"]?.key === (MAC ? "Cmd+Alt+Right" : "Alt+Right"), [menu["Go > Back"], menu["Go > Forward"]])
+check("File > Reopen closed tab on ⇧⌘T; Window has Pin tab", menu["File > Reopen closed tab"]?.key === `${CMD}+Shift+T` &&
+  !!menu["Window > Pin tab"], [menu["File > Reopen closed tab"], menu["Window > Pin tab"]])
+check("View > Graph view on ⌘G", !menu["View > Graph view"] || menu["View > Graph view"].key === `${CMD}+G`, menu["View > Graph view"])
+check("Edit > Search the vault on ⇧⌘F", menu["Edit > Search the vault"]?.key === `${CMD}+Shift+F`, menu["Edit > Search the vault"])
+check("Help has the docs, release notes and logs", ["Help > Vaultite help", "Help > Release notes", "Help > Show logs"].every((k) => menu[k]), Object.keys(menu).filter((k) => k.startsWith("Help")))
+const hot = (keys) => fetch(`${origin}/api/config/hotkeys`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ "graph:open": keys }) })
+if (menu["View > Graph view"]) {
+  await hot(["Mod+Shift+G"])
+  check("a hotkey set in hotkeys.json shows in the menu", await until(async () => (await menuInfo())["View > Graph view"]?.key === `${CMD}+Shift+G`, 10000), (await menuInfo())["View > Graph view"])
+  await hot([])
+  check("a command with no keys in hotkeys.json has none in the menu", await until(async () => (await menuInfo())["View > Graph view"]?.key === null, 10000), (await menuInfo())["View > Graph view"])
+  await hot(null)
+}
+const pins = await (await fetch(`${origin}/api/state`)).json().then((s) => s.pinned ?? [])
+if (pins.length) check("Go > Pinned lists the pinned pages", await until(async () => Object.keys(await menuInfo()).filter((k) => k.startsWith("Go > Pinned > ")).length > 0, 10000), pins)
+
+await menuClick("Hide left sidebar")
+const tabAt = () => win.locator("[data-corner] [role=tablist] [role=tab]").first().boundingBox()
+const firstTab = await until(async () => { const b = await tabAt(); return b && b.x >= (MAC ? 110 : 40) ? b : null }, 4000) ?? await tabAt()
+check("folded sidebar: the first tab clears the traffic lights (a Mac's) and the toggle", firstTab && firstTab.x >= (MAC ? 110 : 40), firstTab)
+await win.screenshot({ path: path.join(OUT, "rail.png") })
+const look = await (await fetch(`${origin}/api/config/appearance`)).json()
+const setLook = (body) => fetch(`${origin}/api/config/appearance`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+await setLook({ tabBar: false, paneTabBars: false })
+await win.evaluate(() => { location.hash = "#file/Start%20here.md" })
+const titleRow = () => win.evaluate(() => {
+  const bar = document.querySelector("[data-corner] [data-pane] [data-view-bar]"), toggle = document.querySelector("[data-sidebar-toggle='']")
+  const first = bar?.querySelector("button")?.getBoundingClientRect(), t = toggle.getBoundingClientRect()
+  return bar && { top: bar.getBoundingClientRect().top, first: first?.left, toggle: t.right, row: t.top + t.height / 2 - (first.top + first.height / 2) }
+})
+const row = await until(async () => { const r = await titleRow(); return r && r.top < 1 && r }, 10000)
+check("no tab bar: a note's bar is the title row, clear of the toggle and level with it", !!row && row.first >= row.toggle + 4 && Math.abs(row.row) <= 1, row || await titleRow())
+await win.screenshot({ path: path.join(OUT, "rail-title-row.png") })
+await setLook({ tabBar: look.tabBar ?? true, paneTabBars: look.paneTabBars ?? true })
+await menuClick("Show left sidebar")
+
+const cdp = await win.context().newCDPSession(win)
+async function drop(files, x, y, modifiers = 0) {
+  const data = { items: [], files, dragOperationsMask: 1 | 16 }
+  for (const type of ["dragEnter", "dragOver", "drop"]) { await cdp.send("Input.dispatchDragEvent", { type, x, y, data, modifiers }); await ui.idle() }
+}
+const blank = async () => { await win.locator("#main-scroll [data-newtab-section]").first().waitFor(); await ui.idle() }
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64")
+
+await win.keyboard.press("ControlOrMeta+P")
+await win.keyboard.type("Open terminal")
+await win.keyboard.press("Enter")
+const term = () => terminalText(win)
+await until(async () => (await win.locator("[data-term]").count()) > 0, 15000)
+await until(async () => PROMPT.test(await terminalText(win)), 10000)
+await win.locator("[data-term]").first().click()
+await win.keyboard.type("echo vau-$((6*7)) && pwd\n")
+check("the terminal runs a shell in the vault", await until(async () => (await term()).includes("vau-42") && (await term()).includes(path.basename(VAULT)), 15000), (await term()).slice(-300))
+const shot = path.join(TMP, "Screenshot.png")
+fs.writeFileSync(shot, png)
+const xb = await win.locator("[data-term]").first().boundingBox()
+const termUrl = win.url()
+await drop([shot], xb.x + xb.width / 2, xb.y + xb.height / 2)
+check("an image dropped on the terminal types its uploaded path", await until(async () => /uploads\/\w+\/\w+-Screenshot\.png/.test((await term()).replaceAll("\n", "")), 5000), (await term()).slice(-300))
+check("…and doesn't open it in a tab", win.url() === termUrl, win.url())
+await win.keyboard.press("Control+C")
+await menuClick("Close tab")
+
+const src = path.join(TMP, "from finder")
+fs.mkdirSync(path.join(src, "Folder in"), { recursive: true })
+fs.writeFileSync(path.join(src, "Dropped note.md"), "Dropped from Finder.\n")
+fs.writeFileSync(path.join(src, "Folder in", "Inside.md"), "Inside a folder.\n")
+fs.writeFileSync(path.join(src, "Moved.md"), "Moved with option.\n")
+const folderRow = win.locator('[data-tree-path="Notes"]').first()
+const at = async () => {
+  await folderRow.scrollIntoViewIfNeeded()
+  let b = await folderRow.boundingBox(), prev = null
+  for (let i = 0; i < 20 && JSON.stringify(b) !== JSON.stringify(prev); i++) { await new Promise((r) => setTimeout(r, 100)); prev = b; b = await folderRow.boundingBox() }
+  return [b.x + 40, b.y + b.height / 2]
+}
+await drop([path.join(src, "Dropped note.md"), path.join(src, "Folder in")], ...await at())
+check("a drop on a folder copies files and folders in", await until(() => fs.existsSync(path.join(VAULT, "Notes/Dropped note.md")) && fs.existsSync(path.join(VAULT, "Notes/Folder in/Inside.md")), 10000)
+  && fs.existsSync(path.join(src, "Dropped note.md")))
+await drop([path.join(src, "Dropped note.md")], ...await at())
+check("a name that's taken gets \" 1\"", await until(() => fs.existsSync(path.join(VAULT, "Notes/Dropped note 1.md")), 10000))
+await drop([path.join(src, "Moved.md")], ...await at(), MAC ? 1 /* Alt */ : 8 /* Shift: Alt drags windows on Linux */)
+check("⌥ moves", await until(() => fs.existsSync(path.join(VAULT, "Notes/Moved.md")) && !fs.existsSync(path.join(src, "Moved.md")), 10000))
+check("the tree shows what came in", await until(async () => (await win.locator('[data-tree-path="Notes/Dropped note.md"]').count()) > 0, 10000))
+
+const outside = path.join(TMP, "Outside note.md")
+fs.writeFileSync(outside, "Written outside the vault.\n")
+const main = await win.locator("#main-scroll").boundingBox()
+await drop([outside], main.x + main.width / 2, main.y + 200)
+check("a file dropped on the editor opens in a tab", await until(async () => decodeURIComponent(win.url()).includes(`#file/${outside}`), 10000), win.url())
+check("its text shows", await until(async () => (await win.locator(".cm-content").first().textContent()).includes("Written outside the vault."), 10000))
+check("it isn't added to the vault", !fs.readdirSync(VAULT).includes("Outside note.md"))
+await win.locator(".cm-content").first().click()
+await win.keyboard.press("ControlOrMeta+End")
+await win.keyboard.type("Edited in the app.")
+check("editing saves it in place", await until(() => fs.readFileSync(outside, "utf8").includes("Edited in the app."), 5000), fs.readFileSync(outside, "utf8"))
+check("the server refuses outside files nobody allowed", (await fetch(`${origin}/api/file?path=${encodeURIComponent("/etc/hosts")}`)).status === 404)
+await win.screenshot({ path: path.join(OUT, "outside.png") })
+await win.locator('[role="tab"][aria-selected="true"]').first().click({ button: "right" })
+await win.getByRole("menuitem", { name: "Copy to vault" }).click()
+check("Copy to vault copies it in", await until(() => fs.existsSync(path.join(VAULT, "Outside note.md")) && fs.readFileSync(path.join(VAULT, "Outside note.md"), "utf8").includes("Edited in the app."), 10000))
+check("…and the tab shows the vault's copy", await until(async () => decodeURIComponent(win.url()).endsWith("#file/Outside note.md"), 10000), win.url())
+await menuClick("New tab")
+await blank()
+
+const pdfOut = path.join(TMP, "Outside statement.pdf")
+fs.writeFileSync(pdfOut, "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n")
+await drop([pdfOut], main.x + main.width / 2, main.y + 200)
+check("a PDF dropped from outside opens in a tab", await until(async () => decodeURIComponent(win.url()).includes(`#file/${pdfOut}`), 10000), win.url())
+check("in the PDF viewer, its bytes served", await until(async () => (await win.locator("article iframe[src*='api/raw']").count()) > 0, 10000) &&
+  (await fetch(`${origin}/api/raw?path=${encodeURIComponent(pdfOut)}`)).status === 200)
+const imgOut = path.join(TMP, "Outside photo.png")
+fs.writeFileSync(imgOut, png)
+await menuClick("New tab")
+await blank()
+await drop([imgOut], main.x + main.width / 2, main.y + 200)
+check("an image dropped from outside opens in a tab", await until(async () => decodeURIComponent(win.url()).includes(`#file/${imgOut}`), 10000), win.url())
+check("its path bar has Copy to vault", await until(async () => (await win.locator('[data-pane] button[aria-label="Copy to vault"]').count()) > 0, 10000))
+await win.locator("[data-pane] article[data-kind=image] img").first().click({ button: "right" })
+check("right-clicking it shows Copy image and Copy to vault", await until(async () => (await win.getByRole("menuitem", { name: "Copy to vault" }).count()) > 0
+  && (await win.getByRole("menuitem", { name: "Copy image" }).count()) > 0, 10000))
+await win.getByRole("menuitem", { name: "Copy to vault" }).click()
+const inVault = () => execFileSync("find", [VAULT, "-name", "Outside photo.png"], { encoding: "utf8" }).trim()
+check("Copy to vault brings the image in", await until(() => !!inVault(), 10000))
+check("…and the tab shows the vault's copy", await until(async () => !decodeURIComponent(win.url()).includes(TMP), 10000), win.url())
+await win.locator("[data-pane] article[data-kind=image] img").first().click({ button: "right" })
+check("a vault image's right-click has its file's items", await until(async () => (await win.getByRole("menuitem", { name: "Move file to…" }).count()) > 0
+  && (await win.getByRole("menuitem", { name: "Delete", exact: true }).count()) > 0, 10000))
+await win.keyboard.press("Escape")
+const xlsxOut = path.join(TMP, "Outside budget.xlsx")
+fs.writeFileSync(xlsxOut, (await import(pathToFileURL(path.join(ROOT, "tools/fixtures/formats/make.ts")).href)).xlsx())
+await menuClick("New tab") // (a PDF's viewer takes drops itself)
+await blank()
+await drop([xlsxOut], main.x + main.width / 2, main.y + 200)
+check("a workbook dropped from outside opens as a grid", await until(async () => (await win.locator("[data-sheet-grid] td", { hasText: "Lamp oil" }).count()) > 0, 15000))
+check("the server refuses bytes nobody allowed", (await fetch(`${origin}/api/raw?path=${encodeURIComponent("/etc/hosts")}`)).status === 404)
+await win.screenshot({ path: path.join(OUT, "outside-workbook.png") })
+
+const htmlOut = path.join(TMP, "Outside chart.html")
+fs.writeFileSync(htmlOut, `<!doctype html><html><head><title>Outside chart</title></head><body><p id="out">ran</p><script>
+  document.getElementById("out").textContent = "script ran";
+  vau.read("/Welcome.md").then(() => { document.getElementById("out").textContent += ", read the vault" }, () => { document.getElementById("out").textContent += ", vault refused" })
+</script></body></html>`)
+await menuClick("New tab")
+await blank()
+await drop([htmlOut], main.x + main.width / 2, main.y + 200)
+const htmlText = async () => { for (const f of win.frames()) { try { const t = await f.evaluate(() => document.getElementById("out")?.textContent ?? ""); if (t) return t } catch {} } return "" }
+check("an HTML page dropped from outside runs", await until(async () => (await htmlText()).startsWith("script ran"), 15000), await htmlText())
+check("and can't read the vault", await until(async () => (await htmlText()) === "script ran, vault refused", 10000), await htmlText())
+await win.screenshot({ path: path.join(OUT, "outside-html.png") })
+
+const dropNote = path.join(VAULT, "Notes/Qa drop.md")
+fs.writeFileSync(dropNote, "Dropped onto.\n")
+await win.evaluate((h) => { location.hash = h }, `#file/${encodeURIComponent("Notes/Qa drop.md")}`)
+await until(async () => (await win.locator("#main-scroll .cm-line", { hasText: "Dropped onto." }).count()) > 0, 10000)
+const notePane = await win.locator("#main-scroll").boundingBox(), noteUrl = win.url()
+await drop([shot], notePane.x + notePane.width / 2, notePane.y + notePane.height - 80)
+check("a screenshot dropped below a note's text goes into the note", await until(() => /Dropped onto\.\n!\[\[Screenshot( \d+)?\.png\]\]/.test(fs.readFileSync(dropNote, "utf8")), 10000), fs.readFileSync(dropNote, "utf8"))
+check("…not opened in a tab", win.url() === noteUrl, win.url())
+
+const txt = path.join(TMP, "Plain.txt")
+fs.writeFileSync(txt, "Just text.\n")
+await app.evaluate(({ app }, p) => app.emit("open-file", { preventDefault() {} }, p), txt)
+check("Open with: a file opens in a tab", await until(async () => decodeURIComponent(win.url()).includes(`#file/${txt}`), 10000), win.url())
+check("a .txt shows as its text", await until(async () => (await win.locator("[data-pane] .cm-content").first().textContent()).includes("Just text."), 10000))
+
+await win.evaluate(() => window.vaultite.manageVaults())
+const mgr = await until(() => app.windows().some((w) => w.url().endsWith("vaults.html")), 10000) && app.windows().find((w) => w.url().endsWith("vaults.html"))
+await mgr.waitForSelector("nav[aria-label=Vaults] button")
+check("the manager lists the vault", (await mgr.locator("nav[aria-label=Vaults]").textContent()).includes(path.basename(VAULT)))
+await mgr.screenshot({ path: path.join(OUT, "manager.png") })
+const parent = path.join(TMP, "vaults")
+fs.mkdirSync(parent)
+mgr.evaluate((p) => window.vaultite.createVault(p, "Second vault"), parent).catch(() => {})
+const second = await until(() => app.windows().some((w) => w.url().startsWith("http") && w.url() !== win.url() && !w.url().startsWith(origin)), 60000)
+  && app.windows().find((w) => w.url().startsWith("http") && !w.url().startsWith(origin))
+check("a new vault opens in its own window, on its own server", !!second && await until(() => fs.existsSync(path.join(parent, "Second vault", ".vaultite", "AGENTS.md")), 10000), app.windows().map((w) => w.url()))
+check("opening a vault closes the manager", await until(() => !app.windows().some((w) => w.url().endsWith("vaults.html")), 10000))
+fs.writeFileSync(path.join(VAULT, "Notes", "Cross vault.md"), "In the first vault.\n")
+await second.waitForSelector("#main-scroll")
+await second.keyboard.press("ControlOrMeta+t")
+await second.locator("#main-scroll [data-newtab-section]").first().waitFor()
+await second.locator("#main-scroll [data-file-drop]").waitFor({ state: "detached" })
+const m2 = await second.locator("#main-scroll").boundingBox()
+const cdp2 = await second.context().newCDPSession(second)
+for (const type of ["dragEnter", "dragOver", "drop"]) await cdp2.send("Input.dispatchDragEvent", { type, x: m2.x + 200, y: m2.y + 200, data: { items: [], files: [path.join(VAULT, "Notes", "Cross vault.md")], dragOperationsMask: 1 } })
+check("a file of another known vault opens in that vault's window", await until(async () => decodeURIComponent(win.url()).endsWith("#file/Notes/Cross vault.md"), 10000), win.url())
+const port2 = new URL(second.url()).port
+await app.evaluate(({ BaseWindow }, port) => BaseWindow.getAllWindows().find((w) => w.webContents.getURL().includes(`:${port}/`)).close(), port2)
+check("closing a window stops its server", await until(async () => { try { await fetch(`http://127.0.0.1:${port2}/api/vault`); return false } catch { return true } }, 10000))
+const kept = () => { const s = JSON.parse(fs.readFileSync(path.join(TMP, "userData", "vaults.json"), "utf8")); return s.vaults.length === 2 && s.vaults.find((v) => v.path === VAULT).open === true && s.vaults.find((v) => v.path !== VAULT).open === false }
+check("the vault list is kept in userData", await until(kept, 5000), fs.readFileSync(path.join(TMP, "userData", "vaults.json"), "utf8"))
+
+noErrors()
+const port1 = new URL(origin).port
+await app.close()
+check("quitting stops the servers", await until(async () => { try { await fetch(`http://127.0.0.1:${port1}/api/vault`); return false } catch { return true } }, 10000))
+fs.mkdirSync(path.join(TMP, "userData-fresh"), { recursive: true })
+fs.writeFileSync(path.join(TMP, "userData-fresh", "setup.json"), JSON.stringify({ done: new Date().toISOString() }))
+const fresh = await _electron.launch({
+  executablePath: DESKTOP.executablePath, args: DESKTOP.args,
+  env: { ...process.env, ...DESKTOP.env, VAULTITE_QUIET: process.env.SHOW ? "" : "1", VAULTITE_USER_DATA: path.join(TMP, "userData-fresh"), VAULTITE_LOCAL: path.join(TMP, "local") },
+})
+const first = await fresh.firstWindow()
+await first.waitForSelector("text=Open folder as vault")
+check("with no vaults, the manager shows", first.url().endsWith("vaults.html"))
+await fresh.close()
+console.log(`\nshots in ${OUT}`)
+await done()

@@ -1,0 +1,133 @@
+import UIKit
+import SwiftUI
+import Capacitor
+import WebKit
+
+/// The app's one screen: Capacitor's web view (the first screen, then a server's app), with the Shell plugin. It also
+/// does what a widget or a shortcut asks (Links): a voice note over the page, or a command for the page to run.
+class AppViewController: CAPBridgeViewController {
+    private let shell = ShellPlugin()
+    /// Capacitor's navigation delegate, kept (the web view holds its delegate weakly).
+    private var fallback: LoadFallback?
+
+    /// Capacitor's, with the offline app's scheme (LocalScheme.swift), served from the same bundled files as phone.html.
+    override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+        let config = super.webViewConfiguration(for: instanceConfiguration)
+        LocalScheme.shared.web = instanceConfiguration.appLocation
+        config.setURLSchemeHandler(LocalScheme.shared, forURLScheme: LocalScheme.scheme)
+        return config
+    }
+
+    override open func capacitorDidLoad() {
+        bridge?.registerPluginInstance(shell)
+        KeyboardBar.hide()
+        _ = LocalStore.shared // (its network monitor knows the path by the time a page asks)
+        // A server's page that doesn't load (unreachable, or reloaded after iOS ended the page in the background) opens
+        // the offline app on its vault's copy, else goes back to the first screen, saying why, instead of a blank screen.
+        if let webView, let local = bridge?.config.localURL {
+            let fallback = LoadFallback(inner: webView.navigationDelegate) { [weak webView] failed, why in
+                if let vault = LocalStore.vault(for: failed), LocalStore.hasCopy(vault), let url = LocalStore.offlineURL(vault) {
+                    LocalStore.offlineVault = vault
+                    _ = webView?.load(URLRequest(url: url))
+                    return
+                }
+                var to = URLComponents(url: local.appendingPathComponent("phone.html"), resolvingAgainstBaseURL: false)
+                to?.queryItems = [URLQueryItem(name: "failed", value: failed), URLQueryItem(name: "why", value: why)]
+                if let url = to?.url { _ = webView?.load(URLRequest(url: url)) }
+            }
+            webView.navigationDelegate = fallback
+            self.fallback = fallback
+        }
+        // What the audio playing here does, told to the page (plugins/core/player/native.ts), whichever page it is now.
+        Audio.shared.tell = { [weak self] state in
+            guard let data = try? JSONSerialization.data(withJSONObject: state), let json = String(data: data, encoding: .utf8) else { return }
+            self?.webView?.evaluateJavaScript("dispatchEvent(new CustomEvent('vaultite:audio', { detail: \(json) }))")
+        }
+        // The system's background behind a page while it loads: no white flash in dark mode.
+        webView?.isOpaque = false
+        webView?.backgroundColor = .systemGroupedBackground
+        webView?.scrollView.backgroundColor = .systemGroupedBackground
+        NotificationCenter.default.addObserver(forName: Links.asked, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.takeLink() }
+        }
+        // The app switcher, a call or Control Center: the page isn't told it's inactive, so a finger's drag there would
+        // never end (web/src/core/away.ts).
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.webView?.evaluateJavaScript("dispatchEvent(new Event('vaultite:away'))") }
+        }
+        // And back: a video the player turned to sound while away shows again (plugins/core/player).
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.webView?.evaluateJavaScript("dispatchEvent(new Event('vaultite:back'))") }
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        #if DEBUG
+        // (a file played in as the microphone: the simulator's test opens its voice note once, as the app starts)
+        if VoiceRecorder.played != nil, !Self.playedIn { Self.playedIn = true; Links.pending = Links.record }
+        #endif
+        takeLink() // asked before this screen was there (the app started by it)
+    }
+    #if DEBUG
+    private static var playedIn = false
+    #endif
+
+    private func takeLink() {
+        guard viewIfLoaded?.window != nil, let url = Links.pending else { return }
+        Links.pending = nil
+        switch url.host {
+        case "record": record()
+        case "command", "open", "bundle":
+            let arg = String(url.path.dropFirst()) // (decoded)
+            guard !arg.isEmpty, let host = url.host else { return }
+            shell.waiting = [host: arg]
+            // The server's page takes it now; the first screen opens the server, whose page takes it as it starts.
+            webView?.evaluateJavaScript("dispatchEvent(new Event('vaultite:link'))")
+        default: break
+        }
+    }
+
+    private func record() {
+        if presentedViewController is UIHostingController<VoiceNoteView> { return }
+        presentedViewController?.dismiss(animated: false)
+        let note = VoiceNote()
+        let sheet = UIHostingController(rootView: VoiceNoteView(note: note))
+        sheet.isModalInPresentation = true
+        if let s = sheet.sheetPresentationController { s.detents = [.large()] }
+        note.close = { [weak sheet] in sheet?.dismiss(animated: true) }
+        present(sheet, animated: true)
+    }
+}
+
+/// Capacitor's navigation delegate with one thing more: a server's page whose load failed (not one replaced by another
+/// load) calls `failed` with the server's address and why. Everything else goes to Capacitor's, as before.
+final class LoadFallback: NSObject, WKNavigationDelegate {
+    private let inner: WKNavigationDelegate?
+    private let failed: (String, String) -> Void
+
+    init(inner: WKNavigationDelegate?, failed: @escaping (String, String) -> Void) {
+        self.inner = inner
+        self.failed = failed
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || (inner?.responds(to: aSelector) ?? false)
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        inner?.responds(to: aSelector) == true ? inner : super.forwardingTarget(for: aSelector)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        inner?.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
+        let e = error as NSError
+        // (-999: another load took over; WebKit's 102: a download or a link handed to another app)
+        if e.domain == NSURLErrorDomain && e.code == NSURLErrorCancelled { return }
+        if e.domain == "WebKitErrorDomain" && e.code == 102 { return }
+        guard let url = e.userInfo[NSURLErrorFailingURLErrorKey] as? URL, url.scheme == "http" || url.scheme == "https",
+              let host = url.host else { return }
+        let origin = "\(url.scheme!)://\(host)\(url.port.map { ":\($0)" } ?? "")"
+        failed(origin, e.localizedDescription)
+    }
+}

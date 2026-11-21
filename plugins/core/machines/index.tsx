@@ -1,0 +1,142 @@
+import { lazy, Suspense, type MouseEvent } from "react"
+import { ArrowUpRight, FolderOpen, Monitor, Server, SquareTerminal } from "lucide-react"
+import {
+  Arriving, canRunAgents, cell, confirmDialog, definePlugin, notify, notifyError, op, Empty, fetchMachines, List, Loading, LoadingRows, openMenu, openPlace, openTerminal, openView, Panel, places,
+  SidebarHeading, SidebarRow,
+  useKeptCount, useMachines, type Machine, type MenuItem, type SearchDoc, type SidebarCtx,
+} from "@vaultite"
+import { DevicesPanel } from "@plugins/tabs/devices"
+import { EnrollMachine } from "./Enroll"
+
+const MachineFiles = lazy(() => import("./Files").then((m) => ({ default: m.MachineFiles })))
+
+const dot = (m: Machine) => (m.online ? "var(--green)" : "var(--gray)")
+const about = (m: Machine) => m.online
+  ? [m.self && "This one", m.host, m.platform === "darwin" ? "macOS" : m.platform === "linux" ? "Linux" : m.platform,
+    m.dial && "Read-only files", m.version && `Vaultite ${m.version}${m.commit ? ` (${m.commit})` : ""}`].filter(Boolean).join(" · ")
+  : `Offline${m.error ? `: ${m.error}` : ""}`
+
+const hasTerminal = (m: Machine) => canRunAgents() && m.online && (m.self || !!m.plugins?.includes("terminal"))
+
+const revoking = cell(new Set<string>())
+const marking = (id: string, on: boolean) => revoking.update((s) => { const next = new Set(s); if (on) next.add(id); else next.delete(id); return next })
+
+async function revokeMachine(m: Machine) {
+  if (!await confirmDialog({ title: `Revoke ${m.label}?`, body: "Its file agent will disconnect. You can enroll it again later.", confirm: "Revoke" })) return
+  marking(m.id, true)
+  try { await op("machines.revoke", { id: m.id }); notify("File access revoked") } catch (e) { notifyError(e, "Couldn't revoke it") } finally { marking(m.id, false) }
+}
+
+async function machineItems(m: Machine): Promise<MenuItem[]> {
+  const terminal = hasTerminal(m)
+  const here = terminal ? (await places()).filter((p) => p.machine === (m.self ? "" : m.id) && p.agent) : []
+  return [
+    ...(m.dial ? [
+      { label: "Browse files", icon: FolderOpen, run: () => openView(`machine-files/${m.id}`, { newTab: true }) },
+      { label: "Revoke file access", run: () => revokeMachine(m) },
+    ] : []),
+    ...(terminal ? [{ label: "New terminal", icon: SquareTerminal, run: () => openTerminal({ machine: m.self ? "" : m.id }) }] : []),
+    ...here.map((p, i) => ({ label: `New ${[p.agent!.label, p.profileLabel].filter(Boolean).join(" · ")}`, icon: p.agent!.icon, sep: i === 0, run: () => openPlace(p) })),
+    ...(!m.self && !m.dial ? [{ label: "Open its app", icon: ArrowUpRight, sep: terminal, run: () => window.open(m.url, "_blank", "noopener") }] : []),
+  ]
+}
+
+async function machineMenu(e: MouseEvent, m: Machine) {
+  const r = e.currentTarget.getBoundingClientRect()
+  const items = await machineItems(m)
+  if (items.length) openMenu({ x: r.left, y: r.bottom + 4, flip: r.top - 4 }, items)
+}
+
+function machineContextMenu(e: MouseEvent, m: Machine) {
+  e.preventDefault(); e.stopPropagation()
+  const at = { x: e.clientX, y: e.clientY }
+  void machineItems(m).then((items) => openMenu(at, items))
+}
+
+function MachineRow({ m }: { m: Machine }) {
+  const going = revoking.use((s) => s.has(m.id))
+  return (
+    <button type="button" onClick={(e) => void machineMenu(e, m)} onContextMenu={(e) => machineContextMenu(e, m)} data-machine={m.id}
+      className="relative isolate flex min-h-11 w-full cursor-pointer items-center gap-3 py-2 text-left before:absolute before:inset-y-0 before:-inset-x-2 before:-z-10 before:rounded-[8px] hover:before:bg-foreground/[0.04]">
+      <span className="size-2 shrink-0 rounded-full" style={{ background: dot(m) }} data-tip={m.online ? "Online" : "Offline"} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] leading-[20px]">{m.label}</div>
+        <div className="truncate text-[13px] text-muted-foreground">{going ? <span className="shimmer">Revoking file access…</span> : about(m)}</div>
+      </div>
+    </button>
+  )
+}
+
+const NONE = "No machines yet. Each server on your tailnet adds itself (with Tailscale on); or list them in .vaultite/plugins/machines/data.json."
+
+function MachinesBlock() {
+  const list = useMachines()
+  const rows = useKeptCount("machines", list?.length)
+  return (
+    <Panel title="Machines" icon={Server} tint="var(--machines)">
+      {!list ? (rows ? <LoadingRows count={rows} lead={<span className="size-2 shrink-0 rounded-full bg-muted" />} /> : <Loading />) : !list.length ? <Empty>{NONE}</Empty> : (
+        <List>{list.map((m) => <MachineRow key={m.id} m={m} />)}</List>
+      )}
+    </Panel>
+  )
+}
+
+function MachinesPanel({ open }: SidebarCtx) {
+  const list = useMachines()
+  const rows = (list ?? []).map((m) => (
+    <SidebarRow key={m.id} icon={m.platform === "linux" ? Server : Monitor} tint={m.online ? "var(--machines)" : undefined} label={m.label} open={open}
+      tip={`${m.label}: ${about(m)}`} data-machine={m.id}
+      onClick={(e) => void machineMenu(e, m)} onContextMenu={(e) => machineContextMenu(e, m)}>
+      {open && !m.online && <span className="mr-1 text-[11px] text-tertiary">offline</span>}
+    </SidebarRow>
+  ))
+  if (!open) return rows.length ? <div className="flex flex-col gap-px">{rows}</div> : null
+  return (
+    <div className="flex shrink-0 flex-col" data-machines-panel>
+      <SidebarHeading title="Machines" open={open} />
+      <div className="flex flex-col gap-px">
+        {rows}
+        {list && !list.length && <p className="h-7 truncate pl-1.5 text-[13px] leading-7 text-tertiary">No machines yet</p>}
+      </div>
+    </div>
+  )
+}
+
+function MachinesView() {
+  return <div className="space-y-6 pt-2 pb-10"><MachinesBlock /><DevicesPanel /><EnrollMachine /></div>
+}
+
+const mock: Machine[] = [
+  { id: "studio", label: "Studio", url: "https://studio.example.ts.net:8447", online: true, self: true, host: "studio", platform: "darwin", version: "0.1.0", commit: "1a2b3c4", plugins: ["terminal"] },
+  { id: "laptop", label: "Laptop", url: "https://laptop.example.ts.net:8447", online: true, self: false, host: "laptop", platform: "darwin", version: "0.1.0", commit: "1a2b3c4", plugins: ["terminal"] },
+  { id: "box", label: "Box", url: "https://box.example.ts.net:8447", online: false, self: false, error: "no answer" },
+]
+
+let found: Machine[] = []
+function machineDocs(): SearchDoc[] {
+  return found.map((m) => {
+    const terminal = hasTerminal(m)
+    return {
+      id: `machine-${m.id}`, title: m.label, kind: "Machine", icon: m.platform === "linux" ? Server : Monitor, tint: m.online ? "var(--machines)" : "var(--muted-foreground)",
+      meta: `Machine · ${m.dial ? "read-only files" : !m.online ? "offline" : terminal ? "opens a terminal there" : m.self ? "this one" : "opens its app"}`,
+      run: () => (m.dial ? openView(`machine-files/${m.id}`, { newTab: true }) : terminal ? openTerminal({ machine: m.self ? "" : m.id }) : m.online && !m.self ? void window.open(m.url, "_blank", "noopener") : openView("machines", { newTab: true })),
+      text: [m.host, m.self && "this one"].filter(Boolean).join(" "), recent: 0, weight: 5,
+    }
+  })
+}
+
+export default definePlugin({
+  blocks: { machines: () => <MachinesBlock /> },
+  searchLive: {
+    docs: machineDocs,
+    subscribe: (changed) => {
+      let on = true
+      void fetchMachines().then((list) => { if (on) { found = list; changed() } })
+      return () => { on = false }
+    },
+  },
+  sidebar: { machines: { title: "Machines", heading: false, sort: 32, hidden: true, view: "machines", render: (ctx) => <MachinesPanel {...ctx} /> } },
+  views: { machines: { icon: Server, title: () => "Machines", render: () => <MachinesView /> }, "machine-files": { icon: FolderOpen, title: (id) => `${id.split("|")[0]} files`, argState: true, pinAs: (id) => id || null, render: (ctx) => <Suspense fallback={<Arriving />}><MachineFiles {...ctx} /></Suspense> } },
+  commands: [{ id: "machines:open-tab", name: "Open machines in a tab", run: () => openView("machines", { newTab: true }) }],
+  mockLive: () => ({ machines: mock }),
+})

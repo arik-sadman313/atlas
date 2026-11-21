@@ -1,0 +1,113 @@
+import { useSyncExternalStore } from "react"
+import type { WorkspaceHost, WorkspaceInfo } from "@/core/define"
+import type { Tab } from "../../../core/layout.ts"
+import { isEnabled, PLUGINS } from "@/core/plugins"
+import { devicePref, getPrefs, onPrefs } from "@/core/prefs"
+
+export type Scope = "workspace" | "device"
+
+function workspaceHost(): WorkspaceHost | null {
+  const off = getPrefs().disabled
+  return PLUGINS.find((p) => p.workspace && isEnabled(p.id, off))?.workspace ?? null
+}
+
+const subs = new Set<() => void>()
+let version = 0
+/** Tell the app the current workspace, or something kept in it, changed (the plugin keeping workspaces calls it). */
+export function workspaceChanged() { version++; subs.forEach((f) => f()) }
+/** Subscribe to the current workspace and what's kept in it (for useSyncExternalStore with a getter of your own). */
+export const subscribeScoped = (f: () => void) => subscribe(f)
+const subscribe = (f: () => void) => {
+  subs.add(f)
+  const off = onPrefs(f)
+  return () => { subs.delete(f); off() }
+}
+/** Redraws when the current workspace or what's kept in it changes; answers a number that changes then. */
+export const useWorkspaceVersion = () => useSyncExternalStore(subscribe, () => `${version}:${workspaceHost() ? 1 : 0}`)
+
+export const useWorkspacesOn = () => useSyncExternalStore(subscribe, () => !!workspaceHost())
+
+/** The plugin keeping workspaces, as the phone's tab list pages through them (null: none). */
+export function workspaces(): Pick<WorkspaceHost, "current" | "list" | "switchTo" | "menu"> | null {
+  return workspaceHost()
+}
+
+/** The current workspace (null: no plugin keeps workspaces). */
+export function currentWorkspace(): WorkspaceInfo | null {
+  const h = workspaceHost()
+  if (!h) return null
+  const n = h.current()
+  return h.list().find((w) => w.n === n) ?? { n, label: `Workspace ${n}`, places: [] }
+}
+export const landingWorkspace = (): number | null => (workspaceHost() ? null : PLUGINS.find((p) => p.workspace)?.workspace?.picked() || null)
+export const otherWorkspacesTabs = (): { w: WorkspaceInfo; tabs: Tab[] }[] => {
+  const h = workspaceHost()
+  if (!h) return []
+  const n = h.current()
+  return h.list().filter((w) => w.n !== n).map((w) => ({ w, tabs: h.tabs(w.n) })).filter((x) => x.tabs.length)
+}
+export const showWorkspaceTab = (n: number, id: string) => workspaceHost()?.show(n, id)
+/** The workspaces in use, and the current one ([] without workspaces). */
+export const workspaceList = (): WorkspaceInfo[] => workspaceHost()?.list() ?? []
+
+/** The current workspace's pinned pages, or null: no workspaces, or the current one has no list of its own (it shows
+ *  the vault's, .vaultite/pages.json: Pinned's). */
+export const workspacePins = (): string[] | null => workspaceHost()?.pinned() ?? null
+/** Pin a page in the current workspace (at the end, or before `before`) or unpin it there; one without a list of its
+ *  own starts from `base` (the vault's). Nothing without workspaces. */
+export const pinInWorkspace = (path: string, on: boolean, before: string | null | undefined, base: string[]): Promise<unknown> =>
+  workspaceHost()?.pin(path, on, before, base) ?? Promise.resolve()
+
+const local = (key: string) => devicePref<unknown>(`ws:${key}`, undefined)
+
+function read<T>(key: string, fallback: T, scope: Scope): T {
+  if (scope === "workspace") {
+    const h = workspaceHost()
+    const v = h ? h.get(key) : local(key).get()
+    return v === undefined || v === null ? fallback : v as T
+  }
+  const v = devicePref<unknown>(key, undefined).get()
+  return v === undefined ? fallback : v as T
+}
+
+function write(key: string, value: unknown, scope: Scope) {
+  if (scope === "workspace") {
+    const h = workspaceHost()
+    if (h) h.set(key, value ?? null)
+    else local(key).set(value ?? undefined)
+    return
+  }
+  devicePref<unknown>(key, undefined).set(value ?? undefined)
+}
+
+/** A value kept at a level by key ("<plugin id>:<name>"): `get` answers `fallback` while
+ *  nothing's kept, `set(undefined)` removes it. Workspace values travel with the workspace; device values stay here. */
+export function scopedState<T>(key: string, fallback: T, scope: Scope = "workspace") {
+  return { get: () => read(key, fallback, scope), set: (v: T | undefined) => write(key, v, scope) }
+}
+
+/** The same as a hook: [value, set], redrawn when it changes (here, another device on the workspace, a switch). Keep
+ *  `fallback` stable (a constant), or the value redraws on every draw while nothing's kept. */
+export function useScopedState<T>(key: string, fallback: T, scope: Scope = "workspace"): [T, (v: T | undefined) => void] {
+  const v = useSyncExternalStore(subscribe, () => read(key, fallback, scope))
+  return [v, (next) => write(key, next, scope)]
+}
+
+const RECENT_MAX = 200
+const recentState = scopedState<string[]>("core:recent", [], "workspace")
+const NONE: string[] = []
+export const recentFiles = (): string[] => { const v = recentState.get(); return Array.isArray(v) ? v : NONE }
+export const useRecentFiles = () => useSyncExternalStore(subscribe, recentFiles)
+let recentTimer = 0, noted = ""
+export function noteOpened(path: string) {
+  const now = `${currentWorkspace()?.n}:${path}`
+  if (now === noted) return
+  noted = now
+  clearTimeout(recentTimer)
+  if (!path) return
+  recentTimer = window.setTimeout(() => {
+    const cur = recentFiles()
+    if (cur[0] === path) return
+    recentState.set([path, ...cur.filter((p) => p !== path)].slice(0, RECENT_MAX))
+  }, 1500)
+}

@@ -1,0 +1,61 @@
+import { execFile } from "node:child_process"
+import fs from "node:fs"
+import path from "node:path"
+import { promisify } from "node:util"
+import { atExit } from "../exit.ts"
+
+const exec = promisify(execFile)
+export type Lease = { pid: number; started: string; what: string }
+
+export const startedIn = async (pid: number, env: NodeJS.ProcessEnv) => {
+  try { return (await exec("ps", ["-o", "lstart=", "-p", String(pid)], { env })).stdout.trim() || null } catch { return null }
+}
+/** ps tells a start in local time, which a trip changes. null when it isn't running. */
+export const processStart = (pid: number) => startedIn(pid, { ...process.env, TZ: "UTC" })
+export async function leaseIn(store: string, sha: string, l: { pid: number; what: string }) {
+  const started = await processStart(l.pid)
+  if (!started) throw new Error(`process ${l.pid} isn't running`)
+  const file = path.join(store, "leases", `${sha}.${l.pid}.json`)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify({ pid: l.pid, started, what: l.what } satisfies Lease, null, 2) + "\n")
+  fs.renameSync(`${file}.tmp`, file)
+  return () => fs.rmSync(file, { force: true })
+}
+
+export function storeRootOf(file: string): { store: string; sha: string; root: string } | null {
+  const parts = path.resolve(file).split(path.sep)
+  for (let i = parts.length - 2; i > 0; i--) {
+    if (parts[i] === "roots" && /^[0-9a-f]{40}$/.test(parts[i + 1] ?? "")) {
+      const store = parts.slice(0, i).join(path.sep) || path.sep
+      if (fs.existsSync(path.join(store, "repo.git"))) return { store, sha: parts[i + 1], root: parts.slice(0, i + 2).join(path.sep) }
+    }
+  }
+  return null
+}
+
+/** Never throws. */
+export async function holdRoot(self: string, what: string) {
+  const at = storeRootOf(self)
+  if (!at) return () => {}
+  try {
+    const release = await leaseIn(at.store, at.sha, { pid: process.pid, what })
+    const off = atExit(release)
+    return () => { off(); release() }
+  } catch { return () => {} }
+}
+
+export function rootsHeld(self: string, what: string) {
+  const own = storeRootOf(self)?.sha
+  const ready = holdRoot(self, what).then(() => {})
+  let other: { sha: string; held: Promise<() => void> } | null = null
+  return {
+    ready,
+    async take(file: string) {
+      const sha = storeRootOf(file)?.sha
+      if (sha === (other?.sha ?? own)) return
+      const was = other
+      other = sha && sha !== own ? { sha, held: holdRoot(file, what) } : null
+      await Promise.all([other?.held, was?.held.then((release) => release())])
+    },
+  }
+}

@@ -1,0 +1,74 @@
+import { ArrowDown, ArrowUp, ClipboardPaste, Delete, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6, ImagePlus, Link, Link2, List, ListIndentDecrease, ListIndentIncrease, ListOrdered, ListTodo, Pilcrow, RemoveFormatting, SquareCheck, Superscript, TextQuote } from "lucide-react"
+import { activeFile, copyBlockLink, currentEditor, definePlugin, HIGHLIGHT_EMOJI, isMac, keysInEditor, linkableHere, notifyError, unhighlight, type PluginCommand } from "@vaultite"
+import type { EditorView } from "@codemirror/view"
+import { NoteKeys, ToolbarSettings } from "./keys"
+import { addPhotos } from "./photo"
+
+// Obsidian's command ids, so its names and keys carry over.
+let loading: Promise<typeof import("./edit")> | null = null, edit: typeof import("./edit") | null = null
+const load = () => (loading ??= import("./edit").then((m) => (edit = m)))
+
+const note = () => { const ed = currentEditor(); return ed?.kind === "markdown" && !ed.view.state.readOnly ? ed.view : null }
+const run = (fn: (m: typeof import("./edit")) => (v: EditorView) => unknown) => () => {
+  const v = note()
+  if (!v) return
+  if (edit) { fn(edit)(v); v.focus() } else void load().then((m) => { fn(m)(v); v.focus() })
+}
+const when = () => !!note()
+const shown = () => { const ed = currentEditor(); return ed?.kind === "markdown" ? ed.view : null }
+const coarse = () => matchMedia("(pointer: coarse)").matches
+
+const marks: [string, string, string, string[]?][] = [
+  ["bold", "Toggle bold", "**", ["Mod+B"]], ["italics", "Toggle italics", "*", ["Mod+I"]], ["highlight", "Toggle highlight", "==", ["Mod+Shift+H"]],
+  ["strikethrough", "Toggle strikethrough", "~~", ["Mod+Shift+X"]], ["code", "Toggle code", "`", ["Mod+Shift+C"]], ["inline-math", "Toggle inline math", "$"],
+  ["comment", "Toggle comment", "%%", ["Mod+/"]],
+]
+const blocks: [string, string, string][] = [
+  ["insert-callout", "Insert callout", "> [!note]\n> ‸"],
+  ["insert-codeblock", "Insert code block", "```\n‸\n```"],
+  ["insert-mathblock", "Insert math block", "$$\n‸\n$$"],
+  ["insert-table", "Insert table", "| ‸ |  |\n| --- | --- |\n|  |  |"],
+  ["insert-horizontal-rule", "Insert horizontal rule", "---\n‸"],
+]
+
+export default definePlugin({
+  settingsPanel: () => <ToolbarSettings />,
+  settingsPanelDraws: ["toolbar"],
+  commands: ([
+    ...marks.map(([id, name, m, keys]) => ({ id: `editor:toggle-${id}`, name, keys, when, run: run((e) => (m === "==" ? (v) => unhighlight(v) || e.toggleMark(m)(v) : e.toggleMark(m))) })),
+    { id: "editor:clear-formatting", name: "Clear formatting", when, run: run((e) => (v) => e.clearFormatting(v, HIGHLIGHT_EMOJI)), icon: RemoveFormatting },
+    { id: "editor:insert-link", name: "Insert Markdown link", keys: ["Mod+K"], when, run: run((e) => e.insertLink), icon: Link },
+    { id: "editor:insert-wikilink", name: "Add internal link", when, run: run((e) => e.insertWikilink), icon: Link2 },
+    { id: "editor:copy-block-link", name: "Copy link to block", when: () => { const v = shown(); return !!v && !!linkableHere(v) }, run: () => { const v = shown(); if (v) copyBlockLink(v) }, icon: Link2 },
+    { id: "editor:toggle-checklist-status", name: "Toggle checkbox status", keys: ["Mod+L"], when, run: run((e) => e.toggleChecklist), icon: SquareCheck },
+    { id: "editor:toggle-bullet-list", name: "Toggle bullet list", keys: ["Mod+Shift+8"], when, run: run((e) => e.toggleBullets), icon: List },
+    { id: "editor:toggle-numbered-list", name: "Toggle numbered list", keys: ["Mod+Shift+7"], when, run: run((e) => e.toggleNumbers), icon: ListOrdered },
+    { id: "editor:toggle-task-list", name: "Toggle task list", keys: ["Mod+Shift+9"], when, run: run((e) => e.toggleTasks), icon: ListTodo },
+    { id: "editor:indent-list", name: "Indent list", when, run: run((e) => e.indentMore), icon: ListIndentIncrease },
+    { id: "editor:unindent-list", name: "Unindent list", when, run: run((e) => e.indentLess), icon: ListIndentDecrease },
+    { id: "editor:toggle-blockquote", name: "Toggle blockquote", when, run: run((e) => e.toggleQuote), icon: TextQuote },
+    ...[1, 2, 3, 4, 5, 6].map((n) => ({ id: `editor:set-heading-${n}`, name: `Set as heading ${n}`, keys: [`Mod+Alt+${n}`], when, run: run((e) => e.setHeading(n)), icon: [Heading1, Heading2, Heading3, Heading4, Heading5, Heading6][n - 1] })),
+    { id: "editor:set-heading-0", name: "Remove heading", keys: ["Mod+Alt+0"], when, run: run((e) => e.setHeading(0)), icon: Pilcrow },
+    { id: "editor:delete-paragraph", name: "Delete paragraph", keys: ["Mod+Shift+Backspace"], when, run: run((e) => e.deleteParagraph), icon: Delete },
+    { id: "editor:swap-line-up", name: "Move line up", keys: ["Alt+ArrowUp"], when, run: run((e) => e.lineUp), icon: ArrowUp },
+    { id: "editor:swap-line-down", name: "Move line down", keys: ["Alt+ArrowDown"], when, run: run((e) => e.lineDown), icon: ArrowDown },
+    { id: "editor:add-cursor-above", name: "Add cursor above", keys: isMac ? ["Mod+Alt+ArrowUp"] : undefined, when, run: run((e) => e.addCursorAbove) },
+    { id: "editor:add-cursor-below", name: "Add cursor below", keys: isMac ? ["Mod+Alt+ArrowDown"] : undefined, when, run: run((e) => e.addCursorBelow) },
+    { id: "editor:select-next-occurrence", name: "Select next occurrence", when, run: run((e) => e.selectNextOccurrence) },
+    ...blocks.map(([id, name, text]) => ({ id: `editor:${id}`, name, when, run: run((e) => e.insertBlock(text)) })),
+    { id: "editor:insert-footnote", name: "Insert footnote", when, run: run((e) => e.insertFootnote), icon: Superscript },
+    // (not through `run`: the picker opens only while the tap or key is being handled)
+    { id: "editor:add-photo", name: "Add photo or video", when: () => !!activeFile(), run: () => { const f = activeFile(); if (f) void addPhotos(f.path) }, icon: ImagePlus },
+    { id: "editor:paste-plain-text", name: "Paste as plain text", keys: ["Mod+Shift+V"], when, run: () => { const v = note(); if (v) void load().then((m) => m.pastePlain(v)).catch((e) => notifyError(e, "Couldn't read the clipboard")) }, icon: ClipboardPaste },
+  ] satisfies PluginCommand[]).map((c) => ({ ...c, keysWhen: () => keysInEditor() })),
+  slash: () => (!activeFile() ? [] : [{
+    id: "editor:add-photo", title: "Photo or video", section: "Media", keywords: "photo image picture video movie clip camera library attachment upload",
+    detail: coarse() ? "Library or camera" : "Image or video file", line: true, icon: ImagePlus,
+    description: coarse() ? "A photo or video from your library or camera, kept with the note." : "An image or video file, kept with the note.",
+    run: (put) => { const f = activeFile(); if (f) return addPhotos(f.path, put) },
+  }]),
+  fileMenu: (path) => (/\.md$/i.test(path) && !path.startsWith(".")
+    ? [{ label: "Add photo or video", icon: ImagePlus, section: coarse() ? "actions" : "more", run: () => addPhotos(path) }] : []),
+  editor: () => { void load(); return import("./menu").then((m) => m.editorMenu) },
+  background: () => <NoteKeys />,
+})

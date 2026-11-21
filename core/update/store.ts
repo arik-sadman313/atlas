@@ -1,0 +1,383 @@
+import { execFile, spawn, type ChildProcess } from "node:child_process"
+import fs from "node:fs"
+import net from "node:net"
+import os from "node:os"
+import path from "node:path"
+import { promisify } from "node:util"
+import { gitEnv } from "../gitenv.ts"
+import { fixSpawnHelper } from "./npm.ts"
+import { leaseIn, processStart, startedIn, type Lease } from "./lease.ts"
+import { fingerprint } from "../../electron/shell/print.mjs"
+import { atExit } from "../exit.ts"
+import { codeOf, isObj, messageOf } from "../values.ts"
+import { CODE_CACHE, codeCacheDir } from "../codecache.ts"
+
+const exec = promisify(execFile)
+const MINUTE = 60_000
+const SHA = /^[0-9a-f]{40}$/
+const FRESH = 10 * MINUTE
+/** In a deps set, what builds write (tsconfig's tsBuildInfoFile, vite's cacheDir): left writable, shared as caches. */
+const CACHES = [".tmp", ".vite"]
+
+export type Exec = (cmd: string, args: string[], o: { cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }) => Promise<string>
+
+const running = new Set<ChildProcess>()
+const tracked = <C extends ChildProcess>(c: C) => { running.add(c); c.once("exit", () => running.delete(c)); return c }
+export function stopRuns(signal: NodeJS.Signals = "SIGTERM") {
+  for (const c of running) c.kill(signal)
+  return running.size
+}
+atExit(() => stopRuns("SIGKILL"))
+
+export const execIn: Exec = async (cmd, args, o) => {
+  try {
+    const run = exec(cmd, args, { cwd: o.cwd, env: o.env ?? process.env, timeout: o.timeout ?? 30 * MINUTE, maxBuffer: 64 << 20 })
+    tracked(run.child)
+    return (await run).stdout
+  } catch (e) {
+    const x = e as { stdout?: string; stderr?: string; message: string }, all = `${x.stdout ?? ""}\n${x.stderr ?? ""}`.split("\n").map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").trim()).filter(Boolean)
+    const errors = all.filter((l) => /\berror\b|\bERR!|failed|FAIL\b/i.test(l))
+    throw new Error((errors.length ? errors : all).slice(-3).join(" ").slice(0, 500) || x.message, { cause: e })
+  }
+}
+
+export type StepCtx = { root: string; store: string; helpers: string; node: string; env: NodeJS.ProcessEnv; exec: Exec }
+export type Step = { name: string; run: (c: StepCtx) => Promise<void> }
+export type Recipe = { build: Step[]; keyFiles: string[]; preflight: Step[] }
+
+const freePort = () => new Promise<number>((resolve, reject) => {
+  const srv = net.createServer().listen(0, "127.0.0.1", () => { const p = (srv.address() as net.AddressInfo).port; srv.close(() => resolve(p)) })
+  srv.on("error", reject)
+})
+
+export const serverBoots: Step = {
+  name: "server boots",
+  async run(c) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vaultite-preflight-"))
+    try {
+      const vault = path.join(tmp, "vault"), port = await freePort()
+      await c.exec(c.node, [path.join(c.root, "bin", "vau"), "sandbox", vault], { cwd: c.root, env: c.env, timeout: 2 * MINUTE })
+      const server = tracked(spawn(c.node, [path.join(c.root, "server.ts")], { cwd: c.root, stdio: ["ignore", "ignore", "pipe"],
+        env: { ...c.env, PORT: String(port), HOST: "127.0.0.1", VAULTITE_VAULT: vault, VAULTITE_LOCAL: path.join(tmp, "local"), VAULTITE_QUIET: "1",
+          NODE_COMPILE_CACHE: codeCacheDir(c.root), NODE_COMPILE_CACHE_PORTABLE: "1" } }))
+      let said = ""
+      server.stderr.on("data", (b) => { said = (said + b).slice(-2000) })
+      try {
+        for (let i = 0; i < 240; i++) {
+          if (server.exitCode !== null) break
+          if (await fetch(`http://127.0.0.1:${port}/api/state`).then((r) => r.ok, () => false)) return
+          await new Promise((r) => setTimeout(r, 250))
+        }
+        throw new Error(`its server didn't answer${said ? `: ${said.trim().split("\n").slice(-3).join(" ")}` : ""}`)
+      } finally {
+        const gone = new Promise((r) => server.exitCode !== null ? r(null) : server.once("exit", r))
+        server.kill("SIGTERM")
+        await Promise.race([gone, new Promise((r) => setTimeout(r, 10_000))])
+        if (server.exitCode === null) server.kill("SIGKILL")
+      }
+    } finally { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) }
+  },
+}
+
+const MAIN_FILL = "tools/compilefill.mjs"
+export const mainCompiles: Step = {
+  name: "main's compile cache",
+  run: async (c) => {
+    if (!fs.existsSync(path.join(c.root, MAIN_FILL))) return
+    await c.exec(c.node, [MAIN_FILL], { cwd: c.root, env: { ...c.env, NODE_COMPILE_CACHE: codeCacheDir(c.root), NODE_COMPILE_CACHE_PORTABLE: "1" } })
+  },
+}
+
+export function appRecipe(o: { channel?: string } = {}): Recipe {
+  const npm = (c: StepCtx, args: string[], env: Record<string, string> = {}) => c.exec("npm", args, { cwd: c.root, env: { ...c.env, ...env } })
+  return {
+    build: [
+      { name: "web build", run: (c) => npm(c, ["run", "build"], { VAULTITE_CLEAN_BUILD: "1" }).then(() => {}) },
+      { name: "helpers", run: (c) => c.exec(c.node, ["tools/build_helpers.ts", "--cache", c.helpers], { cwd: c.root, env: c.env }).then(() => {}) },
+      { name: "stamp", run: (c) => c.exec(c.node, ["electron/stamp.ts"], { cwd: c.root, env: { ...c.env, VAULTITE_CHANNEL: o.channel ?? "main" } }).then(() => {}) },
+    ],
+    keyFiles: ["server.ts", "package.json", "bin/vau", "electron/boot.ts", "electron/main.ts", "electron/build.json", "web/dist/index.html",
+      ...["boot.mjs", "roots.mjs", "vau.mjs", "print.mjs", "compilecache.mjs", "inputs.json"].map((f) => `electron/shell/${f}`)],
+    preflight: [serverBoots, mainCompiles, { name: "smoke", run: (c) => c.exec(c.node, ["web/qa/boot.mjs"], { cwd: c.root, env: c.env }).then(() => {}) }],
+  }
+}
+
+export function serverRecipe(): Recipe {
+  return {
+    build: [
+      { name: "web build", run: (c) => c.exec("npm", ["run", "build"], { cwd: c.root, env: { ...c.env, VAULTITE_CLEAN_BUILD: "1" } }).then(() => {}) },
+      { name: "stamp", run: (c) => c.exec(c.node, ["electron/stamp.ts"], { cwd: c.root, env: { ...c.env, VAULTITE_CHANNEL: "main" } }).then(() => {}) },
+    ],
+    keyFiles: ["server.ts", "package.json", "bin/vau", "bin/vaultite-server", "bin/vaultite-launch.mjs", "electron/build.json", "web/dist/index.html"],
+    preflight: [serverBoots],
+  }
+}
+
+export type StoreOptions = {
+  dir: string
+  url: string
+  recipe?: Recipe
+  node?: string
+  env?: NodeJS.ProcessEnv
+  install?: (dir: string, o: { fresh: boolean }) => Promise<void>
+  exec?: Exec
+  log?: (line: string) => void
+  now?: () => number
+  fresh?: number
+}
+
+export type Root = { commit: string; dir: string; fingerprint: string; deps: string; prepared: number; seconds: number; steps: Record<string, number> }
+export type { Lease }
+
+const readJson = <T>(file: string): T | null => { try { return JSON.parse(fs.readFileSync(file, "utf8")) as T } catch { return null } }
+const writeJson = (file: string, v: unknown) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify(v, null, 2) + "\n")
+  fs.renameSync(`${file}.${process.pid}.tmp`, file)
+}
+export function writable(dir: string, on: boolean) {
+  const walk = (p: string) => {
+    const st = fs.lstatSync(p)
+    if (st.isSymbolicLink()) return
+    if (st.isDirectory() && on) fs.chmodSync(p, st.mode | 0o200)
+    if (st.isDirectory()) for (const n of fs.readdirSync(p)) walk(path.join(p, n))
+    fs.chmodSync(p, on ? st.mode | 0o200 : st.mode & ~0o222)
+  }
+  if (fs.existsSync(dir)) walk(dir)
+}
+function remove(dir: string) {
+  if (!fs.existsSync(dir)) return
+  writable(dir, true)
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+async function cloneDir(from: string, to: string, run: Exec) {
+  try {
+    if (process.platform === "darwin") await run("cp", ["-cR", from, to], { cwd: path.dirname(to) })
+    else if (process.platform === "linux") await run("cp", ["-R", "--reflink=auto", from, to], { cwd: path.dirname(to) })
+    else throw new Error("no cp")
+  } catch {
+    fs.rmSync(to, { recursive: true, force: true })
+    fs.cpSync(from, to, { recursive: true, mode: fs.constants.COPYFILE_FICLONE, verbatimSymlinks: true })
+  }
+}
+
+const chains = new Map<string, Promise<unknown>>()
+
+export function rootStore(o: StoreOptions) {
+  const dir = path.resolve(o.dir), run = o.exec ?? execIn, log = o.log ?? (() => {}), now = o.now ?? Date.now
+  const recipe = o.recipe ?? appRecipe(), node = o.node ?? process.execPath, env = o.env ?? process.env
+  const repo = path.join(dir, "repo.git"), roots = path.join(dir, "roots")
+  const deps = path.join(dir, "deps"), helpers = path.join(dir, "helpers")
+  const git = (args: string[], cwd = repo) => run("git", args, { cwd, env: gitEnv(), timeout: 10 * MINUTE }).then((s) => s.trim())
+  const rootOf = (sha: string) => path.join(roots, sha)
+  const install = o.install ?? (async (d: string, x: { fresh: boolean }) => {
+    await run("npm", [x.fresh ? "ci" : "install", "--no-audit", "--no-fund"], { cwd: d, env })
+  })
+
+  const lockFile = path.join(dir, "lock")
+  async function locked<T>(fn: () => Promise<T>): Promise<T> {
+    const mine = (chains.get(dir) ?? Promise.resolve()).then(async () => {
+      fs.mkdirSync(dir, { recursive: true })
+      for (let i = 0; ; i++) {
+        try { fs.writeFileSync(lockFile, String(process.pid), { flag: "wx" }); break } catch {
+          const pid = Number(fs.readFileSync(lockFile, "utf8"))
+          let alive = false
+          try { process.kill(pid, 0); alive = true } catch (e) { alive = codeOf(e) === "EPERM" }
+          if (!alive || pid === process.pid) { fs.rmSync(lockFile, { force: true }); continue }
+          if (i > 600) throw new Error(`the store is locked by process ${pid}`)
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+      }
+      try { return await fn() } finally { fs.rmSync(lockFile, { force: true }) }
+    })
+    chains.set(dir, mine.catch(() => {}))
+    return mine
+  }
+
+  async function init(from?: string) {
+    if (fs.existsSync(path.join(repo, "HEAD"))) return
+    fs.mkdirSync(dir, { recursive: true })
+    const tmp = `${repo}.${process.pid}.tmp`
+    fs.rmSync(tmp, { recursive: true, force: true })
+    const local = from && fs.existsSync(path.join(from, ".git")) ? from : null
+    await run("git", ["clone", "--quiet", "--bare", ...(local ? ["--local", local] : [o.url]), tmp], { cwd: dir, env: gitEnv(), timeout: 30 * MINUTE })
+    await git(["remote", "set-url", "origin", o.url], tmp)
+    await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], tmp)
+    fs.renameSync(tmp, repo)
+    log(`store: made ${repo}${local ? ` from ${local}` : ""}`)
+  }
+
+  async function fetch(branch: string) {
+    await init()
+    await git(["fetch", "--quiet", "--no-tags", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`])
+    return git(["rev-parse", `refs/remotes/origin/${branch}`])
+  }
+
+  async function depsFor(sha: string) {
+    const blob = await git(["rev-parse", `${sha}:package-lock.json`])
+    const at = path.join(deps, blob)
+    if (fs.existsSync(path.join(at, ".ready"))) return { blob, at, made: false }
+    remove(at)
+    const tmp = path.join(deps, `.tmp-${blob}-${process.pid}`)
+    remove(tmp)
+    fs.mkdirSync(deps, { recursive: true })
+    const near = fs.readdirSync(deps).filter((n) => /^[0-9a-f]{40}$/.test(n) && fs.existsSync(path.join(deps, n, ".ready")))
+      .map((n) => ({ n, t: fs.statSync(path.join(deps, n, ".ready")).mtimeMs })).sort((a, b) => b.t - a.t)[0]
+    try {
+      if (near) { await cloneDir(path.join(deps, near.n), tmp, run); writable(tmp, true); fs.rmSync(path.join(tmp, ".ready"), { force: true }) }
+      else fs.mkdirSync(tmp)
+      for (const f of ["package.json", "package-lock.json", ".npmrc"]) {
+        const text = await git(["show", `${sha}:${f}`]).catch(() => null)
+        if (text !== null) fs.writeFileSync(path.join(tmp, f), text + "\n")
+      }
+      await install(tmp, { fresh: !near })
+      fixSpawnHelper(path.join(tmp, "node_modules"))
+      fs.writeFileSync(path.join(tmp, ".ready"), `${sha}\n`)
+      for (const c of CACHES) fs.mkdirSync(path.join(tmp, "node_modules", c), { recursive: true })
+      // (moved first: a Mac may refuse to rename a folder no longer writable)
+      fs.renameSync(tmp, at)
+      writable(at, false)
+      for (const c of CACHES) writable(path.join(at, "node_modules", c), true)
+    } catch (e) { remove(tmp); remove(at); throw e }
+    log(`store: deps ${blob.slice(0, 7)} for ${sha.slice(0, 7)}${near ? ` (from ${near.n.slice(0, 7)})` : ""}`)
+    return { blob, at, made: true }
+  }
+
+  async function check(root: string, sha: string): Promise<string[]> {
+    const out: string[] = []
+    const stamp = readJson<{ commit?: string }>(path.join(root, "electron", "build.json"))?.commit
+    if (stamp !== sha) out.push(`its electron/build.json says ${stamp ?? "nothing"}, not ${sha}`)
+    const head = await git(["rev-parse", "HEAD"], root).catch(() => "")
+    if (head !== sha) out.push(`its HEAD is ${head || "unknown"}, not ${sha}`)
+    for (const f of recipe.keyFiles) if (!fs.existsSync(path.join(root, f))) out.push(`it has no ${f}`)
+    const pkg = readJson<{ dependencies?: Record<string, string> }>(path.join(root, "package.json"))
+    for (const name of Object.keys(pkg?.dependencies ?? {})) {
+      if (!fs.existsSync(path.join(root, "node_modules", name, "package.json"))) { out.push(`its dependency ${name} doesn't resolve`); break }
+    }
+    const status = (await git(["status", "--porcelain"], root).catch((e) => `(git status failed: ${messageOf(e)})`)).split("\n").filter((l) => l !== `?? ${CODE_CACHE}/`).join("\n")
+    if (status) out.push(`git finds it changed: ${status.split("\n").slice(0, 3).join("; ")}`)
+    return out
+  }
+
+  const metaOf = (sha: string) => readJson<Root>(path.join(dir, "meta", `${sha}.json`))
+  const badOf = (sha: string) => readJson<{ why: string; t: number }>(path.join(dir, "bad", `${sha}.json`))
+  const pointer = (name: "current" | "good") => {
+    const c = readJson<{ commit?: string }>(path.join(dir, `${name}.json`))?.commit
+    return typeof c === "string" && SHA.test(c) ? c : null
+  }
+  const prepared = (sha: string): Root | null => { const m = metaOf(sha); return m && fs.existsSync(rootOf(sha)) ? m : null }
+
+  async function drop(root: string) {
+    remove(root)
+    await git(["worktree", "prune"]).catch(() => {})
+  }
+
+  function prepare(sha: string, x: { retry?: boolean } = {}): Promise<Root> {
+    return locked(async () => {
+      if (!SHA.test(sha)) throw new Error(`${sha} isn't a full commit hash`)
+      const bad = badOf(sha)
+      if (bad && !x.retry) throw new Error(`${sha.slice(0, 7)} failed before: ${bad.why}`)
+      const have = prepared(sha)
+      if (have) return have
+      await init()
+      const t0 = now(), root = rootOf(sha), stage = path.join(roots, `.staging-${sha}`), steps: Record<string, number> = {}
+      await drop(root)
+      await drop(stage)
+      fs.mkdirSync(roots, { recursive: true })
+      const timed = async <T>(name: string, fn: () => Promise<T>) => { const t = now(); try { return await fn() } finally { steps[name] = (now() - t) / 1000 } }
+      let mine = false
+      try {
+        await timed("worktree", () => git(["worktree", "add", "--quiet", "--detach", stage, sha]))
+        const d = await timed("deps", () => depsFor(sha))
+        fs.symlinkSync(path.relative(stage, path.join(d.at, "node_modules")), path.join(stage, "node_modules"))
+        const ctx: StepCtx = { root: stage, store: dir, helpers, node, env, exec: run }
+        mine = true
+        for (const s of recipe.build) await timed(s.name, () => s.run(ctx).catch((e) => { throw new Error(`${s.name}: ${errLine(e)}`) }))
+        const problems = await timed("verify", () => check(stage, sha))
+        if (problems.length) throw new Error(`it doesn't check out: ${problems.join("; ")}`)
+        for (const s of recipe.preflight) await timed(s.name, () => s.run(ctx).catch((e) => { throw new Error(`${s.name}: ${errLine(e)}`) }))
+        const after = await check(stage, sha)
+        if (after.length) throw new Error(`its preflight changed it: ${after.join("; ")}`)
+        mine = false
+        await git(["worktree", "move", stage, root])
+        const r: Root = { commit: sha, dir: root, fingerprint: fingerprint(root), deps: d.blob, prepared: now(), seconds: (now() - t0) / 1000, steps }
+        writable(root, false)
+        writeJson(path.join(dir, "meta", `${sha}.json`), r)
+        log(`store: prepared ${sha.slice(0, 7)} in ${r.seconds.toFixed(1)} s`)
+        return r
+      } catch (e) {
+        await drop(stage)
+        await drop(root)
+        const why = errLine(e)
+        if (mine) writeJson(path.join(dir, "bad", `${sha}.json`), { why, t: now() })
+        log(`store: ${sha.slice(0, 7)} wasn't prepared: ${why}`)
+        throw new Error(`${sha.slice(0, 7)} wasn't prepared: ${why}`, { cause: e })
+      }
+    })
+  }
+
+  const verify = async (sha: string) => prepared(sha) ? check(rootOf(sha), sha) : [`${sha.slice(0, 7)} isn't prepared`]
+
+  async function setCurrent(sha: string) {
+    const bad = badOf(sha)
+    if (bad) throw new Error(`${sha.slice(0, 7)} is bad: ${bad.why}`)
+    const problems = await verify(sha)
+    if (problems.length) throw new Error(`${sha.slice(0, 7)} can't be current: ${problems.join("; ")}`)
+    writeJson(path.join(dir, "current.json"), { commit: sha, t: now() })
+  }
+  function markGood(sha: string) {
+    if (!prepared(sha)) throw new Error(`${sha.slice(0, 7)} isn't prepared`)
+    writeJson(path.join(dir, "good.json"), { commit: sha, t: now() })
+  }
+  function markBad(sha: string, why: string) {
+    writeJson(path.join(dir, "bad", `${sha}.json`), { why, t: now() })
+    for (const p of ["current", "good"] as const) if (pointer(p) === sha) fs.rmSync(path.join(dir, `${p}.json`), { force: true })
+  }
+
+  const lease = (sha: string, l: { pid: number; what: string }) => leaseIn(dir, sha, l)
+  async function leased(): Promise<Map<string, Lease[]>> {
+    const out = new Map<string, Lease[]>(), at = path.join(dir, "leases")
+    let names: string[] = []
+    try { names = fs.readdirSync(at) } catch { return out }
+    for (const n of names) {
+      const m = /^([0-9a-f]{40})\.(\d+)\.json$/.exec(n), l = readJson<Lease>(path.join(at, n))
+      if (m && l && (await holds(l))) out.set(m[1], [...out.get(m[1]) ?? [], l])
+      else fs.rmSync(path.join(at, n), { force: true })
+    }
+    return out
+  }
+
+  function gc() {
+    return locked(async () => {
+      const fresh = (n: string) => now() - (metaOf(n)?.prepared ?? 0) < (o.fresh ?? FRESH)
+      const keep = new Set([pointer("current"), pointer("good"), ...(await leased()).keys(), ...(fs.existsSync(roots) ? fs.readdirSync(roots).filter((n) => SHA.test(n) && fresh(n)) : [])]
+        .filter((s): s is string => !!s))
+      const gone: string[] = []
+      let names: string[] = []
+      try { names = fs.readdirSync(roots) } catch { /* none */ }
+      for (const n of names) if (!keep.has(n)) { await drop(path.join(roots, n)); fs.rmSync(path.join(dir, "meta", `${n}.json`), { force: true }); gone.push(n) }
+      const used = new Set([...keep].map((s) => metaOf(s)?.deps).filter(Boolean))
+      try { for (const n of fs.readdirSync(deps)) if (!used.has(n)) { remove(path.join(deps, n)); gone.push(`deps/${n}`) } } catch { /* none */ }
+      if (gone.length) log(`store: removed ${gone.length} (${gone.map((g) => g.replace(/([0-9a-f]{7})[0-9a-f]{33}/, "$1")).join(", ")})`)
+      return gone
+    })
+  }
+
+  return {
+    dir, repo, init, fetch, prepare, verify, setCurrent, markGood, markBad, lease, leased, gc,
+    root: rootOf, prepared, current: () => pointer("current"), good: () => pointer("good"), bad: badOf,
+    roots: () => { try { return fs.readdirSync(roots).filter((n) => SHA.test(n)) } catch { return [] } },
+  }
+}
+export type RootStore = ReturnType<typeof rootStore>
+
+function alive(pid: number) {
+  try { process.kill(pid, 0); return true } catch (e) { return codeOf(e) === "EPERM" }
+}
+
+async function holds(l: Lease): Promise<boolean> {
+  if (!alive(l.pid)) return false
+  const started = await processStart(l.pid), psFailed = started === null
+  return psFailed || started === l.started || (await startedIn(l.pid, process.env)) === l.started
+}
+const errLine = (e: unknown) => String((isObj(e) && (e.stderr || e.message)) || e).trim().split("\n").slice(-3).join(" ").slice(0, 500)

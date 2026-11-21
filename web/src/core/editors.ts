@@ -1,0 +1,81 @@
+import type { EditorState } from "@codemirror/state"
+import type { EditorView } from "@codemirror/view"
+import { typingIn } from "@/core/commands"
+import { dockedKeys } from "@/core/active"
+
+export type OpenEditor = {
+  view: EditorView
+  /** A note (Markdown: live preview, reading or source), a code file, or other text (JSON, HTML, CSV). */
+  kind: "markdown" | "code" | "text"
+  /** Its file, when it's one: a Markdown file's editor holds its whole text, frontmatter included, in every mode, so
+   *  positions in it are the file's. */
+  path?: string
+  /** Source mode: the frontmatter shown as text, not as Properties. */
+  source?: boolean
+  /** Where the text shown starts: after the frontmatter it hides (0 in source mode, or without one). */
+  start?: (state: EditorState) => number
+  /** Its history's ⌘Z and ⇧⌘Z, for the app's Undo while the keyboard is elsewhere (a property just removed): false
+   *  when there's nothing to undo. */
+  undo?: () => boolean
+  redo?: () => boolean
+  /** Is from..to text the reader sees (live preview and reading hide a link's address, a view's options)? What Find
+   *  finds. */
+  findable?: (state: EditorState, from: number, to: number) => boolean
+  /** The blocks drawn in place of their Markdown (a table, a callout, a view), with their elements while on screen;
+   *  `text` when drawn from their text, so what's found in them can be lit there. */
+  blocks?: () => { from: number; to: number; text: boolean; el: HTMLElement | null }[]
+}
+
+const open: OpenEditor[] = []
+
+export function registerEditor(e: OpenEditor) {
+  open.push(e)
+  return () => { const i = open.indexOf(e); if (i >= 0) open.splice(i, 1) }
+}
+
+/** The editor drawn by this view, if it's one of the app's. */
+export const editorOf = (view: EditorView) => open.find((e) => e.view === view) ?? null
+/** The app's editor whose element (.cm-editor) this is, if one is (without loading CodeMirror, as its findFromDOM would). */
+export const editorAt = (el: Element) => open.find((e) => e.view.dom === el) ?? null
+
+/** The editor the user means now, or null (the focused tab isn't a text file: a dashboard's grid, a terminal). */
+export function currentEditor(): OpenEditor | null {
+  const shown = open.filter((e) => e.view.dom.isConnected && e.view.dom.getClientRects().length > 0)
+  if (!shown.length) return null
+  const at = document.activeElement
+  const own = at && shown.find((e) => e.view.dom.contains(at))
+  if (own) return own
+  const sheets = [...document.querySelectorAll("dialog[open]")]
+  for (const d of sheets.reverse()) {
+    const hit = shown.find((e) => d.contains(e.view.dom))
+    if (hit) return hit
+  }
+  if (sheets.length) return null
+  const docked = dockedKeys.get()
+  return (docked && shown.find((e) => e.view.dom.closest(`[data-docked="${CSS.escape(docked)}"]`))) || shown.find((e) => e.view.dom.closest("#main-scroll .file-view")) || null
+}
+
+/** Keys pressed now are meant for this editor: the keyboard is in it, or nowhere else (nothing focused, something in
+ *  its file's view, or what holds it: a sheet). Not while a sidebar's row or another field has it. */
+export function keysInEditor(ed: Pick<OpenEditor, "view"> | null = currentEditor()) {
+  if (!ed) return false
+  const a = document.activeElement
+  return a === ed.view.contentDOM || !typingIn(a) && (!a || a.contains(ed.view.dom) || !!a.closest(".file-view")?.contains(ed.view.dom))
+}
+
+/** Select an editor's whole text: in reading view, the page's selection over what it shows. */
+export function selectAllIn(view: EditorView) {
+  if (view.contentDOM.contentEditable !== "true") { getSelection()?.selectAllChildren(view.contentDOM); return }
+  view.focus()
+  view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } })
+}
+
+/** The text selected in an editor (the one the user means by default): its selections, or in reading view the page's
+ *  selection inside it; "" for none. */
+export function selectedText(ed: Pick<OpenEditor, "view"> | null = currentEditor()): string {
+  if (!ed) return ""
+  const { state, contentDOM } = ed.view
+  if (contentDOM.contentEditable === "true") return state.selection.ranges.map((r) => state.sliceDoc(r.from, r.to)).filter(Boolean).join("\n")
+  const sel = getSelection()
+  return sel && !sel.isCollapsed && sel.anchorNode && contentDOM.contains(sel.anchorNode) ? sel.toString() : ""
+}

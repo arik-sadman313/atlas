@@ -1,0 +1,268 @@
+import crypto from "node:crypto"
+import { bullets, fmtAgo, HTTPError, OpError, Plugin, section, type ServerError } from "../../../core/plugins.ts"
+import type { ErrorDetail, ErrorEvent, ErrorGroup, ErrorList, Source } from "./model.ts"
+import { ErrorRow } from "./rows.ts"
+
+export const plugin = new Plugin(import.meta.url)
+
+const MINUTE = 60_000, DAY = 86_400_000
+const BURST = 10_000
+const RECENT = 30
+
+const log = plugin.dayLog("errors", ErrorRow)
+const append = (e: ErrorEvent) => log.append(e.t, [e])
+
+function settings() {
+  const s = plugin.loaded ? plugin.settings() : {}
+  return { keep: Math.max(1, Number(s.keep_days) || 30), notify: s.notify !== false }
+}
+
+const steady = (s: string) => s
+  .replace(/\?[^\s)]*/g, "")
+  .replace(/-[A-Za-z0-9_-]{8}\.(js|css)/g, ".$1") // Vite's hashed chunk names
+  .replace(/:\d+:\d+/g, "").replace(/:\d+\)/g, ")")
+  .replace(/https?:\/\/[^/\s]+/g, "")
+  .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>")
+  .replace(/\b\d+(\.\d+)?\b/g, "<n>")
+/** The first frame of a stack that's the code's (Chrome's "    at f (x.js:1:2)", Safari's "f@x.js:1:2"). */
+const frame = (stack?: string) => stack?.split("\n").map((l) => l.trim()).find((l) => /^at |@/.test(l)) ?? ""
+function kindOf(source: Source, message: string, stack?: string) {
+  return crypto.createHash("sha1").update(`${source}\0${steady(message)}\0${steady(frame(stack))}`).digest("hex").slice(0, 10)
+}
+
+let groups: Map<string, ErrorGroup> | null = null
+const recent = new Map<string, ErrorEvent[]>()
+
+function add(e: ErrorEvent, live: boolean): ErrorGroup | null {
+  const all = groups!
+  let g = all.get(e.id)
+  const isNew = !g
+  if (!g) { g = { id: e.id, source: e.source, kind: e.kind, message: e.message, first: e.t, last: e.t, count: 0, fatal: 0, devices: [], latest: e }; all.set(e.id, g) }
+  g.count += e.n ?? 1
+  if (e.fatal) g.fatal++
+  if (e.t >= g.last) { g.last = e.t; g.latest = e; g.kind = e.kind; g.message = e.message }
+  g.first = Math.min(g.first, e.t)
+  if (e.device && !g.devices.includes(e.device)) g.devices = [...g.devices, e.device]
+  const r = recent.get(e.id) ?? []
+  r.push(e)
+  if (r.length > RECENT) r.shift()
+  recent.set(e.id, r)
+  return live && isNew ? g : null
+}
+
+function loaded() {
+  if (groups) return groups
+  groups = new Map()
+  recent.clear()
+  const rows = log.days().flatMap(log.read).sort((a, b) => a.t - b.t)
+  for (const e of rows) add(e, false)
+  return groups
+}
+
+const held = new Map<string, { at: number; n: number; last: ErrorEvent }>()
+let flusher: ReturnType<typeof setInterval> | null = null
+const toldOf = new Set<string>()
+
+function record(e: Omit<ErrorEvent, "id">) {
+  const event: ErrorEvent = { id: kindOf(e.source, e.message, e.stack), ...e }
+  loaded()
+  log.prune(settings().keep)
+  const h = held.get(event.id)
+  if (h && event.t - h.at < BURST && !event.fatal) {
+    h.n++
+    h.last = event
+    const g = groups!.get(event.id)
+    if (g) { g.count++; g.last = event.t; g.latest = event }
+    return
+  }
+  if (h && h.n) flushHeld(event.id)
+  held.set(event.id, { at: event.t, n: 0, last: event })
+  flusher ??= setInterval(flushOld, BURST)
+  flusher.unref()
+  append(event)
+  const isNew = add(event, true)
+  if (isNew) tell(isNew)
+}
+
+function flushHeld(id: string) {
+  const h = held.get(id)
+  if (!h || !h.n) return
+  append({ ...h.last, n: h.n })
+  h.n = 0
+}
+function flushOld() {
+  const now = Date.now()
+  for (const [id, h] of held) { if (now - h.at >= BURST) { flushHeld(id); held.delete(id) } }
+  if (!held.size && flusher) { clearInterval(flusher); flusher = null }
+}
+plugin.onUnload(() => { if (flusher) clearInterval(flusher); for (const id of held.keys()) flushHeld(id); held.clear() })
+
+const TOLD = new Set(["stale", "shown", "plugin", "hung", "caught", "voice"])
+function tell(g: ErrorGroup) {
+  if (!settings().notify || TOLD.has(g.kind) || g.latest.fatal && g.source === "server") return
+  const where = g.source === "app" ? (g.kind === "stopped" ? "The app stopped" : "Something went wrong in the app") : "Something went wrong in the server"
+  if (toldOf.has(where)) return
+  toldOf.add(where)
+  setImmediate(() => {
+    try {
+      void plugin.runOp("ui.notify", { text: `${where}. It's kept in Errors`, error: true, actionOpen: "view:errors" }).catch(() => {})
+    } catch {}
+  })
+}
+
+plugin.onServerError((e: ServerError) => {
+  if (!plugin.loaded) return
+  record({ t: e.t, source: "server", kind: e.fatal ? "fatal" : "error", message: e.message, ...(e.stack ? { stack: e.stack } : {}),
+    ...(e.where ? { where: e.where } : {}), ...(e.fatal ? { fatal: true } : {}) })
+})
+
+const KINDS = ["uncaught", "rejection", "boundary", "stopped", "boot", "stale", "shown", "plugin", "update", "hung", "caught", "voice"]
+type Reported = Partial<Record<"message" | "t" | "trail" | "kind" | "stack" | "component" | "fatal" | "url" | "build", unknown>>
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "")
+
+plugin.route("POST", "errors", (req) => {
+  const b: { errors?: unknown; device?: unknown } = req.body ?? {}
+  const list: Reported[] = Array.isArray(b.errors) ? b.errors.slice(0, 50) : []
+  const from = req.http?.headers["x-vaultite-client"]
+  const client = typeof from === "string" ? from.replace(/^app\//, "") : ""
+  const device = str(b.device, 40) || client || "web"
+  let n = 0
+  for (const x of list) {
+    const message = str(x.message, 500)
+    if (!message) continue
+    const t = typeof x.t === "number" && Math.abs(x.t - Date.now()) < 7 * DAY ? x.t : Date.now()
+    const trail = Array.isArray(x.trail) ? x.trail.filter((s): s is string => typeof s === "string").slice(-10).map((s) => s.slice(0, 200)) : []
+    record({ t, source: "app", kind: KINDS.find((k) => k === x.kind) ?? "uncaught", message, device,
+      ...(str(x.stack, 8000) ? { stack: str(x.stack, 8000) } : {}), ...(str(x.component, 3000) ? { component: str(x.component, 3000) } : {}),
+      ...(x.fatal === true ? { fatal: true } : {}), ...(str(x.url, 500) ? { url: str(x.url, 500) } : {}),
+      ...(str(x.build, 100) ? { build: str(x.build, 100) } : {}), ...(trail.length ? { trail } : {}) })
+    n++
+  }
+  return { ok: true, recorded: n }
+})
+
+function list(q: { source?: string; limit?: number; since?: number }): ErrorList {
+  const all = [...loaded().values()]
+  const since = q.since ?? 0
+  const shown = all.filter((g) => (!q.source || g.source === q.source) && g.last >= since).sort((a, b) => b.last - a.last)
+  const oldest = all.length ? all.reduce((m, g) => Math.min(m, g.first), Infinity) : null
+  return { groups: shown.slice(0, Math.min(500, Math.max(1, q.limit ?? 50))), total: shown.length,
+    events: shown.reduce((n, g) => n + g.count, 0), since: oldest }
+}
+
+function detail(id: string): ErrorDetail {
+  const g = loaded().get(id) ?? [...loaded().values()].find((x) => x.id.startsWith(id) && id.length >= 4)
+  if (!g) throw new HTTPError(404, `no error '${id}'`)
+  return { group: g, events: [...(recent.get(g.id) ?? [])].reverse() }
+}
+
+function forget(id?: string) {
+  if (!id) {
+    for (const d of log.days()) log.rewrite(d, [])
+    groups = new Map(); recent.clear(); held.clear()
+    return { ok: true, forgot: "all" }
+  }
+  const g = detail(id).group
+  for (const d of log.days()) {
+    const rows = log.read(d), kept = rows.filter((e) => e.id !== g.id)
+    if (kept.length !== rows.length) log.rewrite(d, kept)
+  }
+  groups!.delete(g.id); recent.delete(g.id); held.delete(g.id)
+  return { ok: true, forgot: g.id }
+}
+
+const num = (v: unknown) => (v === undefined || v === "" ? undefined : Number(v) || undefined)
+plugin.route("GET", "errors", (req) => list({ source: req.query.source || undefined, limit: num(req.query.limit), since: num(req.query.since) }))
+plugin.route("GET", "errors/*", (req) => detail(req.arg(0)))
+plugin.route("DELETE", "errors", () => forget())
+plugin.route("DELETE", "errors/*", (req) => forget(req.arg(0)))
+
+const sourceLabel = (g: ErrorGroup) => (g.source === "app" ? `app${g.devices.length ? ` (${g.devices.join(", ")})` : ""}` : "server")
+const groupLine = (g: ErrorGroup) =>
+  `${g.id}  ${fmtAgo(g.last)}  ${sourceLabel(g)}, ${g.kind}${g.count > 1 ? `, ×${g.count}` : ""}: ${g.message}`
+
+plugin.op({
+  id: "errors.list",
+  cli: "errors",
+  summary: "The errors the app and the server hit, the latest first: each kind once, with how many times and where.",
+  help: `One line per kind of error: its id, when it last happened, where (the app on which device, or the server) and
+how (stopped: it unmounted the app; boundary: a block or view failed; error: the server logged it; fatal: it ended the
+server), how many times, its message. \`vau errors show <id>\` has its stack and each time it happened. Kept on the
+server's machine for keep_days (default 30).
+
+  vau errors                    the latest 20 kinds
+  vau errors --source app       only the app's
+  vau errors --minutes 30       only what happened in the last 30 minutes`,
+  kind: "read",
+  params: {
+    limit: { type: "integer", minimum: 1, maximum: 500, default: 20, description: "at most this many kinds" },
+    source: { type: "string", enum: ["app", "server"], description: "only the app's errors, or only the server's" },
+    minutes: { type: "integer", minimum: 1, description: "only kinds that happened in the last this many minutes" },
+  },
+  run: ({ limit, source, minutes }) => list({ limit, source, since: minutes ? Date.now() - minutes * MINUTE : undefined }),
+  text: (r: ErrorList) => r.groups.length
+    ? [`${r.total} kinds of error, ${r.events} times${r.total > r.groups.length ? ` (the latest ${r.groups.length})` : ""}:`, "", ...r.groups.map(groupLine)].join("\n")
+    : "No errors recorded.",
+})
+
+function eventText(e: ErrorEvent) {
+  const d = new Date(e.t)
+  return [
+    `${d.toDateString()} ${d.toTimeString().slice(0, 8)}${(e.n ?? 1) > 1 ? ` (×${e.n})` : ""}: ${e.kind}${e.fatal ? " (fatal)" : ""}`,
+    e.device ? `  device: ${e.device}` : "", e.where ? `  request: ${e.where}` : "", e.url ? `  at: ${e.url}` : "", e.build ? `  build: ${e.build}` : "",
+    e.trail?.length ? `  before it: ${e.trail.join(" → ")}` : "",
+  ].filter(Boolean).join("\n")
+}
+
+plugin.op({
+  id: "errors.show",
+  cli: "errors show",
+  summary: "One kind of error: its message, stack and component stack, and each time it happened (device, address, build, what the user did before).",
+  help: `The id is from \`vau errors\` (its first characters are enough).
+
+  vau errors show 3f9a2c1b7e`,
+  kind: "read",
+  params: {
+    id: { type: "string", required: true, description: "the error's id (from vau errors)" },
+    times: { type: "integer", minimum: 1, maximum: 30, default: 5, description: "how many of the times it happened to list" },
+  },
+  args: ["id"],
+  run: ({ id, times }) => { const d = detail(id); return { ...d, events: d.events.slice(0, times) } },
+  text: (d: ErrorDetail) => {
+    const g = d.group, e = g.latest
+    return [
+      `${g.message}`, "",
+      `${sourceLabel(g)}, ${g.kind}: ${g.count} time${g.count === 1 ? "" : "s"}${g.fatal ? ` (${g.fatal} fatal)` : ""}, first ${fmtAgo(g.first)}, last ${fmtAgo(g.last)}`,
+      e.stack ? `\nStack:\n${e.stack}` : "", e.component ? `\nComponents:${e.component}` : "",
+      `\nTimes (newest first):`, ...d.events.map(eventText),
+    ].filter(Boolean).join("\n")
+  },
+})
+
+plugin.op({
+  id: "errors.clear",
+  cli: "errors clear",
+  summary: "Forget the errors kept: one kind (its id), or all of them.",
+  help: `  vau errors clear 3f9a2c1b7e     forget one kind (fixed)
+  vau errors clear --all          forget everything kept`,
+  kind: "destructive",
+  params: {
+    id: { type: "string", description: "the error's id (from vau errors)" },
+    all: { type: "boolean", description: "forget every error" },
+  },
+  args: ["id"],
+  run: ({ id, all }) => {
+    if (!id && !all) throw new OpError("say which error (its `id`), or `all`")
+    return forget(all ? undefined : id)
+  },
+  text: (r: { forgot: string }) => (r.forgot === "all" ? "Forgot every error." : `Forgot ${r.forgot}.`),
+})
+
+plugin.block("errors", (ctx) => {
+  const o = ctx.options
+  const r = list({ limit: Number(o.limit) || 20, source: o.source === "app" || o.source === "server" ? o.source : undefined })
+  const title = typeof o.title === "string" && o.title ? o.title : "Errors"
+  if (!r.groups.length) return section(title, "_No errors recorded._")
+  return section(title, `${r.total} kinds, ${r.events} times.`, bullets(r.groups.map((g) =>
+    `${fmtAgo(g.last)} · ${sourceLabel(g)}, ${g.kind}${g.count > 1 ? ` (×${g.count})` : ""} · ${g.message} · \`${g.id}\``)))
+})

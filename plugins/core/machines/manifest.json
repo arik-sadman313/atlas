@@ -1,0 +1,17 @@
+{
+  "id": "machines",
+  "icon": "server",
+  "category": "system",
+  "offByDefault": true,
+  "requires": ["tabs"],
+  "name": "Machines",
+  "description": "Your other computers and agent VMs: their status, terminals and coding agents, or read-only folders and files through a relay server.",
+  "tint": "teal",
+  "blocks": {
+    "machines": {
+      "description": "your other computers running Vaultite, whether they answer and what they run",
+      "live": "the other machines' apps, asked live",
+      "options": {}
+    }
+  }
+}

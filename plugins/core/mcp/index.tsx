@@ -1,0 +1,42 @@
+import { Bot, Copy, Globe, Plug } from "lucide-react"
+import { aiOn, copyText, definePlugin, Group, notify, notifyError, openView, Section, SettingRow } from "@vaultite"
+import { AiApps, CONNECTION_DETAIL, ConnectionSheet, ConnectionsView, ConnectSection, connectionTitle, RemoteAccess, SETUP_DETAIL, SetupSheet, setupTitle } from "./Connections"
+import { GrokBotIcon, MuseIcon } from "./marks"
+
+
+const here = () => (typeof location === "undefined" ? "http://127.0.0.1:8793" : location.origin)
+
+function Connect() {
+  const rows = [
+    { label: "Claude Code, through vau", sub: "Starts vau mcp for each session", cmd: "claude mcp add --scope user vaultite -- vau mcp" },
+    { label: "Claude Code, over HTTP", sub: "This server's address", cmd: `claude mcp add --scope user --transport http vaultite ${here()}/api/mcp` },
+  ]
+  return (
+    <Section title="Connect an AI">
+      <Group>
+        {rows.map((r) => (
+          <SettingRow key={r.label} label={r.label} sub={<code className="break-all text-[12px]">{r.cmd}</code>} onClick={() => copyText(r.cmd).then(() => notify("Copied the command", { id: "copied" }), (e) => notifyError(e))} chevron={Copy} />
+        ))}
+        <SettingRow label="Claude desktop" sub={<span>In claude_desktop_config.json, a server whose command is vau (its full path) with the argument mcp</span>} />
+        <SettingRow label="Claude, ChatGPT, Muse and Grok Bot" sub="On the web and your phone: Connections" onClick={() => openView("connections", { newTab: true })} />
+      </Group>
+    </Section>
+  )
+}
+
+export default definePlugin({
+  settingsPanel: () => <Connect />,
+  settingsPanelFirst: true,
+  icons: { "grok-bot": GrokBotIcon, muse: MuseIcon },
+  details: {
+    [SETUP_DETAIL]: { title: (_s, [id]) => setupTitle(id), render: (_s, [id]) => <SetupSheet id={id} /> },
+    [CONNECTION_DETAIL]: { title: (_s, [id]) => connectionTitle(id), render: (_s, [id]) => <ConnectionSheet id={id} /> },
+  },
+  settingsPages: {
+    apps: { label: "Connect an AI app", icon: Bot, in: "ai", render: () => <AiApps bare /> },
+    remote: { label: "Share & sync", icon: Globe, sub: "Reach your vault from anywhere, and share folders", render: () => <RemoteAccess /> },
+  },
+  newTab: { connect: { title: "Connect your AI", sort: 5, heading: false, render: () => <ConnectSection /> } },
+  views: { connections: { icon: Plug, title: () => "Connections", render: () => <ConnectionsView /> } },
+  commands: [{ id: "mcp:connections", name: "Open connections", when: aiOn, run: () => openView("connections", { newTab: true }) }],
+})

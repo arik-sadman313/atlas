@@ -1,0 +1,287 @@
+import { useId, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Command as CommandIcon, EyeOff, Layers, LayoutDashboard, MousePointerClick, Plus, RotateCcw, Smile, SquarePlus, Trash2 } from "lucide-react"
+import type { Store } from "@/core/data"
+import { getStore } from "@/core/data"
+import { folderOf, stem } from "@/core/files"
+import { fileAt } from "@/core/pages"
+import type { NewTabSection, SidebarPanel } from "@/core/define"
+import { available, commandList, keyHint, keysOf, runCommand, useCommandList, type Command } from "@/core/commands"
+import { edgeScroller, startDrag, useDragItem, useDropHit, useDropTarget } from "@/core/drag"
+import { reorder, slotAt, useSlide } from "@/core/slide"
+import { commandIcon } from "@/core/pages"
+import { newTabSections, sidebarPanels } from "@/core/plugins"
+import { opensChoices, setOpens } from "@/core/launcher"
+import { getPrefs, setPrefs, usePrefs } from "@/core/prefs"
+import { notify } from "@/core/notify"
+import { choose } from "@/components/Chooser"
+import { pickIcon } from "@/core/iconask"
+import { checklist, menuFor, type CheckItem, type MenuItem } from "@/components/ContextMenu"
+import { panelMenu, SidebarHeading, SidebarRow } from "@/components/Sidebar"
+import { changedFiles, RecentList, useOpenedFiles } from "@/components/RecentFiles"
+import { CORE_SECTIONS, shownActions, shownSections, withIcon, withPanels, type NewTabSetup, type SectionInfo } from "../../../core/newtab.ts"
+import { anchorFor, placeKey } from "../../../core/slots.ts"
+import { cn } from "@/lib/utils"
+import { Catch, Drawn, Guard } from "@/components/Guard"
+import { HeadingButton } from "@/components/Button"
+import { closestOf } from "@/core/dom"
+
+type Section = SectionInfo & { heading?: string | false; render?: NewTabSection["render"]; sidebar?: SidebarPanel }
+
+function allSections(disabled: string[]): Section[] {
+  return withPanels<Section, Section>(
+    [...CORE_SECTIONS, ...newTabSections(disabled).map(({ key, section: s }) => ({ key, title: s.title, sort: s.sort, hidden: s.hidden, only: s.only, heading: s.heading, render: s.render }))],
+    sidebarPanels(disabled).map(({ key, panel }) => ({ key, title: panel.title, heading: panel.heading ?? panel.title, sidebar: panel })),
+  )
+}
+
+const fits = (s: Section, phone: boolean) => !s.only || s.only === (phone ? "phone" : "desktop")
+
+export function useNewTabPage(store: Store | null): string | null {
+  const { page } = usePrefs().newTab
+  return page && store && fileAt(store.files.files, page) ? page : null
+}
+const labelOf = (c: Command) => c.label ?? c.name
+
+export function NewTab({ store, phone }: { store: Store; phone?: boolean }) {
+  const { disabled, newTab } = usePrefs()
+  const all = allSections(disabled)
+  const byKey = new Map(all.map((s) => [s.key, s]))
+  const shown = shownSections(newTab, all).flatMap((k) => byKey.get(k) ?? []).filter((s) => fits(s, !!phone))
+  const opened = useOpenedFiles(store, 6)
+  const both = shown.some((s) => s.key === "core:opened") && opened.length
+  const recent = changedFiles(store, both ? 5 : 8, both ? opened : [])
+  const body = (s: Section): ReactNode => {
+    if (s.key === "core:actions") return <ActionButtons phone={phone} />
+    if (s.key === "core:opened") return opened.length ? <RecentList store={store} files={opened} phone={phone} /> : null
+    if (s.key === "core:changed") return recent.length ? <RecentList store={store} files={recent} phone={phone} /> : null
+    if (s.sidebar) return <PanelSection panel={s.sidebar} id={s.key} store={store} phone={phone} />
+    try { return s.render?.({ store, phone: !!phone }) ?? null } catch (e) { return <Drawn draw={() => { throw e }} /> }
+  }
+  const drawn = shown.map((s) => ({ s, el: body(s) })).filter((x) => x.el !== null)
+  const list = useRef<HTMLDivElement>(null)
+  useReorder(list, "sections")
+  const item = useDragItem()
+  const onMenu = (e: MouseEvent) => {
+    const action = closestOf<HTMLElement>(e.target, "[data-newtab-action]")?.dataset.newtabAction
+    const section = closestOf<HTMLElement>(e.target, "[data-newtab-section]")?.dataset.newtabSection
+    menuFor(() => customizeMenu(!!phone, { action, section }))(e)
+  }
+  const sections = (
+    <div className="size-up-bleed">
+    <div ref={list} data-size-up className="relative flex flex-col gap-3 [&_[data-panel-handle]]:mt-0">
+      {drawn.map(({ s, el }) => {
+        const heading = s.heading === false ? null : s.heading ?? s.title
+        return (
+          <section key={s.key} data-newtab-section={s.key} data-slide={s.key} aria-label={s.title} className={cn(item?.newtab?.key === s.key && "opacity-50")}
+            onPointerDown={(e) => {
+              const handle = closestOf<HTMLElement>(e.target, "[data-panel-handle]")
+              const control = closestOf(e.target, "button, a, input")
+              if (!handle || (control && !control.hasAttribute("data-panel-handle"))) return
+              startDrag(e, { from: "newtab", newtab: { list: "sections", key: s.key }, label: s.title }, { touch: !!phone })
+            }}>
+            {heading && <SidebarHeading title={heading} open>{s.key === "core:actions" ? <AddButton /> : s.sidebar?.actions && <Catch fallback={() => null}><Drawn draw={() => s.sidebar!.actions!({ store, open: true, file: "", tab: "", phone: !!phone })} /></Catch>}</SidebarHeading>}
+            <Guard what="This section">{el}</Guard>
+          </section>
+        )
+      })}
+      {!drawn.length && !phone && (
+        <p className="flex h-7 items-center gap-2 pl-1.5 text-[13px] text-muted-foreground">
+          <MousePointerClick className="size-4" strokeWidth={2} />Right-click to choose what a new tab shows
+        </p>
+      )}
+    </div>
+    </div>
+  )
+  if (phone) return <div onContextMenu={onMenu} className="pt-2">{sections}</div>
+  return (
+    <div onContextMenu={onMenu} className="mx-auto flex min-h-full max-w-[520px] flex-col">
+      <div aria-hidden className="min-h-6 shrink-0 grow basis-0 max-h-[14vh]" />
+      {sections}
+      <div aria-hidden className="min-h-10 shrink-0 grow-[2] basis-0" />
+    </div>
+  )
+}
+
+type Reorder = { before: string | null; order: string[] }
+
+function useReorder(box: RefObject<HTMLDivElement | null>, list: "sections" | "actions", across = false) {
+  const target = `newtab:${useId()}`
+  const [edge] = useState(() => edgeScroller())
+  useDropTarget<Reorder>(target, (item, x, y) => {
+    const n = item.newtab, root = box.current
+    if (n?.list !== list || !root) return null
+    edge.over(root, x, y)
+    const r = root.getBoundingClientRect()
+    if (!r.width || x < r.left - 48 || x > r.right + 48 || y < r.top - 24 || y > r.bottom + 24) return null
+    const rows = [...root.children].filter((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.slide)
+    if (!rows.length) return null
+    const { order, before, same } = reorder(rows.map((el) => el.dataset.slide!), [n.key], slotAt(root, rows, x, y, across ? "wrap" : "y"))
+    return same ? null : { before, order }
+  }, (item, h) => {
+    const key = item.newtab!.key
+    const now = list === "sections" ? sectionsNow() : shownActions(getPrefs().newTab)
+    void setNewTab({ [list]: placeKey(now, key, h.before && now.includes(h.before) ? h.before : null) })
+  }, { end: edge.stop })
+  useSlide(box, useDropHit<Reorder>(target)?.order ?? null, across ? "wrap" : "y")
+}
+
+function PanelSection({ panel, id, store, phone }: { panel: SidebarPanel; id: string; store: Store; phone?: boolean }) {
+  return <div className="flex flex-col" data-newtab-panel={id}><Drawn draw={() => panel.render({ store, open: true, file: "", tab: "", phone })} /></div>
+}
+
+/** The commands newtab.json lists (else the default) that exist now, drawn as the command is. `panel`: the Buttons
+ *  panel's own (`open` false: the rail, icons only); `dock`: a phone's dock, 44px icons, held for name and menu. */
+export function ActionButtons({ phone, open = true, panel, dock }: { phone?: boolean; open?: boolean; panel?: string; dock?: boolean }) {
+  const { newTab } = usePrefs()
+  const byId = new Map(useCommandList().map((c) => [c.id, c]))
+  const cmds = available(shownActions(newTab).flatMap((id) => byId.get(id) ?? []))
+  const box = useRef<HTMLDivElement>(null)
+  useReorder(box, "actions", dock)
+  const item = useDragItem()
+  const dragged = item?.newtab?.list === "actions" ? item.newtab.key : null
+  const menu = (id: string) => [...buttonMenu(id, dock), ...(dock && panel ? panelMenu(panel).map((it, i) => (i ? it : { ...it, sep: true })) : [])]
+  if (dock) return (
+    <div ref={box} className="relative flex flex-wrap" data-newtab-actions>
+      {cmds.map((c) => {
+        const Icon = commandIcon(c, newTab.icons?.[c.id]) ?? CommandIcon
+        return (
+          <button key={c.id} type="button" data-newtab-action={c.id} data-slide={c.id} aria-label={labelOf(c)} onClick={() => runCommand(c)}
+            onPointerDown={(e) => startDrag(e, { from: "newtab", newtab: { list: "actions", key: c.id }, label: labelOf(c) }, { touch: true })}
+            onContextMenu={menuFor(() => [{ label: labelOf(c), caption: true, run: () => {} }, ...menu(c.id).map((it, i) => (i ? it : { ...it, sep: true }))])}
+            className={cn("grid size-11 cursor-pointer place-items-center rounded-[10px] text-primary active:bg-foreground/[0.06]", dragged === c.id && "opacity-50")}>
+            <Icon className="size-[21px]" strokeWidth={2} />
+          </button>
+        )
+      })}
+      {!cmds.length && (
+        <button type="button" aria-label="Add a button" onClick={() => addButton()} className="grid size-11 cursor-pointer place-items-center rounded-[10px] text-muted-foreground active:bg-foreground/[0.06]">
+          <Plus className="size-[21px]" strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  )
+  if (!cmds.length) return null
+  return (
+    <div ref={box} className="relative flex flex-col gap-px pb-1" data-newtab-actions>
+      {cmds.map((c) => {
+        const Icon = commandIcon(c, newTab.icons?.[c.id]) ?? CommandIcon
+        const keys = keysOf(c)[0]
+        return (
+          <div key={c.id} data-slide={c.id} onPointerDown={(e) => startDrag(e, { from: "newtab", newtab: { list: "actions", key: c.id }, label: labelOf(c) }, { touch: !!phone })}
+            onContextMenu={panel ? menuFor(() => menu(c.id)) : undefined} className={cn(dragged === c.id && "opacity-50")}>
+            <SidebarRow data-newtab-action={c.id} icon={Icon} tint="var(--primary)" label={labelOf(c)} open={open} className="text-primary" onClick={() => runCommand(c)}>
+              {keys && !phone && <span data-rebind={c.id} data-tip="Change shortcut" className="mr-0.5 shrink-0 px-1 text-[11px] text-tertiary">{keyHint(keys)}</span>}
+            </SidebarRow>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function AddButton() {
+  return (
+    <HeadingButton icon={Plus} label="Add a button" onClick={() => addButton()} />
+  )
+}
+
+const setNewTab = (patch: Partial<NewTabSetup>) => setPrefs({ newTab: { ...getPrefs().newTab, ...patch } })
+
+export function chooseNewTabPage() {
+  const store = getStore()
+  if (!store) return
+  const { page } = getPrefs().newTab
+  const name = (f: { path: string; title: string }) => f.title || stem(f.path)
+  const files = store.files.files.filter((f) => f.type === "dashboard").sort((a, b) => name(a).localeCompare(name(b)))
+  choose({
+    title: "New tab's page", placeholder: "A dashboard for new tabs…", current: page ?? undefined,
+    items: files.map((f) => ({ id: f.path, label: name(f), detail: folderOf(f.path) || undefined, icon: LayoutDashboard })),
+    empty: <p className="px-3 py-6 text-center text-[15px] text-muted-foreground">No dashboards yet.</p>,
+    onPick: (it) => { void setNewTab({ page: it.id }) },
+  })
+}
+
+export function showNewTabSections() {
+  const was = getPrefs().newTab.page
+  if (!was) return
+  void setNewTab({ page: null })
+  notify("New tabs show their sections", { action: { label: "Undo", run: () => setNewTab({ page: was }) } })
+}
+const sectionsNow = () => { const { disabled, newTab } = getPrefs(); return shownSections(newTab, allSections(disabled)) }
+const moved = (list: string[], key: string, where: "up" | "down") => placeKey(list, key, anchorFor(list, key, where) ?? null)
+
+function customizeMenu(phone: boolean, hit: { action?: string; section?: string }): MenuItem[] {
+  const { disabled, newTab } = getPrefs()
+  const all = allSections(disabled)
+  const shown = shownSections(newTab, all)
+  const buttons = shownActions(newTab)
+  const cmds = new Map(commandList().map((c) => [c.id, c]))
+  const name = (id: string) => { const c = cmds.get(id); return c ? labelOf(c) : id }
+  const out: MenuItem[] = []
+  if (hit.action && buttons.includes(hit.action)) out.push(...buttonItems(hit.action))
+  else if (hit.section && shown.includes(hit.section)) {
+    const key = hit.section, i = shown.indexOf(key), title = all.find((s) => s.key === key)?.title ?? key
+    out.push(
+      { label: "Move up", icon: ArrowUp, disabled: i === 0, run: () => setNewTab({ sections: moved(shown, key, "up") }) },
+      { label: "Move down", icon: ArrowDown, disabled: i === shown.length - 1, run: () => setNewTab({ sections: moved(shown, key, "down") }) },
+      { label: `Hide ${title}`, icon: EyeOff, run: () => setNewTab({ sections: shown.filter((k) => k !== key) }) },
+    )
+  }
+  const choice = (s: SectionInfo): CheckItem => ({ key: s.key, label: s.title, hint: s.panel ? "Panel" : fits(s, phone) ? undefined : s.only === "phone" ? "Phones" : "Computers" })
+  const hidden = all.filter((s) => !shown.includes(s.key))
+  const sections = checklist("newtab:sections", {
+    on: shown.flatMap((k) => all.find((s) => s.key === k) ?? []).map(choice),
+    off: [hidden.filter((s) => !s.panel).map(choice), hidden.filter((s) => s.panel).map(choice)],
+    set: (k, on, before) => { const now = sectionsNow(); setNewTab({ sections: on ? placeKey(now, k, before) : now.filter((x) => x !== k) }) },
+  })
+  if (hit.section === "core:actions" && shown.includes(hit.section)) {
+    const buttonItems: MenuItem[] = [
+      ...checklist("newtab:buttons", {
+        on: buttons.map((id) => ({ key: id, label: name(id) })),
+        set: (id, on, before) => { const now = shownActions(getPrefs().newTab); setNewTab({ actions: on ? placeKey(now, id, before) : now.filter((k) => k !== id) }) },
+      }),
+      { label: "Add a button…", icon: Plus, sep: !!buttons.length, run: () => addButton() },
+    ]
+    out.push({ label: "Buttons", icon: MousePointerClick, sep: true, run: () => {}, items: buttonItems })
+  }
+  out.push({ label: "Sections", icon: Layers, sep: !!out.length, run: () => {}, items: sections })
+  out.push({ label: "Show a page instead…", icon: LayoutDashboard, run: () => chooseNewTabPage() })
+  out.push({ label: "New tabs open", icon: SquarePlus, run: () => {}, items: opensChoices().map((c) => ({ label: c.label, checked: c.value === newTab.opens, run: () => setOpens(c.value) })) })
+  if (newTab.sections || newTab.actions || newTab.icons) out.push({ label: "Reset new tab", icon: RotateCcw, sep: true, run: () => {
+    const was = getPrefs().newTab
+    void setNewTab({ sections: null, actions: null, icons: null, page: null })
+    notify("New tab reset", { action: { label: "Undo", run: () => setNewTab(was) } })
+  } })
+  return out
+}
+
+function buttonItems(id: string, across = false): MenuItem[] {
+  const { newTab } = getPrefs()
+  const buttons = shownActions(newTab), i = buttons.indexOf(id), own = newTab.icons?.[id]
+  const c = commandList().find((x) => x.id === id)
+  return [
+    { label: across ? "Move left" : "Move up", icon: across ? ArrowLeft : ArrowUp, disabled: i === 0, run: () => setNewTab({ actions: moved(buttons, id, "up") }) },
+    { label: across ? "Move right" : "Move down", icon: across ? ArrowRight : ArrowDown, disabled: i === buttons.length - 1, run: () => setNewTab({ actions: moved(buttons, id, "down") }) },
+    { label: "Change icon", icon: Smile, sep: true, run: () => changeIcon(id) },
+    ...(own ? [{ label: "Use the command's icon", icon: RotateCcw, run: () => setNewTab({ icons: withIcon(getPrefs().newTab.icons, id, "") }) }] : []),
+    { label: `Remove ${c ? labelOf(c) : id}`, icon: Trash2, sep: true, run: () => setNewTab({ actions: buttons.filter((k) => k !== id) }) },
+  ]
+}
+
+const buttonMenu = (id: string, across = false): MenuItem[] => [...buttonItems(id, across), { label: "Add a button…", icon: Plus, sep: true, run: () => addButton() }]
+
+function changeIcon(id: string) {
+  const c = commandList().find((x) => x.id === id)
+  const current = getPrefs().newTab.icons?.[id] ?? (typeof c?.icon === "string" ? c.icon : undefined)
+  pickIcon({ title: `${c ? labelOf(c) : id}'s icon`, current, onPick: (n) => setNewTab({ icons: withIcon(getPrefs().newTab.icons, id, n) }) })
+}
+
+function addButton() {
+  const have = shownActions(getPrefs().newTab)
+  const items = available(commandList()).filter((c) => !have.includes(c.id)).sort((a, b) => a.name.localeCompare(b.name))
+    .map((c) => ({ id: c.id, label: c.name }))
+  choose({
+    title: "Add a button", placeholder: "A command to add as a button…", items,
+    onPick: (it) => setNewTab({ actions: [...shownActions(getPrefs().newTab).filter((k) => k !== it.id), it.id] }),
+  })
+}

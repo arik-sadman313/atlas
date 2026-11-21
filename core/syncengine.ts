@@ -1,0 +1,683 @@
+import { sha256 } from "@noble/hashes/sha2.js"
+import { mergeJson, mergeText } from "./syncmerge.ts"
+
+export type Node = {
+  id: string; file: string; path: string; blob: string | null; size: number; parents: string[]
+  clock: number; device: string; at: number
+  conflict?: Conflict
+  settles?: string[]
+  from?: string
+  confirmed?: true
+}
+export type Conflict = {
+  id: string; kind: "text" | "json" | "binary" | "deleted" | "name"
+  base: string | null; other: string | null
+  device: string; at: number
+  copy?: string; keys?: string[]; lines?: number
+}
+export type Entry = { device: string; seq: number; node: Node }
+export type Vector = Record<string, number>
+export type FileStat = { path: string; size: number; mtime: number }
+
+export interface Folder {
+  list(): FileStat[]
+  stat(path: string): FileStat | null
+  read(path: string): Uint8Array | null
+  hash(path: string): string | null
+  write(path: string, bytes: Uint8Array): FileStat
+  move(from: string, to: string): FileStat | null
+  remove(path: string): void
+  copyIn?(path: string, from: string, hash: string): FileStat | null
+}
+/** Where a device keeps its logs, blobs and what it knows of its folder: runtime state, never in the vault. */
+export interface Store {
+  entries(): Entry[]
+  append(entries: Entry[]): void
+  state(): Record<string, unknown> | null
+  saveState(state: Record<string, unknown>): void
+  hasBlob(h: string): boolean
+  blob(h: string): Uint8Array | null
+  putBlob(h: string, bytes: Uint8Array): void
+  keepFile?(h: string, folder: Folder, path: string): boolean
+  blobFile?(h: string): string | null
+  placed?(h: string, folder: Folder, path: string): void
+}
+
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"))
+export const sha = (b: Uint8Array | string) => { let s = ""; for (const x of sha256(typeof b === "string" ? new TextEncoder().encode(b) : b)) s += HEX[x]; return s }
+const enc = new TextEncoder(), dec = new TextDecoder("utf-8", { fatal: true })
+export const PROTOCOL = 1
+const DEBUG = typeof process !== "undefined" && !!process.env?.SYNC_DEBUG
+const TEXT_MAX = 8 << 20
+
+/** The id a version has: a hash of everything else in it, so two devices that make the same merge agree on it. */
+export function nodeId(n: Omit<Node, "id">): string {
+  return sha(JSON.stringify([n.file, n.path, n.blob, n.size, [...n.parents].sort(), n.clock, n.device, n.at, n.conflict ?? null, n.settles ?? null, n.from ?? null, n.confirmed ?? null]))
+}
+const made = (n: Omit<Node, "id">): Node => ({ ...n, parents: [...n.parents].sort(), id: nodeId(n) })
+
+const TEXT = /\.(md|markdown|txt|text|csv|tsv|json|jsonl|canvas|base|yaml|yml|toml|ini|css|js|mjs|ts|tsx|jsx|html|htm|xml|svg|py|sh|swift|excalidraw|tex|bib|org|rst|log|ics|vtt|srt)$/i
+export type Kind = "text" | "json" | "binary"
+export function kindOf(path: string, bytes?: Uint8Array | null): Kind {
+  if (/\.(json|canvas|base|excalidraw)$/i.test(path)) return "json"
+  if (TEXT.test(path)) return "text"
+  if (bytes && bytes.length < 1 << 20 && !bytes.includes(0)) { try { dec.decode(bytes); return "text" } catch { /* binary */ } }
+  return "binary"
+}
+const textOf = (b: Uint8Array | null) => { if (!b) return null; try { return dec.decode(b) } catch { return null } }
+/** A path as sync names it: NFC, forward slashes, and the key two paths that clash on a Mac share (case). */
+export const norm = (p: string) => p.normalize("NFC").replaceAll("\\", "/").replace(/^\/+/, "")
+const keyOf = (p: string) => norm(p).toLowerCase()
+
+/** What isn't synced: the folder's own machinery, the OS's litter, sync's temporary files. */
+export function unsynced(rel: string) {
+  const parts = rel.split("/"), name = parts[parts.length - 1]
+  return parts.some((p) => p === ".git" || p === "node_modules" || p === ".Trash" || p === ".trash" || p === ".sync-tmp")
+    || name === ".DS_Store" || name === "Icon\r" || name.startsWith("._") || name.endsWith(".icloud") || /^\.~|~\$/.test(name) || name.endsWith(".sync-part")
+}
+
+/** "Notes/Idea.md", "m4", 2026-11-07 -> "Notes/Idea (m4 2026-11-07).md" */
+export function besideName(path: string, device: string, at: number, n = 1) {
+  const dot = path.lastIndexOf("."), slash = path.lastIndexOf("/")
+  const [stem, ext] = dot > slash + 1 ? [path.slice(0, dot), path.slice(dot)] : [path, ""]
+  const day = new Date(at).toISOString().slice(0, 10)
+  return `${stem} (${device || "merge"} ${day}${n > 1 ? ` ${n}` : ""})${ext}`
+}
+
+type Tracked = { hash: string; node: string; size: number; mtime: number }
+export type Guard = { files: number; max: number }
+export type Status = {
+  device: string; vector: Vector; files: number; heads: number; merging: number; waiting: number; missingBlobs: number
+  held: { deletes: number; since: number } | null; conflicts: number
+  deleting: number
+}
+
+export class Replica {
+  readonly device: string
+  readonly store: Store
+  readonly folder: Folder
+  readonly input: Folder
+  readonly shadow: boolean
+  nodes = new Map<string, Node>()
+  kids = new Map<string, Set<string>>()
+  byFile = new Map<string, Set<string>>()
+  logs = new Map<string, Entry[]>()
+  private headCache = new Map<string, Node[]>()
+  private named = new Map<string, Set<string>>()
+  waiting = new Map<string, Map<number, Entry>>()
+  clock = 0
+  seq = 0
+  seen = new Map<string, Tracked>()
+  wrote = new Map<string, Tracked>()
+  held: { deletes: string[]; since: number } | null = null
+  release = false
+  private going = new Set<string>()
+  deleting = 0
+  extra: Record<string, unknown> = {}
+  now: () => number
+  guard: Guard = { files: 50, max: 0.05 }
+  onEntries: (e: Entry[]) => void = () => {}
+  onLog: (msg: string) => void = () => {}
+
+  constructor(o: { device: string; store: Store; folder: Folder; input?: Folder; now?: () => number }) {
+    this.device = o.device; this.store = o.store; this.folder = o.folder; this.input = o.input ?? o.folder
+    this.shadow = !!o.input && o.input !== o.folder
+    this.now = o.now ?? Date.now
+    const st = this.store.state() as { clock?: number; seen?: [string, Tracked][]; wrote?: [string, Tracked][]; held?: Replica["held"]; extra?: Record<string, unknown> } | null
+    for (const e of this.store.entries()) this.take(e)
+    this.clock = Math.max(this.clock, st?.clock ?? 0)
+    this.seq = this.logs.get(this.device)?.length ?? 0
+    this.seen = new Map(st?.seen ?? [])
+    this.wrote = this.shadow ? new Map(st?.wrote ?? []) : this.seen
+    this.held = st?.held ?? null
+    this.extra = st?.extra ?? {}
+  }
+
+  save() {
+    this.store.saveState({ clock: this.clock, seen: [...this.seen], ...(this.shadow ? { wrote: [...this.wrote] } : {}), held: this.held, extra: this.extra })
+  }
+
+  private take(e: Entry): boolean {
+    const log = this.logs.get(e.device) ?? []
+    if (e.seq <= log.length) return false
+    if (e.seq > log.length + 1) {
+      const w = this.waiting.get(e.device) ?? new Map()
+      w.set(e.seq, e); this.waiting.set(e.device, w)
+      return false
+    }
+    log.push(e); this.logs.set(e.device, log)
+    this.addNode(e.node)
+    const w = this.waiting.get(e.device)
+    if (w?.has(e.seq + 1)) { const next = w.get(e.seq + 1)!; w.delete(e.seq + 1); if (!w.size) this.waiting.delete(e.device); this.take(next) }
+    return true
+  }
+
+  private clashBlobs = new Set<string>()
+
+  private addNode(n: Node) {
+    if (this.nodes.has(n.id)) return
+    this.nodes.set(n.id, n)
+    for (const b of [n.conflict?.base, n.conflict?.other]) if (b) this.clashBlobs.add(b)
+    this.clock = Math.max(this.clock, n.clock)
+    for (const p of n.parents) { const k = this.kids.get(p) ?? new Set(); k.add(n.id); this.kids.set(p, k) }
+    const f = this.byFile.get(n.file) ?? new Set(); f.add(n.id); this.byFile.set(n.file, f)
+    this.reindex(n.file)
+    for (const p of n.parents) { const pn = this.nodes.get(p); if (pn && pn.file !== n.file) this.reindex(pn.file) }
+  }
+
+  private reindex(file: string) {
+    for (const h of this.headCache.get(file) ?? []) { const s = this.named.get(keyOf(h.path)); s?.delete(file); if (s && !s.size) this.named.delete(keyOf(h.path)) }
+    const hs: Node[] = []
+    for (const id of this.byFile.get(file) ?? []) if (!(this.kids.get(id)?.size)) hs.push(this.nodes.get(id)!)
+    hs.sort(order)
+    this.headCache.set(file, hs)
+    for (const h of hs) { const k = keyOf(h.path), s = this.named.get(k) ?? new Set(); s.add(file); this.named.set(k, s) }
+  }
+
+  receive(entries: Entry[]): number {
+    const fresh: Entry[] = []
+    for (const e of entries) {
+      if (!e || typeof e.device !== "string" || !Number.isInteger(e.seq) || e.seq < 1 || !e.node || e.device === this.device) continue
+      const { id, ...rest } = e.node
+      if (nodeId(rest) !== id) { this.onLog(`refused a version from ${e.device} whose id doesn't match`); continue }
+      const before = this.logs.get(e.device)?.length ?? 0
+      this.take(e)
+      const log = this.logs.get(e.device) ?? []
+      fresh.push(...log.slice(before))
+    }
+    if (fresh.length) this.store.append(fresh)
+    return fresh.length
+  }
+
+  vector(): Vector {
+    const v: Vector = {}
+    for (const [d, log] of this.logs) v[d] = log.length
+    return v
+  }
+
+  missing(vector: Vector, max = 5000): Entry[] {
+    const out: Entry[] = []
+    for (const [d, log] of this.logs) {
+      const from = Math.max(0, Math.min(vector[d] ?? 0, log.length))
+      for (let i = from; i < log.length && out.length < max; i++) out.push(log[i])
+    }
+    return out
+  }
+
+  private record(n: Node): Node {
+    if (this.nodes.has(n.id)) return this.nodes.get(n.id)!
+    const e: Entry = { device: this.device, seq: ++this.seq, node: n }
+    this.take(e)
+    this.store.append([e])
+    this.onEntries([e])
+    return n
+  }
+
+  heads(file: string): Node[] { return this.headCache.get(file) ?? [] }
+
+  private whole(file: string) {
+    for (const h of this.heads(file)) for (const id of this.ancestors(h.id)) if (!this.nodes.has(id)) return false
+    return true
+  }
+
+  author(n: Node): Node {
+    if (n.device) return n
+    let best: Node | null = null
+    for (const id of this.ancestors(n.id)) { const a = this.nodes.get(id); if (a?.device && (!best || order(best, a) < 0)) best = a }
+    return best ?? n
+  }
+
+  head(file: string): Node | null {
+    const h = this.heads(file)
+    return h.length === 1 ? h[0] : null
+  }
+
+  private ancestors(id: string): Set<string> {
+    const out = new Set<string>(), todo = [id]
+    while (todo.length) {
+      const x = todo.pop()!
+      if (out.has(x)) continue
+      out.add(x)
+      for (const p of this.nodes.get(x)?.parents ?? []) todo.push(p)
+    }
+    return out
+  }
+
+  private bases(xs: string[], ys: string[]): Node[] {
+    const ax = new Set<string>(), ay = new Set<string>()
+    for (const x of xs) for (const a of this.ancestors(x)) ax.add(a)
+    for (const y of ys) for (const a of this.ancestors(y)) ay.add(a)
+    const common = [...ax].filter((id) => ay.has(id) && this.nodes.has(id))
+    const below = new Set<string>()
+    for (const c of common) for (const p of this.nodes.get(c)!.parents) for (const a of this.ancestors(p)) below.add(a)
+    return common.filter((c) => !below.has(c)).map((c) => this.nodes.get(c)!).sort(order)
+  }
+
+  private textOfSet(ns: Node[]): string | null {
+    if (!ns.length) return ""
+    let acc = this.blobText(ns[0].blob)
+    const done = [ns[0].id]
+    for (const n of ns.slice(1)) {
+      const t = this.blobText(n.blob), base = this.textOfSet(this.bases(done, [n.id]))
+      if (acc === null || t === null || base === null) return null
+      acc = mergeText(base, t, acc, true).text
+      done.push(n.id)
+    }
+    return acc
+  }
+
+  blobText(h: string | null): string | null { return h === null ? "" : textOf(this.store.blob(h)) }
+
+  missingBlobs(): string[] {
+    const out = new Set<string>()
+    for (const [file] of this.byFile) {
+      const hs = this.heads(file)
+      for (const h of hs) if (h.blob && !this.store.hasBlob(h.blob)) out.add(h.blob)
+      if (hs.length > 1) for (const b of this.bases([hs[0].id], [hs[1].id])) if (b.blob && !this.store.hasBlob(b.blob)) out.add(b.blob)
+    }
+    for (const b of this.clashBlobs) if (this.store.hasBlob(b)) this.clashBlobs.delete(b); else out.add(b)
+    return [...out]
+  }
+
+  private putText(text: string): { blob: string; size: number } {
+    const bytes = enc.encode(text), blob = sha(bytes)
+    if (!this.store.hasBlob(blob)) this.store.putBlob(blob, bytes)
+    return { blob, size: bytes.length }
+  }
+
+  private merge2(x: Node, y: Node): Node | null {
+    const bs = this.bases([x.id], [y.id]), base = bs[bs.length - 1] ?? null
+    const parents = [x.id, y.id], clock = Math.max(x.clock, y.clock), at = Math.max(x.at, y.at)
+    const path = mergedPath(base?.path ?? null, x.path, y.path)
+    const ax = this.author(x)
+    const loser = (k: Conflict["kind"], extra: Partial<Conflict> = {}): Conflict =>
+      ({ id: "", kind: k, base: null, other: null, device: ax.device || "merge", at: ax.at, ...extra })
+    const node = (blob: string | null, size: number, conflict?: Conflict) => {
+      const c = conflict ? { ...conflict, id: sha(JSON.stringify([parents.sort(), conflict])).slice(0, 16) } : undefined
+      return made({ file: x.file, path, blob, size, parents, clock, device: "", at, ...(c ? { conflict: c } : {}) })
+    }
+    if (x.blob === y.blob) return node(x.blob, x.size)
+    const baseBlob = bs.length === 1 ? base!.blob : null
+    if (x.blob === null || y.blob === null) {
+      const kept = x.blob === null ? y : x
+      if (bs.length && bs.every((b) => b.blob === kept.blob)) return node(null, 0)
+      const del = this.author(x.blob === null ? x : y)
+      return node(kept.blob, kept.size, loser("deleted", { device: del.device || "merge", at: del.at }))
+    }
+    if (bs.length === 1 && baseBlob === x.blob) return node(y.blob, y.size)
+    if (bs.length === 1 && baseBlob === y.blob) return node(x.blob, x.size)
+    const kind = Math.max(x.size, y.size) > TEXT_MAX ? "binary" : kindOf(path, y.size < 1 << 20 ? this.store.blob(y.blob) : null)
+    if (kind !== "binary") {
+      if (!this.store.hasBlob(x.blob) || !this.store.hasBlob(y.blob) || bs.some((b) => b.blob && !this.store.hasBlob(b.blob))) return null
+      if (!this.store.blob(x.blob) || !this.store.blob(y.blob) || bs.some((b) => b.blob && !this.store.blob(b.blob))) return null
+      const bt = this.textOfSet(bs), xt = this.blobText(x.blob), yt = this.blobText(y.blob)
+      if (bt !== null && xt !== null && yt !== null) {
+        const m = (kind === "json" && mergeJson(bt, yt, xt, true)) || mergeText(bt, yt, xt, true)
+        const { blob, size } = this.putText(m.text)
+        if (!m.clash) return node(blob, size)
+        const keys = "keys" in m && Array.isArray(m.keys) ? { keys: m.keys as string[] } : {}
+        return node(blob, size, loser(kind === "json" && "keys" in m ? "json" : "text",
+          { base: this.putText(m.clash.base).blob, other: this.putText(m.clash.other).blob, lines: m.clash.lines, ...keys }))
+      }
+    }
+    return node(y.blob, y.size, loser("binary", { other: x.blob, copy: this.freeName(besideName(path, ax.device, ax.at), x.file) }))
+  }
+
+  private freeName(want: string, self: string): string {
+    const taken = (p: string) => [...this.named.get(keyOf(p)) ?? []].some((f) => f !== self && this.heads(f).some((h) => h.blob !== null && keyOf(h.path) === keyOf(p)))
+    let name = want
+    for (let n = 2; taken(name); n++) name = want.replace(/(\)(\.[^./]*)?)$/, ` ${n}$1`)
+    return name
+  }
+
+  mergeAll(): number {
+    let made_ = 0
+    for (const [file] of this.byFile) {
+      let hs = this.heads(file)
+      if (hs.length > 1 && !this.whole(file)) continue
+      while (hs.length > 1) {
+        const m = this.merge2(hs[0], hs[1])
+        if (!m) break
+        this.record(m)
+        made_++
+        if (m.conflict?.kind === "binary" && m.conflict.copy && m.conflict.other) {
+          const loser = this.nodes.get(m.parents.find((p) => this.nodes.get(p)!.blob === m.conflict!.other)!)!
+          this.record(made({ file: sha(`copy:${m.id}`), path: m.conflict.copy, blob: m.conflict.other, size: loser.size, parents: [], clock: m.clock, device: "", at: m.at }))
+        }
+        hs = this.heads(file)
+      }
+    }
+    const byName = new Map<string, Node[]>()
+    for (const [file] of this.byFile) { const h = this.head(file); if (h && h.blob !== null) { const k = keyOf(h.path); byName.set(k, [...(byName.get(k) ?? []), h]) } }
+    for (const hs of byName.values()) {
+      if (hs.length < 2) continue
+      hs.sort(order)
+      for (const h of hs.slice(1)) {
+        const a = this.author(h), to = this.freeName(besideName(h.path, a.device, a.at), h.file)
+        this.record(made({ file: h.file, path: to, blob: h.blob, size: h.size, parents: [h.id], clock: h.clock, device: "", at: h.at,
+          conflict: { id: sha(`name:${h.id}`).slice(0, 16), kind: "name", base: null, other: null, device: a.device, at: a.at, copy: h.path } }))
+        made_++
+      }
+    }
+    return made_
+  }
+
+  private fileAt(path: string): { file: string; head: Node } | null {
+    let gone: { file: string; head: Node } | null = null
+    for (const file of this.named.get(keyOf(path)) ?? []) {
+      const hs = this.heads(file).filter((h) => keyOf(h.path) === keyOf(path))
+      const live = hs.filter((h) => h.blob !== null).pop()
+      if (live) return { file, head: live }
+      if (this.heads(file).some((h) => h.blob !== null)) continue
+      const h = hs.pop()
+      if (h && (!gone || order(gone.head, h) < 0)) gone = { file, head: h }
+    }
+    return gone
+  }
+
+  private fresh(o: { file: string; path: string; blob: string | null; size: number; parents: string[]; from?: string; settles?: string[]; confirmed?: boolean }): Node {
+    const { from, settles, confirmed, ...rest } = o
+    return made({ ...rest, clock: ++this.clock, device: this.device, at: this.now(), ...(from ? { from } : {}), ...(settles ? { settles } : {}), ...(confirmed ? { confirmed: true as const } : {}) })
+  }
+
+  private keep(folder: Folder, path: string, hash: string): boolean {
+    if (this.store.hasBlob(hash)) return true
+    if (this.store.keepFile?.(hash, folder, path)) return true
+    const bytes = folder.read(path)
+    if (!bytes || sha(bytes) !== hash) return false
+    this.store.putBlob(hash, bytes)
+    return true
+  }
+
+  scan(paths?: string[], { from }: { from?: string } = {}): { changed: number; held: number; waiting: number } {
+    const all = !paths
+    const list = paths ? paths.map(norm).filter((p) => !unsynced(p)) : this.input.list().map((s) => norm(s.path)).filter((p) => !unsynced(p))
+    const now = new Map<string, FileStat | null>()
+    for (const p of list) now.set(p, this.input.stat(p))
+    if (all) for (const p of this.seen.keys()) if (!now.has(p)) now.set(p, null)
+    const seed = this.seen.size === 0 && all && this.nodes.size === 0
+    const joining = this.seen.size === 0 && all && this.nodes.size > 0
+    const gone: string[] = [], added: { path: string; st: FileStat; hash: string }[] = []
+    let changed = 0
+    for (const [p, st] of now) {
+      if (unsynced(p)) continue
+      const was = this.seen.get(p)
+      if (!st) { if (was) gone.push(p); continue }
+      if (was && was.size === st.size && was.mtime === st.mtime) continue
+      const hash = this.input.hash(p)
+      if (!hash) continue
+      if (was && was.hash === hash) { this.seen.set(p, { ...was, size: st.size, mtime: st.mtime }); continue }
+      if (!this.keep(this.input, p, hash)) continue
+      if (!was) { added.push({ path: p, st, hash }); continue }
+      const prev = this.nodes.get(was.node)
+      if (!prev) { added.push({ path: p, st, hash }); continue }
+      this.seen.set(p, { hash, node: this.adopt(prev, hash, p, st.size, from).id, size: st.size, mtime: st.mtime })
+      changed++
+    }
+    for (const a of added) {
+      const at = gone.findIndex((g) => this.seen.get(g)!.hash === a.hash)
+      let node: Node
+      if (at >= 0) {
+        const g = gone.splice(at, 1)[0], was = this.seen.get(g)!, prev = this.nodes.get(was.node)!
+        this.seen.delete(g)
+        node = this.record(this.fresh({ file: prev.file, path: a.path, blob: a.hash, size: a.st.size, parents: [prev.id], from }))
+      } else {
+        const there = this.fileAt(a.path)
+        const known = there && [...this.byFile.get(there.file)!].map((id) => this.nodes.get(id)!).filter((n) => n.blob === a.hash && keyOf(n.path) === keyOf(a.path)).sort(order).pop()
+        if (there && there.head.blob === a.hash) node = there.head
+        else if (known && (joining || there.head.blob !== null)) node = known
+        else if (there && joining && this.likest(there.file, a.hash)) node = this.record(this.fresh({ file: there.file, path: a.path, blob: a.hash, size: a.st.size, parents: [this.likest(there.file, a.hash)!.id], from }))
+        else if (there && !this.tracks(there.file)) node = this.record(this.fresh({ file: there.file, path: a.path, blob: a.hash, size: a.st.size, parents: there.head.blob === null ? this.heads(there.file).map((h) => h.id) : [], from }))
+        else {
+          const id = sha(`file:${keyOf(a.path)}`)
+          const taken = this.byFile.has(id)
+          const file = taken ? sha(`file:${keyOf(a.path)}:${this.device}:${this.clock + 1}`) : id
+          node = this.record(seed && !taken ? made({ file, path: a.path, blob: a.hash, size: a.st.size, parents: [], clock: 0, device: "", at: 0 })
+            : this.fresh({ file, path: a.path, blob: a.hash, size: a.st.size, parents: [], from }))
+        }
+      }
+      this.seen.set(a.path, { hash: a.hash, node: node.id, size: a.st.size, mtime: a.st.mtime })
+      changed++
+    }
+    let heldN = 0, waitingN = 0
+    const more = gone.some((g) => !this.going.has(g))
+    this.going = new Set(gone)
+    if (gone.length && more && !this.release) waitingN = gone.length
+    else if (gone.length) {
+      this.going = new Set()
+      const total = Math.max(this.seen.size, 1)
+      if (!this.release && gone.length > this.guard.files && gone.length / total > this.guard.max) {
+        this.held = { deletes: gone, since: this.now() }
+        this.going = new Set(gone)
+        heldN = gone.length
+        this.onLog(`held ${gone.length} deletes for your yes (sync.release)`)
+      } else {
+        for (const g of gone) {
+          const was = this.seen.get(g)!, prev = this.nodes.get(was.node)
+          this.seen.delete(g)
+          if (!prev) continue
+          const cur = this.current(prev)
+          if (cur.blob === null) continue
+          this.record(this.fresh({ file: prev.file, path: prev.path, blob: null, size: 0, parents: [prev.id], from, confirmed: this.release }))
+          changed++
+        }
+        if (this.release) { this.release = false; this.held = null }
+      }
+    }
+    this.deleting = waitingN
+    this.save()
+    return { changed, held: heldN, waiting: waitingN }
+  }
+
+  private likest(file: string, blob: string): Node | null {
+    const mine = this.blobText(blob)
+    if (mine === null) return null
+    const lines = (t: string) => t.split("\n").filter((l) => l.trim().length > 2)
+    const count = (t: string) => { const m = new Map<string, number>(); for (const l of lines(t)) m.set(l, (m.get(l) ?? 0) + 1); return m }
+    const have = count(mine), n = lines(mine).length
+    if (!n) return null
+    let best: Node | null = null, score = 0.5
+    for (const id of this.byFile.get(file) ?? []) {
+      const v = this.nodes.get(id)!, t = v.blob ? this.blobText(v.blob) : null
+      if (t === null) continue
+      let same = 0
+      for (const [l, k] of count(t)) same += Math.min(k, have.get(l) ?? 0)
+      const s = same / Math.max(n, lines(t).length)
+      if (s > score || (s === score && best && order(best, v) < 0)) { best = v; score = s }
+    }
+    return best
+  }
+
+  private tracks(file: string) {
+    for (const t of this.seen.values()) if (this.nodes.get(t.node)?.file === file) return true
+    return false
+  }
+
+  private current(n: Node): Node { return this.head(n.file) ?? n }
+
+  private adopt(prev: Node, hash: string, path: string, size: number, from?: string): Node {
+    const h = this.head(prev.file)
+    if (h && h.blob === hash && keyOf(h.path) === keyOf(path)) return h
+    for (const k of this.kids.get(prev.id) ?? []) { const n = this.nodes.get(k)!; if (n.blob === hash && keyOf(n.path) === keyOf(path)) return n }
+    return this.record(this.fresh({ file: prev.file, path, blob: hash, size, parents: [prev.id], from }))
+  }
+
+  foreign(path: string, bytes: Uint8Array, parent: string | null, from: string): Node {
+    const blob = sha(bytes)
+    if (!this.store.hasBlob(blob)) this.store.putBlob(blob, bytes)
+    const p = parent ? this.nodes.get(parent) : null
+    if (p) return this.record(this.fresh({ file: p.file, path: norm(path), blob, size: bytes.length, parents: [p.id], from }))
+    const there = this.fileAt(norm(path))
+    if (there) return this.record(this.fresh({ file: there.file, path: norm(path), blob, size: bytes.length, parents: there.head.blob === null ? [there.head.id] : [], from }))
+    return this.record(this.fresh({ file: sha(`file:${keyOf(path)}:${from}:${this.clock + 1}`), path: norm(path), blob, size: bytes.length, parents: [], from }))
+  }
+
+  adoptFile(path: string, hash: string, size: number, mtime: number): boolean {
+    const there = this.fileAt(norm(path))
+    if (!there || there.head.blob !== hash) return false
+    const t = { hash, node: there.head.id, size, mtime }
+    this.wrote.set(there.head.path, t)
+    if (this.shadow) return true
+    this.seen.set(there.head.path, t)
+    this.save()
+    return true
+  }
+
+  forget(path: string) {
+    const p = norm(path)
+    this.wrote.delete(p)
+    this.seen.delete(p)
+    this.save()
+  }
+
+  settle(file: string, ids: string[]): Node | null {
+    const h = this.head(file)
+    if (!h) return null
+    return this.record(this.fresh({ file, path: h.path, blob: h.blob, size: h.size, parents: [h.id], settles: ids }))
+  }
+
+  conflicts(): { file: string; path: string; node: string; conflict: Conflict }[] {
+    const out: { file: string; path: string; node: string; conflict: Conflict }[] = []
+    for (const [file] of this.byFile) {
+      const h = this.head(file)
+      if (!h) continue
+      const settled = new Set<string>(), seenOther = new Set<string>()
+      const anc = [...this.ancestors(h.id)].flatMap((id) => this.nodes.get(id) ?? []).sort((a, b) => order(b, a))
+      for (const n of anc) for (const s of n.settles ?? []) settled.add(s)
+      for (const n of anc) {
+        const c = n.conflict
+        if (!c || settled.has(c.id)) continue
+        const key = `${c.kind}:${c.other ?? c.copy ?? c.id}`
+        if (seenOther.has(key)) continue
+        seenOther.add(key)
+        out.push({ file, path: h.path, node: n.id, conflict: c })
+      }
+    }
+    return out
+  }
+
+  materialize(): { wrote: number; held: number } {
+    const target = new Map<string, Node>()
+    for (const [file] of this.byFile) { const h = this.head(file); if (h) target.set(file, h) }
+    const at = new Map<string, Tracked & { path: string }>()
+    for (const [p, t] of this.wrote) { const n = this.nodes.get(t.node); if (n) at.set(n.file, { ...t, path: p }) }
+    const deletes = [...target.values()].filter((h) => h.blob === null && at.has(h.file) && !h.confirmed)
+    const total = Math.max(this.wrote.size, 1)
+    if (!this.release && deletes.length > this.guard.files && deletes.length / total > this.guard.max) {
+      if (!this.held) { this.held = { deletes: deletes.map((d) => d.path), since: this.now() }; this.onLog(`held ${deletes.length} deletes for your yes (sync.release)`) }
+      this.save()
+      return { wrote: 0, held: deletes.length }
+    }
+    let wrote = 0
+    const changedHere = (t: Tracked & { path: string }) => {
+      const st = this.folder.stat(t.path)
+      return !!st && (st.size !== t.size || st.mtime !== t.mtime) && this.folder.hash(t.path) !== t.hash
+    }
+    let pending: Node[] = []
+    for (const h of target.values()) {
+      const now = at.get(h.file)
+      if (now && now.node === h.id) continue
+      if (now && now.hash === h.blob && now.path === h.path) { this.wrote.set(h.path, { ...now, node: h.id }); continue }
+      if (now && changedHere(now)) continue
+      if (h.blob === null) { if (now) { this.folder.remove(now.path); this.wrote.delete(now.path); at.delete(h.file); wrote++ } continue }
+      pending.push(h)
+    }
+    const moving = () => new Set(pending.map((h) => h.file))
+    for (let round = 0; pending.length && round < pending.length * 3 + 3; round++) {
+      const left: Node[] = [], away = moving()
+      let progress = false
+      for (const h of pending) {
+        const now = at.get(h.file), there = this.wrote.get(h.path), thereFile = there && this.nodes.get(there.node)?.file
+        if (there && thereFile !== h.file) {
+          if (thereFile && away.has(thereFile)) { left.push(h); continue }
+          continue
+        }
+        if (!there && !now && this.folder.stat(h.path) && !this.shadow) continue
+        if (!this.store.hasBlob(h.blob!) && !(now && now.hash === h.blob)) continue
+        let st: FileStat | null
+        if (now && now.path !== h.path && now.hash === h.blob) st = this.folder.move(now.path, h.path)
+        else {
+          const file = h.size > 1 << 20 && this.folder.copyIn ? this.store.blobFile?.(h.blob!) : null
+          if (file) { st = this.folder.copyIn!(h.path, file, h.blob!); if (st) this.store.placed?.(h.blob!, this.folder, h.path) }
+          else {
+            const bytes = this.store.blob(h.blob!)
+            if (!bytes) continue
+            st = this.folder.write(h.path, bytes)
+          }
+          if (now && now.path !== h.path) this.folder.remove(now.path)
+        }
+        if (now) this.wrote.delete(now.path)
+        if (st) { const t = { hash: h.blob!, node: h.id, size: st.size, mtime: st.mtime }; this.wrote.set(h.path, t); at.set(h.file, { ...t, path: h.path }) }
+        wrote++; progress = true
+      }
+      pending = left
+      if (!progress && pending.length) {
+        const h = pending[0], now = at.get(h.file)!
+        const there = this.wrote.get(h.path)!, f = this.nodes.get(there.node)!.file, occupant = at.get(f)!
+        const tmp = `${occupant.path}.${there.node.slice(0, 8)}.sync-part`
+        const st = this.folder.move(occupant.path, tmp)
+        this.wrote.delete(occupant.path)
+        if (st) { const t = { ...occupant, size: st.size, mtime: st.mtime }; this.wrote.set(tmp, t); at.set(f, { ...t, path: tmp }) }
+        void now
+      }
+    }
+    if (this.release) { this.release = false; this.held = null }
+    this.save()
+    return { wrote, held: 0 }
+  }
+
+  step(paths?: string[]) {
+    const s = this.scan(paths)
+    if (DEBUG) this.audit("scan")
+    const m = this.mergeAll()
+    const w = this.materialize()
+    if (DEBUG) this.audit("materialize")
+    return { changed: s.changed, merged: m, wrote: w.wrote, held: s.held + w.held, waiting: s.waiting }
+  }
+
+  releaseHeld(yes: boolean) {
+    if (!this.held) return 0
+    const n = this.held.deletes.length
+    if (yes) this.release = true
+    else {
+      for (const p of this.held.deletes) { const t = this.seen.get(p); if (t && this.input === this.folder) this.wrote.delete(p) }
+      this.held = null
+    }
+    this.save()
+    return n
+  }
+
+  audit(where: string) {
+    const by = new Map<string, string>()
+    for (const [p, t] of this.wrote) { const f = this.nodes.get(t.node)?.file ?? "?"; if (by.has(f)) throw new Error(`${this.device} after ${where}: file ${f.slice(0, 6)} at ${by.get(f)} and ${p}`); by.set(f, p) }
+  }
+
+  status(): Status {
+    let files = 0, heads = 0, merging = 0
+    for (const [file] of this.byFile) { const h = this.heads(file); heads += h.length; if (h.length > 1) merging++; else if (h[0]?.blob) files++ }
+    let waiting = 0
+    for (const w of this.waiting.values()) waiting += w.size
+    return { device: this.device, vector: this.vector(), files, heads, merging, waiting, missingBlobs: this.missingBlobs().length,
+      held: this.held ? { deletes: this.held.deletes.length, since: this.held.since } : null, conflicts: this.conflicts().length, deleting: this.deleting }
+  }
+
+  snapshot(): Map<string, string> {
+    const out = new Map<string, string>()
+    for (const [file] of this.byFile) { const h = this.head(file); if (h && h.blob) out.set(h.path, h.blob) }
+    return out
+  }
+}
+
+/** The later of two versions: Lamport clock, then device, then id; never the wall clock. */
+export function order(a: Node, b: Node) {
+  return a.clock - b.clock || (a.device < b.device ? -1 : a.device > b.device ? 1 : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+}
+
+function mergedPath(base: string | null, x: string, y: string) {
+  if (x === y) return x
+  if (base !== null && x === base) return y
+  if (base !== null && y === base) return x
+  return y
+}
+
+export const textBytes = (s: string) => enc.encode(s)

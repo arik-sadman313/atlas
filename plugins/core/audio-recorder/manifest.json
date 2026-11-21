@@ -1,0 +1,15 @@
+{
+  "id": "audio-recorder",
+  "icon": "mic",
+  "category": "writing",
+  "offByDefault": true,
+  "name": "Audio recorder",
+  "description": "Record from the microphone into the note you're writing: the recording is saved as an attachment, embedded at the cursor and transcribed under it on this machine (Apple's on-device speech recognition on macOS 26, nothing to install; or whisper, when it's there: whisper.cpp on the GPU, else openai-whisper).",
+  "settings": {
+    "transcribe": { "type": "boolean", "default": true, "label": "Transcribe recordings", "description": "what was said, written under each recording; on this machine" },
+    "auto": { "type": "boolean", "default": true, "when": "transcribe", "label": "Transcribe at once", "description": "right after it's recorded, else only when you ask (Transcribe audio)" },
+    "engine": { "type": "enum", "values": ["auto", "apple", "whisper"], "labels": { "auto": "Automatic", "apple": "Apple's speech recognition", "whisper": "Whisper" }, "default": "auto", "when": "transcribe", "label": "Transcriber", "description": "automatic: Apple's on this machine when it has it (macOS 26), else whisper when it's installed (whisper.cpp first: many times faster)" },
+    "model": { "type": "enum", "values": ["tiny", "base", "small", "medium", "turbo"], "when": { "engine": ["auto", "whisper"] }, "unset": "Automatic", "label": "Whisper model", "description": "bigger is better and slower; left out, the best one already downloaded (whisper.cpp: turbo, medium, small, base, tiny; openai-whisper: small, base, tiny)" },
+    "language": { "type": "string", "when": "transcribe", "unset": "Automatic", "label": "Language", "description": "a code like en or pt; left out, Apple's uses the Mac's language and whisper detects it" }
+  }
+}

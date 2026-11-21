@@ -1,0 +1,9 @@
+{
+  "id": "html",
+  "icon": "app-window",
+  "category": "formats",
+  "alwaysOn": true,
+  "name": "HTML pages",
+  "forAgents": "A claude.ai artifact or mini-app the user wants here: write its HTML as a `.html` file; it runs as is (`vau docs html`).",
+  "description": "Interactive pages: an .html file runs in a sandbox (no network, no reach into the app), reads the vault's files and tables through a small bridge, and ![[Spending.html]] shows one in a note."
+}

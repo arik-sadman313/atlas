@@ -1,0 +1,838 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
+import { catalogOf, type OpEntry } from "./contracts/ops.ts"
+import { camel, flagOf, kebab, opDoc, restarting, usage as opUsage } from "./ops.ts"
+import { brief } from "./words.ts"
+import { distance } from "./spelling.ts"
+import { EVENT_TYPES } from "./events.ts"
+import { gitEnv } from "./gitenv.ts"
+import { request } from "./clihttp.ts"
+import { servingOf } from "./serving.ts"
+import { TEST_HEADER, inTestRun, testRunId } from "./testrun.ts"
+import { isObj } from "./values.ts"
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const DEFAULT_URL = "http://127.0.0.1:8793"
+const RESTART_RETRY_MS = 60_000
+const COMING_BACK_MS = 30_000
+const UPLOAD_MOST = 50e6
+
+export type Obj = Record<string, unknown>
+export type Args = { _: string[]; flags: Record<string, string | true>
+  raw?: string[] }
+export type Result = { data: unknown; text: string; code?: number }
+export type Api = (method: string, route: string, body?: unknown) => Promise<{ status: number; body: unknown }>
+export type Command = {
+  name: string
+  sub?: string
+  summary: string
+  usage: string
+  help: string
+  bool?: string[]
+  after?: string
+  run: (a: Args, c: Ctx) => Promise<Result>
+}
+
+export type PluginCli = {
+  commands?: Command[]
+  ops?: Record<string, Local>
+}
+
+export class CliError extends Error {
+  usage: boolean
+  refused = false
+  constructor(message: string, usage = false) {
+    super(message)
+    this.usage = usage
+  }
+}
+
+export const done = (data: unknown, text: string): Result => ({ data, text })
+export const flag = (a: Args, k: string) => { const v = a.flags[k]; return typeof v === "string" ? v : undefined }
+export const need = (v: string | undefined, what: string, usage: string) => {
+  if (!v) throw new CliError(`${what} is missing. Usage: ${usage}`, true)
+  return v
+}
+
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- a JSON text's value, for the caller's schema to parse
+function parseJson(s: string): unknown {
+  try {
+    return JSON.parse(s)
+  } catch (e) {
+    throw new CliError(`that isn't JSON (${e instanceof Error ? e.message : String(e)})`)
+  }
+}
+
+export const userData = (env: Record<string, string | undefined> = process.env, platform: string = process.platform) => env.VAULTITE_USER_DATA || (
+  platform === "darwin" ? path.join(os.homedir(), "Library", "Application Support", "Vaultite")
+  : platform === "win32" ? path.join(env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Vaultite")
+  : path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "Vaultite"))
+
+export function servers(env: Record<string, string | undefined> = process.env, cwd = process.cwd()): string[] {
+  const data = userData(env)
+  type Known = { path: string; port: number; open?: boolean; last?: number }
+  let known: Known[] = []
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(data, "vaults.json"), "utf8"))
+    known = (Array.isArray(v.vaults) ? v.vaults : []).filter((x: Known) => x && typeof x.path === "string" && Number.isInteger(x.port))
+  } catch { /* no desktop app here */ }
+  const real = (p: string) => { try { return fs.realpathSync(p) } catch { return path.resolve(p) } }
+  const inside = (dir: string, root: string) => dir === root || dir.startsWith(root + path.sep)
+  const here = [cwd, env.VAULTITE_VAULT].filter((x): x is string => !!x).map(real)
+  const url = (k: Known) => `http://127.0.0.1:${servingOf(k.path)?.port ?? k.port}`
+  const vaultOf = (dir: string): string | null => fs.existsSync(path.join(dir, ".vaultite")) ? dir : path.dirname(dir) === dir ? null : vaultOf(path.dirname(dir))
+  const served = here.map(vaultOf).flatMap((v) => { const s = v ? servingOf(v) : null; return s ? [`http://127.0.0.1:${s.port}`] : [] })
+  const mine = known.filter((k) => here.some((h) => inside(h, real(k.path))))
+  const others = known.filter((k) => !mine.includes(k) && k.open).sort((a, b) => (b.last ?? 0) - (a.last ?? 0))
+  return [...new Set([...served, ...mine.map(url), DEFAULT_URL, ...others.map(url)])]
+}
+
+export function homeEnv(env: Record<string, string | undefined>, e: { home?: true }): Record<string, string | undefined> | null {
+  const home = env.VAULTITE_HOME?.trim().replace(/\/+$/, "") ?? "", as = env.VAULTITE_HOME_AS?.trim() ?? "", t = env.VAULTITE_TERMINAL ?? ""
+  if (!e.home || !/^https?:\/\//.test(home) || home === env.VAULTITE_URL?.replace(/\/+$/, "")) return null
+  return { ...env, VAULTITE_URL: home, ...(t && as && !t.includes("@") ? { VAULTITE_TERMINAL: `${t}@${as}` } : {}) }
+}
+
+export type Stdin = (implicit?: boolean) => Promise<string>
+export type CtxOptions = { url?: string; api?: Api; env?: Record<string, string | undefined>; stdin?: Stdin
+  client?: string; agent?: string }
+
+export class Ctx {
+  url: string
+  env: Record<string, string | undefined>
+  api: Api
+  stdin: Stdin
+  command = ""
+  private next: string[]
+  fixed: boolean
+  private client: string
+  private agent: string | undefined
+
+  constructor(o: CtxOptions = {}) {
+    this.env = o.env ?? process.env
+    const said = o.url ?? this.env.VAULTITE_URL
+    this.fixed = !!said
+    const found = said || o.api ? [] : servers(this.env)
+    this.url = (said ?? found[0] ?? DEFAULT_URL).replace(/\/+$/, "")
+    this.next = found.slice(1)
+    this.api = o.api ?? ((m, r, b) => this.fetch(m, r, b))
+    this.stdin = o.stdin ?? readStdin
+    this.client = o.client ?? "cli"
+    this.agent = o.agent
+  }
+
+  private async fetch(method: string, route: string, body?: unknown) {
+    let res: { status: number; type: string; text: string }
+    for (;;) {
+      try {
+        res = await request(`${this.url}/api/${route}`, method, body === undefined ? undefined : JSON.stringify(body), this.who())
+        this.next = []
+        break
+      } catch (e) {
+        const refused = e instanceof Error && "code" in e && e.code === "ECONNREFUSED"
+        if (refused && !this.next.length && this.comingBack()) { await new Promise((ok) => setTimeout(ok, 500)); continue }
+        if (!this.next.length || !refused) { this.next = []; throw Object.assign(new CliError(this.down()), { refused }) }
+        this.url = this.next.shift()!
+      }
+    }
+    let out: unknown = res.text
+    if (res.type.includes("json")) {
+      try { out = JSON.parse(res.text) } catch { /* as text */ }
+    }
+    return { status: res.status, body: out }
+  }
+
+  private patience: number | null = null
+  private told = false
+  private comingBack() {
+    if (this.env.VAULTITE !== "1") return false
+    this.patience ??= Date.now() + COMING_BACK_MS
+    if (Date.now() >= this.patience) return false
+    if (!this.told && Date.now() >= this.patience - COMING_BACK_MS + 2000 && process.stderr.isTTY) {
+      this.told = true
+      process.stderr.write(`vau: waiting for Vaultite at ${this.url} to come back (restarting?)\n`)
+    }
+    return true
+  }
+
+  private who(): Record<string, string> {
+    const agent = this.agentName()
+    const actor = process.env.VAULTITE_ACTOR
+    return { "X-Vaultite-Client": this.client, ...(agent ? { "X-Vaultite-Agent": agent } : {}), ...(this.command ? { "X-Vaultite-Command": this.command } : {}),
+      ...(actor ? { "X-Vaultite-Actor": actor } : {}), ...(agent ? this.session() : {}),
+      ...(inTestRun(this.env) ? { [TEST_HEADER]: testRunId(this.env) || "test" } : {}) }
+  }
+
+  private session(): Record<string, string> {
+    const e = this.env, out: Record<string, string> = {}
+    const put = (k: string, v: string | undefined) => { if (v && /^[\w.:@/ -]{1,120}$/.test(v)) out[k] = v }
+    put("X-Vaultite-Terminal", e.VAULTITE_TERMINAL)
+    put("X-Vaultite-Session", e.CLAUDE_CODE_SESSION_ID ?? e.CODEX_SESSION_ID)
+    put("X-Vaultite-Model", e.ANTHROPIC_MODEL ?? e.CLAUDE_MODEL)
+    put("X-Vaultite-Effort", e.CLAUDE_EFFORT ?? e.CLAUDE_CODE_EFFORT_LEVEL)
+    return out
+  }
+
+  agentName(): string {
+    const e = this.env
+    return this.agent ?? (e.CLAUDECODE ? "claude-code" : Object.keys(e).some((k) => k.startsWith("CODEX_") && k !== "CODEX_HOME") ? "codex"
+      : e.OPENCODE ? "opencode" : e.CURSOR_AGENT ? "cursor" : e.GEMINI_CLI ? "gemini" : "")
+  }
+
+  down() {
+    return `Vaultite isn't answering at ${this.url}. Open the app, or start it with \`npm start\` in ${ROOT} (or its ` +
+      "service: vau service install), or set VAULTITE_URL to the server that's running."
+  }
+
+  async op(e: { id: string; kind: string }, query: string, params: unknown, o: { resend?: boolean } = {}): Promise<{ status: number; body: unknown }> {
+    const until = Date.now() + (o.resend === false ? 0 : RESTART_RETRY_MS)
+    let resent = false
+    for (;;) {
+      let r: { status: number; body: unknown } | null = null, failed: CliError | null = null
+      try { r = await this.api("POST", `ops/${encodeURIComponent(e.id)}${query}`, params) } catch (err) { if (!(err instanceof CliError)) throw err; failed = err }
+      if (r && !restarting(r.status, r.body)) return r
+      const unsent = !!failed?.refused
+      if (Date.now() >= until || !(unsent || (e.kind === "read" && !resent))) { if (failed) throw failed; return r! }
+      if (!unsent) resent = true
+      await new Promise((ok) => setTimeout(ok, 1000))
+    }
+  }
+
+  // oxlint-disable-next-line anti-slop/no-unknown-returns, anti-slop/no-unknown-parameters -- the server's answer, for the caller to parse; params are JSON
+  async callOp(e: { id: string; kind: string }, query: string, params: unknown): Promise<unknown> {
+    return this.answer(await this.op(e, query, params), `ops/${e.id}`)
+  }
+
+  // oxlint-disable-next-line anti-slop/no-unknown-returns, anti-slop/no-unknown-parameters -- the server's answer, for the caller to parse; a body is JSON
+  async call(method: string, route: string, body?: unknown): Promise<unknown> {
+    return this.answer(await this.api(method, route, body), route)
+  }
+
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- the server's answer, for the caller to parse
+  private answer(r: { status: number; body: unknown }, route: string): unknown {
+    if (r.status >= 400) {
+      const msg = (isObj(r.body) && "error" in r.body ? r.body.error : String(r.body).slice(0, 300)) || `the server answered ${r.status}, with no reason`
+      if (r.status === 404 && msg === "not found") throw new CliError(`the server has no /api/${route.split("?")[0]} (an older version? restart it)`)
+      throw new CliError(String(msg))
+    }
+    return r.body
+  }
+
+  async up() {
+    try {
+      await this.api("GET", "ui")
+      return true
+    } catch (e) {
+      if (e instanceof CliError) return false
+      throw e
+    }
+  }
+}
+
+let piped: Promise<string> | null = null
+const UNASKED_MS = 250
+
+function readStdin(implicit = false): Promise<string> {
+  if (process.stdin.isTTY) {
+    if (implicit) return Promise.resolve("")
+    return Promise.reject(new CliError("give the text with --from <file> or as an argument, or pipe it in: `echo text | vau ...`"))
+  }
+  piped ??= new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let socket = false
+    // (Windows: any pipe, which fstat may not even describe, as a socket: a spawned process' stdin is one)
+    const win = process.platform === "win32"
+    try { const st = fs.fstatSync(0); socket = st.isSocket() || (win && !st.isFile() && !st.isCharacterDevice()) } catch { socket = win }
+    const quiet = implicit && socket ? setTimeout(() => { process.stdin.destroy(); resolve("") }, UNASKED_MS) : null
+    process.stdin.on("data", (c: Buffer) => { if (quiet) clearTimeout(quiet); chunks.push(c) })
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
+    process.stdin.on("error", (e: NodeJS.ErrnoException) => (e.code === "EBADF" || e.code === "EPIPE" ? resolve("") : reject(e)))
+  })
+  return piped
+}
+
+export const COMMANDS: Command[] = [{
+  name: "sandbox",
+  summary: "Make the sandbox (a made-up vault to try the app in, dated as of today) in a folder.",
+  usage: "vau sandbox <folder> [--today YYYY-MM-DD]",
+  help: `Writes the sandbox into <folder>: the sample vault (examples/vault) with its dates moved to today, plus the
+weeks of sleep, meals, workouts, reading and practice before today. The folder must be new, empty, or a
+sandbox made before (it's replaced). Then open it as a vault (the desktop app: Help > Open sandbox vault does both), or
+serve it: VAULTITE_VAULT=<folder> npm start. Never your own vault: it's made up. No server needed.
+
+  vau sandbox /tmp/vaultite-sandbox
+  vau sandbox ~/Sandbox --today 2026-12-24`,
+  run: async (a) => {
+    const dir = a._[0]
+    if (!dir) throw new CliError("which folder? vau sandbox <folder>")
+    const { makeSandbox, localToday } = await import("./sandbox.ts")
+    const r = makeSandbox(local(dir), flag(a, "today") ?? localToday())
+    return done({ path: path.resolve(dir), ...r }, `Made the sandbox in ${dir} (${r.files} files, as of ${r.today}).`)
+  },
+}, {
+  name: "service",
+  summary: "Keep this checkout's server running on this machine: a launchd agent on macOS, a systemd user unit on Linux, a scheduled task on Windows.",
+  usage: "vau service install --vault <folder> [--port <n>] [--host <address>] [--updates <branch>] [--print] | vau service status | vau service uninstall",
+  bool: ["print"],
+  help: `install writes the job and starts it: on macOS ~/Library/LaunchAgents/app.vaultite.server.plist (at login,
+logs in ~/Library/Logs/vaultite.log), on Linux ~/.config/systemd/user/vaultite.service (at boot: it turns on linger,
+so it runs with nobody logged in, as on a VPS; logs: journalctl --user -u vaultite), on Windows the task "Vaultite
+server" in Task Scheduler (at login, with no window; it runs %LOCALAPPDATA%\\Vaultite\\service.js, logs in
+%LOCALAPPDATA%\\Vaultite\\Logs\\vaultite.log). It runs this checkout's server.ts with the Node running vau, serving
+--vault (else VAULTITE_VAULT) on 127.0.0.1:8793 unless --port/--host say, and starts it again when it stops. Install
+again after moving the checkout or Node. --print shows the file without writing it. Reach it from your other devices
+with Tailscale Serve (\`tailscale serve --bg --https=8447 http://127.0.0.1:8793\`): SECURITY.md. status says whether
+it's installed, running and answering. uninstall stops it and removes the files.
+
+--updates <branch> has the server follow that branch of origin: every 3 minutes (vau update: now), a newer commit whose
+CI tests passed on this machine's OS (ci.yml's test job for it; another OS's failure is only said) is taken. On macOS
+and Linux it's made into a read-only folder of its own (a code root, in the checkout's data/code.noindex or data/code,
+installed, built and its server booted once), and the job runs bin/vaultite-server, which starts the newest root that
+works (else the checkout): the server takes the new web app in place, or restarts onto the root when its own code
+changed. The checkout is then only where it came from: work in it as in any other. On Windows the checkout is
+fast-forwarded (it must be clean), installed and built in place. A restart is never during an agent's call to the
+desktop app's browser, nor within a minute of its last one (vau sends a call that never reached the server again). A
+failure keeps the version before (vau errors says why); a root whose server stops as it starts three times is never run
+again. vau version shows what runs and what the updates are doing; the log, each change and why. A service installed
+before code roots runs the checkout in place until it's installed again.
+
+  vau service install --vault ~/Vault
+  vau service install --vault ~/Vault --updates main
+  vau service install --vault ~/Vault --print
+  vau service status
+  vau service uninstall`,
+  run: async (a, c) => {
+    const what = a._[0]
+    if (what !== "install" && what !== "uninstall" && what !== "status") throw new CliError("install, status or uninstall? vau service install --vault <folder>")
+    const S = await import("./service.ts")
+    if (what === "status") {
+      const st = S.serviceStatus()
+      const answering = st.installed && await request(`${st.url}/api/ui`, "GET").then((r) => r.status < 500, () => false)
+      const yes = (b: boolean) => (b ? "yes" : "no")
+      return done({ ...st, answering }, st.installed
+        ? [`Installed: ${st.file}`, `Vault: ${st.vault}`, `Running: ${yes(st.running)}`, `Answering at ${st.url}: ${yes(answering)}`, `Logs: ${st.log}`].join("\n")
+        : "Not installed (vau service install --vault <folder>).")
+    }
+    const vault = flag(a, "vault") ?? c.env.VAULTITE_VAULT
+    const port = flag(a, "port") !== undefined ? Number(flag(a, "port")) : undefined
+    if (port !== undefined && !(Number.isInteger(port) && port > 0 && port < 65536)) throw new CliError("--port is a port number")
+    const updates = flag(a, "updates")
+    if (updates !== undefined && !/^[\w][\w./-]*$/.test(updates)) throw new CliError("--updates is a branch's name: --updates main")
+    if (updates && !fs.existsSync(path.join(ROOT, ".git"))) throw new CliError(`--updates needs a git checkout, and ${ROOT} isn't one`)
+    const o = { root: ROOT, node: S.stableNode(process.execPath, c.env.PATH), vault: vault ? local(vault) : "", port, host: flag(a, "host"), updates }
+    if (what === "uninstall") {
+      const r = S.uninstallService(process.platform, o)
+      return done({ file: r.file, failed: r.failed }, [`Removed ${r.file}.`, ...r.failed].join("\n"))
+    }
+    if (!vault) throw new CliError("which vault? vau service install --vault <folder>")
+    const [maj, min] = process.versions.node.split(".").map(Number)
+    if (maj < 23 || (maj === 23 && min < 6)) throw new CliError(`this is Node ${process.versions.node}; the server needs 23.6 or later: run vau with that one (path/to/node bin/vau service install ...)`)
+    if (!fs.existsSync(o.vault)) throw new CliError(`no folder ${o.vault}`)
+    if (a.flags.print) {
+      const p = S.servicePlan(process.platform, o)
+      return done({ file: p.file, text: p.text }, [p, ...p.more ?? []].map((f) => `${f.file}:\n\n${f.text}`).join("\n"))
+    }
+    const r = S.installService(process.platform, o)
+    const url = `http://${o.host ?? "127.0.0.1"}:${port ?? 8793}`
+    return done({ file: r.file, log: r.log, url, failed: r.failed },
+      [`Wrote ${r.file} and started it: ${url} serves ${o.vault}${updates ? `, following ${updates}` : ""}. Logs: ${r.log}`, ...r.failed.map((f) => `Couldn't: ${f}`)].join("\n"))
+  },
+}, {
+  name: "wsl",
+  summary: "Windows: put vau in WSL's distros, where it runs this vau through WSL's interop.",
+  usage: "vau wsl install [--distro <name>]",
+  after: "service",
+  help: `Run on Windows (PowerShell or cmd). Links ~/.local/bin/vau in each WSL distro (or --distro's) to a script in
+%LOCALAPPDATA%\\Vaultite\\wsl that runs Windows' vau through WSL's interop: it reaches the server on Windows'
+127.0.0.1 whatever WSL's networking, VAULTITE_* variables cross over, paths of WSL's files among its arguments are
+passed as Windows sees them, and paths it prints are WSL's (/mnt/c/...). Vaultite's own WSL terminals have it already.
+Never over another program's vau.
+
+  vau wsl install
+  vau wsl install --distro Ubuntu`,
+  run: async (a) => {
+    if (a._[0] !== "install") throw new CliError("vau wsl install [--distro <name>]")
+    if (process.platform !== "win32") throw new CliError(process.env.WSL_DISTRO_NAME ? "run it on Windows (PowerShell or cmd): it puts Windows' vau in this distro" : "WSL is Windows'")
+    const { distros } = await import("./wsl.ts")
+    const W = await import("./wslvau.ts")
+    const all = await distros(), want = flag(a, "distro")
+    if (want && !all.some((d) => d.toLowerCase() === want.toLowerCase())) throw new CliError(`no distro ${want} (WSL has: ${all.join(", ") || "none"})`)
+    const list = want ? all.filter((d) => d.toLowerCase() === want.toLowerCase()) : all
+    if (!list.length) throw new CliError("WSL has no distros here (wsl --install)")
+    const dir = W.writeWslVau()
+    const rs = []
+    for (const d of list) rs.push(await W.installInDistro(d, dir))
+    return done(rs, rs.map((r) => `${r.distro}: ${r.did}`).join("\n"))
+  },
+}, {
+  name: "events",
+  summary: "Print the vault's events as they happen (files changed, operations done), one JSON object per line.",
+  usage: "vau events [--type <t1,t2>] [--path <prefix>] [--once] [--timeout <s>] [--after <cursor>]",
+  bool: ["once"],
+  help: `Prints each event (core/events.ts) as one line of JSON until stopped: {type, seq, t, cursor, ...}. --type
+keeps some types or areas (file is every file event), --path the events about paths starting with a prefix. --once
+prints the first and stops; --timeout ends after that many seconds (with --once and nothing come by then, exit 1);
+--json prints them as one list when it ends. --after a cursor (an event's) first prints what came after it, so a
+script that restarts misses nothing. Types:
+${Object.entries(EVENT_TYPES).map(([k, v]) => `  ${k.padEnd(13)} ${v}`).join("\n")}
+<plugin>.<x>  a plugin's own
+
+vau events --type file.changed --path Notes/
+vau events --once --type op.done --timeout 60
+vau events | while read -r ev; do echo "$ev" | jq -r .type; done`,
+  run: async (a, c) => {
+    const once = !!a.flags.once
+    const limit = flag(a, "timeout") !== undefined ? Number(flag(a, "timeout")) : null
+    if (limit !== null && !(limit >= 0)) throw new CliError("--timeout is a number of seconds")
+    const end = limit === null ? Infinity : Date.now() + limit * 1000
+    let after = flag(a, "after") ?? null
+    const kept: unknown[] = []
+    for (;;) {
+      const left = Math.max(0, Math.min(60, (end - Date.now()) / 1000))
+      const r = (await answers()).Waited.parse(await c.call("POST", "ops/events.wait", { types: flag(a, "type") ?? flag(a, "types"), path: flag(a, "path"), after, timeout: left }))
+      after = r.cursor ?? after
+      if (r.missed) process.stderr.write("vau events: some events were let go of before they could be printed\n")
+      for (const ev of r.events ?? []) {
+        if (once) return done(ev, JSON.stringify(ev))
+        if (a.flags.json) kept.push(ev)
+        else process.stdout.write(JSON.stringify(ev) + "\n")
+      }
+      if (Date.now() >= end) break
+    }
+    if (once) throw new CliError(`no matching event within ${limit} s`)
+    return done(kept, "")
+  },
+}]
+
+/** A path on this computer as the shell gave it (~ is home: PowerShell and cmd leave it to vau). */
+const local = (p: string) => path.resolve(String(p).replace(/^~(?=[\\/]|$)/, os.homedir()))
+
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- out and code read the server's answer, each parsing what it reads
+export type Local = { params?: (p: Obj, c: Ctx, extra: string[]) => Promise<Obj>; extra?: number; out?: (result: unknown, p: Obj, extra: string[]) => string; code?: (result: unknown) => number | Promise<number>
+  again?: (p: Obj, ms: number) => Obj | null
+  gone?: (p: Obj, why: string, ms: number) => { result: unknown; text: string } | null }
+const LOCAL: Record<string, Local> = {
+  "app.version": {
+    params: async (p) => {
+      const given = typeof p.commit === "string" ? p.commit.trim() : ""
+      if (!given || /^[0-9a-f]{40}$/.test(given) || !/^[\w./~^-]+$/.test(given) || given.startsWith("-")) return p
+      const { execFileSync } = await import("node:child_process")
+      try { return { ...p, commit: execFileSync("git", ["rev-parse", "--verify", "--quiet", `${given}^{commit}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: gitEnv() }).trim() || given } }
+      catch { return p }
+    },
+    code: async (r) => { const l = (await answers()).Live.safeParse(r); return l.success && !l.data.live.live ? 1 : 0 },
+    again: (p, ms) => {
+      const left = Math.round(Number(p.timeout ?? 900) - ms / 1000)
+      return p.wait && left > 5 ? { ...p, timeout: left, waited: Number(p.waited ?? 0) + Math.round(ms / 1000) } : null
+    },
+    gone: (p, why, ms) => {
+      if (!p.wait || typeof p.commit !== "string") return null
+      const live = { commit: p.commit, live: false, final: false, outcome: "unreachable", waited: Number(p.waited ?? 0) + Math.round(ms / 1000),
+        why: `${p.commit.slice(0, 7)}: can't tell if it's live: ${why}, till the wait's ${p.timeout ?? 900} s were up` }
+      return { result: { live }, text: live.why }
+    },
+  },
+  "file.upload": {
+    extra: 1,
+    params: async (p, _c, extra) => {
+      const given = extra[0] ?? (p.file === undefined || isObj(p.file) || /^\s*\{/.test(String(p.file)) ? undefined : String(p.file))
+      if (given === undefined) return p
+      const from = local(given)
+      const size = fs.statSync(from, { throwIfNoEntry: false })?.size
+      if (size === undefined) throw new CliError(`no file ${from} on this machine`)
+      if (size > UPLOAD_MOST) throw new CliError(`${from} is over ${UPLOAD_MOST / 1e6} MB: send its bytes as the body of POST /api/ops/file.upload (vau upload --help)`)
+      const { file: _, ...rest } = p
+      return { ...rest, data: fs.readFileSync(from).toString("base64"), name: p.name ?? path.basename(from) }
+    },
+  },
+  "file.write": {
+    params: async ({ from, base, ...p }, c) => {
+      const read = (f: string, what: string) => { try { return fs.readFileSync(local(f), "utf8") } catch { throw new CliError(`can't read ${f} (${what})`) } }
+      const text = from !== undefined && from !== true ? read(String(from), "--from: the file with the new text") : p.text ?? await c.stdin()
+      return { ...p, text, ...(base !== undefined && base !== true ? { base: read(String(base), "--base: the file with the text you started from") } : {}) }
+    },
+  },
+  "bundle.import": {
+    params: async (p) => {
+      const b = p.bundle
+      if (typeof b !== "string" || /^\s*\{/.test(b)) return p
+      const from = local(b)
+      if (!fs.existsSync(from) && /^([\w.-]+\/[\w.-]+|https?:\/\/|git@|ssh:\/\/)/.test(b)) { const { bundle: _, ...rest } = p; return { ...rest, from: b } }
+      if (fs.existsSync(from) && fs.statSync(from).isDirectory()) {
+        const files: Record<string, string | { base64: string }> = {}
+        const utf8 = new TextDecoder("utf-8", { fatal: true })
+        for (const rel of fs.readdirSync(from, { recursive: true, encoding: "utf8" })) {
+          const full = path.join(from, rel)
+          if (!fs.statSync(full).isFile() || rel.split(path.sep).some((x) => x.startsWith("."))) continue
+          const data = fs.readFileSync(full)
+          try { files[rel.split(path.sep).join("/")] = utf8.decode(data) } catch { files[rel.split(path.sep).join("/")] = { base64: data.toString("base64") } }
+        }
+        return { ...p, bundle: { vaultite: "bundle", format: 1, id: path.basename(from), files } }
+      }
+      try { return { ...p, bundle: JSON.parse(fs.readFileSync(from, "utf8")) } } catch { throw new CliError(`${from} isn't a bundle's JSON file`) }
+    },
+  },
+  "bundle.export": {
+    extra: 1,
+    out: (r, p, extra) => {
+      const text = JSON.stringify(r, null, 2) + "\n"
+      if (extra[0] === "-") return text.trimEnd()
+      const out = local(extra[0] ?? `${p.id}.bundle.json`)
+      fs.writeFileSync(out, text)
+      return `Wrote ${out}.`
+    },
+  },
+}
+
+let loaded: Promise<Command[]> | null = null
+const pluginLocal = new Map<string, Local>()
+
+function loadPlugins(): Promise<Command[]> {
+  loaded ??= (async () => {
+    const subdirs = (d: string) => {
+      try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => path.join(d, e.name)).sort() } catch { return [] }
+    }
+    const dirs = subdirs(path.join(ROOT, "plugins", "core")).filter((d) => fs.existsSync(path.join(d, "cli.ts")))
+    const mods = await Promise.all(dirs.map(async (d) => { const m: { cli?: PluginCli } = await import(pathToFileURL(path.join(d, "cli.ts")).href); return m.cli }))
+    const commands = [...COMMANDS]
+    for (const m of mods) for (const [id, l] of Object.entries(m?.ops ?? {})) pluginLocal.set(id, l)
+    for (const c of mods.flatMap((m) => m?.commands ?? [])) {
+      const at = c.after ? commands.findIndex((x) => x.name === c.after) : -1
+      commands.splice(at < 0 ? commands.length : at + 1, 0, c)
+    }
+    return commands
+  })()
+  return loaded
+}
+
+export const commands = () => loadPlugins()
+
+const GLOBAL_BOOL = ["json", "help", "copy", "count", "paths"]
+
+export function parseArgs(argv: string[], bool: Iterable<string> = []): Args {
+  const b = new Set([...GLOBAL_BOOL, ...bool])
+  const _: string[] = [], flags: Args["flags"] = {}
+  for (let i = 0; i < argv.length; i++) {
+    const x = argv[i]
+    if (x === "--") { _.push(...argv.slice(i + 1)); break }
+    if (x === "-h") flags.help = true
+    else if (x.startsWith("--") && x.length > 2) {
+      const eq = x.indexOf("=")
+      const k = eq > 0 ? x.slice(2, eq) : x.slice(2)
+      if (eq > 0) flags[k] = x.slice(eq + 1)
+      else if (b.has(k) || i + 1 >= argv.length || (argv[i + 1].startsWith("--") && argv[i + 1].length > 2)) flags[k] = true
+      else flags[k] = argv[++i]
+    } else _.push(x)
+  }
+  return { _, flags }
+}
+
+function leadingWords(argv: string[]) {
+  const out: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const x = argv[i]
+    if (!out.length && (GLOBAL_BOOL.includes(x.slice(2)) && x.startsWith("--") || x === "-h")) continue
+    if (!out.length && x === "--url") { i++; continue }
+    if (x === "--") { out.push(...argv.slice(i + 1)); break }
+    if (x.startsWith("-") && x.length > 1) break
+    out.push(x)
+  }
+  return out
+}
+
+function overview(cmds: Command[], ops: OpEntry[]) {
+  const rows: [string, string][] = []
+  for (const e of ops) {
+    if (!e.cli) continue
+    const first = e.cli.split(" ")[0]
+    if (rows.some(([n]) => n === first)) continue
+    const group = ops.filter((x) => x.cli?.split(" ")[0] === first)
+    const subs = group.map((x) => x.cli!.split(" ").slice(1).join(" ") || first)
+    const own = group.length === 1 && group[0].cli === first ? e.summary : group.find((x) => x.cli === first)?.summary
+    rows.push([first, own ? brief(own) : `${subs.slice(0, 8).join(", ")}${subs.length > 8 ? `, … (+${subs.length - 8})` : ""}`])
+  }
+  for (const c of cmds) if (!rows.some(([n]) => n === c.name)) rows.push([c.name, brief(c.summary)])
+  return rows
+}
+
+function usage(cmds: Command[], ops: OpEntry[] | null = null) {
+  const rows = overview(cmds, ops ?? [])
+  const w = Math.max(...rows.map(([n]) => n.length))
+  const windows = process.platform === "win32" || !!process.env.WSL_DISTRO_NAME
+  return `vau: drive Vaultite (the user's vault and app) from a terminal.
+
+Commands:
+${rows.map(([n, s]) => `  ${n.padEnd(w)}  ${s}`).join("\n")}
+
+${ops ? `And every operation of the API by its id (${ops.length} here): \`vau ops\` lists them.`
+    : "The rest (context, render, read, search, panels, plugins...) are the server's operations: they're listed once it answers."}
+Start with \`vau context\`. \`vau <command> --help\` explains one, with examples.
+When you finish something the user should know about, \`vau notify <text>\` tells them (a toast, kept in their inbox).
+
+Options: --json, --count (how many a list holds), --paths (its files, one a line), --copy (to the clipboard too),
+--url <server>. \`-\` as a value reads stdin. \`vau\` alone in a terminal is a prompt.
+Exit status: 0 done, 1 it failed, 2 the command line was wrong.
+Environment: VAULTITE_URL (else the server for the vault you're in, then ${DEFAULT_URL}, then the app's
+other open vaults), VAULTITE_HOME (a job's terminal on another machine: what reaches the user goes to that server).${windows ? `
+Windows: vau runs in PowerShell, cmd and Git Bash (there cmd expands %VAR% in arguments: such text goes by --from or
+stdin). In WSL (\`vau wsl install\` from Windows) it's Windows' vau: paths it prints are WSL's.` : ""}
+File formats: vau docs.`
+}
+
+const commandHelp = (c: Command) => `${c.usage}\n\n${c.summary}\n\n${c.help}`
+
+async function catalog(c: Ctx, word?: string): Promise<OpEntry[] | null> {
+  let r
+  try {
+    r = await c.api("GET", word ? `ops?word=${encodeURIComponent(word)}` : "ops")
+  } catch (e) {
+    if (e instanceof CliError) return null
+    throw e
+  }
+  if (r.status === 403) throw new CliError(String((isObj(r.body) ? r.body.error : undefined) ?? "the server refused"))
+  return r.status === 200 ? catalogOf(r.body) : null
+}
+
+
+async function opParams(e: OpEntry, argv: string[], c: Ctx, allow = 0): Promise<{ params: Obj; extra: string[] }> {
+  const props = e.params.properties ?? {}
+  const bools = Object.entries(props).filter(([, s]) => s.type === "boolean").flatMap(([k]) => [k, kebab(k)])
+  const said = argv.map((x) => (x.startsWith("--no-") && bools.includes(x.slice(5)) ? `--${x.slice(5)}=false` : x)).flatMap((x, i) => (x.startsWith("--") && bools.includes(x.slice(2)) && /^(true|false|yes|no|on|off)$/i.test(argv[i + 1] ?? "") ? [`${x}=${argv[i + 1]}`] : i > 0 && argv[i - 1].startsWith("--") && bools.includes(argv[i - 1].slice(2)) && /^(true|false|yes|no|on|off)$/i.test(x) ? [] : [x]))
+  const lists: Record<string, string[]> = {}, rest: string[] = []
+  for (let i = 0; i < said.length; i++) {
+    const k = said[i].startsWith("--") ? camel(said[i].slice(2)) : ""
+    if (!k || props[k]?.type !== "array" || said[i].includes("=")) { rest.push(said[i]); continue }
+    const got = (lists[k] ??= [])
+    while (i + 1 < said.length && !(said[i + 1].startsWith("--") && said[i + 1].length > 2)) got.push(said[++i])
+  }
+  const a = parseArgs(rest, bools)
+  const params: Obj = Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.length === 1 ? v[0] : v]))
+  const pos = [...a._]
+  e.args.forEach((k, i) => {
+    if (!pos.length) return
+    const last = i === e.args.length - 1 && !allow
+    params[k] = last && props[k]?.type === "array" ? pos.splice(0) : last && props[k]?.type === "string" ? pos.splice(0).join(" ") : pos.shift()
+  })
+  if (pos.length > allow) throw new CliError(`too many arguments (${pos.slice(allow).join(" ")}). ${opUsage(e)}`, true)
+  if (typeof a.flags.params === "string") Object.assign(params, parseJson(a.flags.params === "-" ? await c.stdin() : a.flags.params))
+  for (const [k, v] of Object.entries(a.flags)) {
+    if (["url", "params", ...GLOBAL_BOOL].includes(k)) continue
+    params[camel(k) in props ? camel(k) : k] = v
+  }
+  for (const [k, v] of Object.entries(params)) if (v === "-") params[k] = (await c.stdin()).replace(/\n$/, "")
+  for (const [k, s] of Object.entries(props)) if (params[k] === undefined && s.env && c.env[s.env]) params[k] = c.env[s.env]
+  const fill = Object.entries(props).find(([k, s]) => s.stdin && params[k] === undefined)
+  if (fill) {
+    const text = (await c.stdin(true).catch(() => "")).replace(/\n$/, "")
+    if (text.trim()) params[fill[0]] = text
+  }
+  return { params, extra: pos }
+}
+
+type Shape = { json?: boolean; count?: boolean; paths?: boolean }
+
+function listOf(r: unknown): unknown[] | null {
+  if (Array.isArray(r)) return r
+  if (r && typeof r === "object") for (const v of Object.values(r)) if (Array.isArray(v)) return v
+  return null
+}
+
+const answers = () => import("./clianswers.ts")
+
+async function listed(r: unknown, how: Shape, c: Ctx): Promise<string> {
+  const rows = listOf(r)
+  if (!rows) throw new CliError(`${how.count ? "--count" : "--paths"} reads a list, and this command's answer isn't one (see it with --json)`)
+  if (how.count) return String(rows.length)
+  let tree: Set<unknown> | null = null
+  const out: string[] = []
+  for (const x of rows) {
+    const o = (await answers()).Named.parse(x)
+    let p = typeof x === "string" ? x : o.path ?? o.file ?? null
+    if (p === null && o.id !== undefined) {
+      if (!tree) { const t = (await answers()).Tree.parse(await c.call("GET", "files").catch(() => ({}))); tree = new Set([...t.files, ...t.others].map((f) => f.path)) }
+      p = tree.has(`${o.id}.md`) ? `${o.id}.md` : tree.has(o.id) ? o.id : null
+    }
+    if (p === null) throw new CliError("--paths: this command's answer lists things that aren't files (see it with --json)")
+    out.push(p)
+  }
+  return out.join("\n")
+}
+
+export function cliError(e: OpEntry, msg: string, problems: string[]): { msg: string; problems: string[] } {
+  const props = e.params.properties ?? {}
+  const shown = (k: string) => (!Object.hasOwn(props, k) ? null : e.args.includes(k) ? `<${k}>` : flagOf(k))
+  const marked = (s: string) => s.replace(/`([A-Za-z_]\w*)`/g, (m, k: string) => shown(k) ?? m)
+  const lead = (p: string) => p.replace(/^([A-Za-z_][\w-]*)(?=[[.:]| is )/, (m, k: string) => shown(k) ?? (p.includes(" has no such parameter") ? flagOf(k) : m))
+    .replace(/\(did you mean (\w+)\?\)$/, (m, k: string) => (shown(k) ? `(did you mean ${shown(k)}?)` : m))
+  for (const p of problems) msg = msg.replace(p, () => lead(p))
+  return { msg: marked(msg), problems: problems.filter((p) => !msg.includes(lead(p))).map((p) => marked(lead(p))) }
+}
+
+async function runOp(e: OpEntry, argv: string[], c: Ctx, how: Shape): Promise<{ out: string; code: number }> {
+  const loc = LOCAL[e.id] ?? (await loadPlugins(), pluginLocal.get(e.id)) ?? {}
+  const given = await opParams(e, argv, c, loc.extra ?? 0)
+  const params = loc.params ? await loc.params(given.params, c, given.extra) : given.params
+  const list = !!how.count || !!how.paths
+  const json = !!how.json || list
+  const out = !!loc.out && !json
+  const both = !!loc.code && !json && !out
+  const began = Date.now()
+  let r: { status: number; body: unknown } | null = null, down: number | null = null
+  for (let p = params; ;) {
+    let failed: CliError | null = null
+    try { r = await c.op(e, json || out ? "" : both ? "?as=both" : "?as=text", p, { resend: !loc.again }) }
+    catch (err) { if (!(err instanceof CliError)) throw err; failed = err; r = null }
+    if (r && !(loc.again && restarting(r.status, r.body))) break
+    down ??= Date.now()
+    const next = loc.again?.(params, Date.now() - began)
+    if (next) { p = next; await new Promise((ok) => setTimeout(ok, 3000)); continue }
+    const why = `the server at ${c.url} ${r ? `answered ${r.status}, not itself (a proxy: the server behind it is down)` : "didn't answer"} for ${Math.round((Date.now() - down) / 1000)} s`
+    const gone = loc.gone?.(params, why, Date.now() - began)
+    if (gone) return { out: json ? JSON.stringify(gone.result, null, 2) : gone.text, code: await loc.code?.(gone.result) ?? 1 }
+    throw failed ?? new CliError(why)
+  }
+  if (r.status >= 400) {
+    const b = r.body, { problems } = (await answers()).Failure.parse(b)
+    const reason = String(isObj(b) && "error" in b ? b.error : b).replace(`${e.id}: `, "") || `the server answered ${r.status}, with no reason`
+    const said = cliError(e, reason, problems ?? [])
+    throw new CliError([said.msg, ...said.problems.map((x) => `  - ${x}`)].join("\n"), r.status === 400 && !!problems)
+  }
+  const shown = both ? (await answers()).Both.parse(r.body) : null
+  const result = shown ? shown.result : r.body, text = shown ? shown.text : r.body
+  const code = await loc.code?.(result) ?? 0
+  if (out) return { out: loc.out!(result, params, given.extra), code }
+  if (list) return { out: await listed(result, how, c), code }
+  if (json) return { out: JSON.stringify(result, null, 2), code }
+  return { out: e.exact ? String(text ?? "") : String(text ?? "").replace(/\n+$/, ""), code }
+}
+
+function nearby(word: string, names: string[]): string[] {
+  const w = word.toLowerCase(), most = Math.max(1, Math.floor((w.length + 2) / 3))
+  const scored = [...new Set(names)].map((n) => ({ n, d: distance(w, n.toLowerCase()) }))
+    .filter((x) => x.d <= most || x.n.toLowerCase().startsWith(w.slice(0, Math.max(3, w.length - 1))))
+  return scored.sort((x, y) => x.d - y.d).slice(0, 4).map((x) => x.n)
+}
+
+const listWord = (op: OpEntry, which: string, next = "") => (op.id.endsWith(".list") && !op.args.length && op.cli === which && ["list", "ls"].includes(next) ? [next] : [])
+
+function opHelp(op: OpEntry, ops: OpEntry[]) {
+  const under = op.cli && !op.cli.includes(" ") ? ops.filter((x) => x.cli?.startsWith(`${op.cli} `)) : []
+  const subs = under.length ? `\n\nAlso:\n${under.map((x) => `  vau ${x.cli!.padEnd(24)} ${brief(x.summary, 60)}`).join("\n")}` : ""
+  return opDoc(op, "#").replace(/^# .*/, `vau ${op.cli ? `${op.cli} (${op.id})` : op.id}`) + subs
+}
+
+function meantUnder(op: OpEntry, ops: OpEntry[], extra: string) {
+  const subs = extra ? ops.filter((x) => x.cli?.startsWith(`${op.cli ?? op.id} `)) : []
+  const near = nearby(extra, subs.map((x) => (x.cli ?? "").split(" ")[1] ?? "")), under = subs.filter((x) => x.args.length)
+  return near.length ? ` Did you mean ${near.slice(0, 3).map((n) => `vau ${op.cli} ${n}`).join(" or ")}?`
+    : under.length ? ` Did you mean ${under.slice(0, 3).map((x) => `vau ${x.cli} ${extra}`).join(" or ")}?` : ""
+}
+
+export async function execute(argv: string[], opts: CtxOptions = {}): Promise<{ code: number; out: string; err: string; exact?: boolean }> {
+  const all = await commands()
+  const a = parseArgs(argv, all.flatMap((c) => c.bool ?? []))
+  const words = leadingWords(argv)
+  const ctx = () => new Ctx({ ...opts, url: flag(a, "url") ?? opts.url })
+  const help = words[0] === "help"
+  if (!words.length || (help && words.length === 1)) return { code: 0, out: usage(all, await catalog(ctx())), err: "" }
+  const named = help ? words.slice(1) : words
+  const which = named[0]
+  const cmd = all.find((c) => c.name === which && (!c.sub || named[1] === c.sub))
+  if (cmd) {
+    if (help || a.flags.help) return { code: 0, out: commandHelp(cmd), err: "" }
+    const c = ctx()
+    c.command = cmd.name
+    const args = parseArgs(argv, cmd.bool ?? [])
+    args._.splice(args._.indexOf(which), 1)
+    if (cmd.sub) args._.splice(args._.indexOf(cmd.sub), 1)
+    args.raw = argv.slice(argv.indexOf(which) + 1)
+    try {
+      const r = await cmd.run(args, c)
+      if (a.flags.count || a.flags.paths) return { code: 0, out: await listed(r.data, { count: !!a.flags.count, paths: !!a.flags.paths }, c), err: "" }
+      return { code: r.code ?? 0, out: a.flags.json ? JSON.stringify(r.data, null, 2) : r.text, err: "" }
+    } catch (e) {
+      if (e instanceof CliError) return { code: e.usage ? 2 : 1, out: "", err: `vau ${cmd.name}: ${e.message}` }
+      throw e
+    }
+  }
+  let c = ctx()
+  const ops = await catalog(c, which)
+  const said = (e: OpEntry) => (e.cli ?? "").split(" ").filter(Boolean)
+  const fits = (ops ?? []).filter((e) => e.id === which || (e.cli && said(e).every((w, i) => named[i] === w)))
+    .sort((x, y) => (y.id === which ? 99 : said(y).length) - (x.id === which ? 99 : said(x).length))
+  const op = fits[0]
+  if (!ops && !(await c.up())) return { code: 1, out: "", err: `vau ${which}: ${c.down()}` }
+  if (!op) {
+    const group = (ops ?? []).filter((e) => e.cli?.startsWith(`${which} `) || e.id.startsWith(`${which}.`))
+    const more = named.length > 1 && !help && !a.flags.help
+    if (group.length) {
+      const close = more ? nearby(named[1], group.flatMap((e) => (e.cli?.startsWith(`${which} `) ? [said(e)[1]] : []))) : []
+      return { code: more ? 2 : 0, out: group.map((e) => `  vau ${(e.cli ?? e.id).padEnd(24)} ${brief(e.summary)}`).join("\n") + `\n\n\`vau ${which} <command> --help\` explains one.`,
+        err: more ? `vau: no command '${named.slice(0, 2).join(" ")}'${close.length ? `. Did you mean ${close.map((n) => `vau ${which} ${n}`).join(" or ")}?` : ""}` : "" }
+    }
+    const every = ops && (await catalog(c))
+    const near = nearby(which, [...all.map((x) => x.name), ...(every ?? []).flatMap((e) => [e.id, said(e)[0] ?? ""]).filter(Boolean)])
+    return { code: 2, out: "", err: `vau: no command '${which}'.${near.length ? ` Did you mean ${near.join(" or ")}?` : ""} See vau --help${ops ? " (a plugin's commands are there while it's on: vau plugins)" : ` (and ${c.down()})`}.` }
+  }
+  if (help || a.flags.help) return { code: 0, out: opHelp(op, ops ?? []), err: "" }
+  const home = flag(a, "url") ?? opts.url ? null : homeEnv(c.env, op)
+  if (home) c = new Ctx({ ...opts, api: undefined, env: home })
+  c.command = op.cli ?? op.id
+  const rest = [...argv]
+  for (const w of [...(help ? ["help"] : []), ...(op.id === which ? [which] : said(op)), ...listWord(op, which, named[1])]) rest.splice(rest.indexOf(w), 1)
+  try {
+    const { out, code } = await runOp(op, rest, c, { json: !!a.flags.json, count: !!a.flags.count, paths: !!a.flags.paths })
+    return { code, out, err: "", ...(op.exact && !a.flags.json ? { exact: true } : {}) }
+  } catch (e) {
+    if (!(e instanceof CliError)) throw e
+    const hint = e.message.startsWith("too many arguments") ? meantUnder(op, ops ?? [], rest.find((w) => !w.startsWith("-")) ?? "") : ""
+    return { code: e.usage ? 2 : 1, out: "", err: `vau ${op.cli ?? op.id}: ${e.message}${hint}` }
+  }
+}
+
+export async function toClipboard(text: string, platform: string = process.platform, env: Record<string, string | undefined> = process.env): Promise<string> {
+  const tools = platform === "darwin" ? [["pbcopy"]] : platform === "win32" ? [["clip"]]
+    : [...(env.WAYLAND_DISPLAY ? [["wl-copy"]] : []), ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+  const { spawn } = await import("node:child_process")
+  for (const [cmd, ...args] of tools) {
+    const ok = await new Promise<boolean>((resolve) => {
+      const p = spawn(cmd, args, { stdio: ["pipe", "ignore", "ignore"], env, windowsHide: true })
+      p.on("error", () => resolve(false))
+      p.on("close", (code) => resolve(code === 0))
+      p.stdin.on("error", () => {})
+      p.stdin.end(text)
+    })
+    if (ok) return ""
+  }
+  return `--copy: no clipboard here (${tools.map((t) => t[0]).join(", ")} not found): printed only`
+}
+
+export async function print(r: { code: number; out: string; err: string; exact?: boolean }, copy = false) {
+  if (r.out) process.stdout.write(r.out.endsWith("\n") || (r.exact && !process.stdout.isTTY) ? r.out : r.out + "\n")
+  if (r.err) process.stderr.write(r.err + "\n")
+  if (copy && r.code === 0 && r.out) {
+    const why = await toClipboard(r.out.replace(/\n$/, ""))
+    if (why) process.stderr.write(`vau: ${why}\n`)
+  }
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  // (on macOS a pipe from Node is a socket, so a reader gone mid-write may say ECONNRESET or ENOTCONN instead of EPIPE)
+  const gone = (e: NodeJS.ErrnoException) => ["EPIPE", "ECONNRESET", "ENOTCONN", "ERR_STREAM_DESTROYED"].includes(e.code ?? "")
+  process.stdout.on("error", (e: NodeJS.ErrnoException) => { if (!gone(e)) throw e; process.exit(process.exitCode ?? 0) })
+  process.stderr.on("error", (e: NodeJS.ErrnoException) => { if (!gone(e)) throw e })
+  if (!argv.length && process.stdin.isTTY && process.stdout.isTTY) return (await import("./repl.ts")).repl()
+  const r = await execute(argv)
+  if (process.env.VAULTITE_WSL && process.platform === "win32") {
+    const { wslText } = await import("./wsl.ts")
+    const json = !!parseArgs(argv).flags.json
+    const deep = (v: unknown): unknown => typeof v === "string" ? wslText(v, process.env.VAULTITE_WSL!) : Array.isArray(v) ? v.map(deep)
+      : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)])) : v
+    try { r.out = json ? JSON.stringify(deep(JSON.parse(r.out)), null, 2) : wslText(r.out, process.env.VAULTITE_WSL) } catch { r.out = wslText(r.out, process.env.VAULTITE_WSL) }
+    r.err = wslText(r.err, process.env.VAULTITE_WSL)
+  }
+  await print(r, !!parseArgs(argv).flags.copy)
+  return r.code
+}

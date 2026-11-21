@@ -1,0 +1,612 @@
+import { memo, Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react"
+import { createPortal } from "react-dom"
+import { Check, ChevronLeft, ChevronRight, Ellipsis, Search } from "lucide-react"
+import { commandName, isOn, isSetting, keyHint, keysOf, offeredCommand, runOrSay } from "@/core/commands"
+import { fadeAway } from "@/core/animation"
+import { fingerHolding, useDragging } from "@/core/drag"
+import { fuzzy } from "@/core/fuzzy"
+import { holdFocus } from "@/core/focus"
+import { haptic } from "@/core/haptics"
+import { usePageLock } from "@/core/pagelock"
+import { cn } from "@/lib/utils"
+import { Segmented } from "@/components/kit"
+import { signal } from "@/core/signal"
+import { trackSoon } from "@/core/unsaved"
+import { isDesktop, isMac } from "@/core/platform"
+import { COLOR_NAMES, COLORS, colorVar, type Color } from "../../../core/colors.ts"
+import { closestOf } from "@/core/dom"
+import type { IconType } from "@/core/icons"
+
+export type MenuItem = {
+  label: string; icon?: IconType; run: () => void; danger?: boolean; disabled?: boolean
+  /** A choice: a check shows on the one that's on. */
+  checked?: boolean
+  /** Muted text at the row's right end: where it is (a panel in the other sidebar: Right sidebar). */
+  hint?: string
+  keysOf?: string
+  /** Clicking it leaves the menu open (redrawn), to switch several things at once (the sidebar's pages). */
+  keep?: boolean
+  /** A line above it. */
+  sep?: boolean
+  middle?: () => void
+  /** A submenu (New ▸): hovering, clicking or → opens it; its items are menu items too (`run` is then unused). */
+  items?: MenuItem[]
+  /** With `items`: clicking the row runs `run`, the common choice (Copy path: from the vault folder), while hovering,
+   *  → or its chevron opens the rest; the submenu repeats it first so it can be found. Phones: the chevron drills in. */
+  split?: boolean
+  /** Not a choice: muted text that wraps, saying what the menu is about (a block's description, where its live data
+   *  comes from). `run` is unused. */
+  caption?: boolean
+  /** Not a choice: a text field atop the menu, focused as it opens on a computer (a tab group's name). `set` hears each change;
+   *  Enter or Escape closes the menu, ↓ goes to its rows. `label` names it. */
+  field?: { value: string; placeholder?: string; set: (v: string) => void }
+  /** Not a choice: the shared palette (core/colors.ts) as a row of swatches, `value` ringed. Picking one keeps the menu
+   *  open (redrawn), as a browser's tab group editor does. `label` names it. */
+  colors?: { value: string; pick: (c: Color) => void }
+  /** Not a choice: a few side by side (a segmented control), `value` on, with the `note` of the one on under it (what
+   *  it does). Picking one keeps the menu open (redrawn). `label` names it. */
+  segments?: { value: string; options: { value: string; label: string; note?: string }[]; pick: (v: string) => void }
+  /** A thin bar along the row's foot, filled this far (0 to 1; -1: going, how far unknown): a download's. */
+  progress?: number
+}
+/** Commands as menu rows (by id), those offered now, named and keyed as in the palette: a setting with its check
+ *  ("Line numbers"), one that switches something else by what it does now ("Hide left sidebar"). */
+export function commandItems(...ids: string[]): MenuItem[] {
+  return ids.flatMap((id) => {
+    const c = offeredCommand(id)
+    if (!c) return []
+    const keys = keysOf(c)[0]
+    return [{ label: commandName(c), icon: typeof c.icon === "string" ? undefined : c.icon, hint: keys ? keyHint(keys) : undefined, keysOf: keys ? c.id : undefined,
+      ...(isSetting(c) ? { checked: isOn(c), keep: true } : {}), run: () => c.run() }]
+  })
+}
+
+export type MenuAt = { x: number; y: number; flip?: number }
+type Open = { at: MenuAt; items: MenuItem[]; up?: boolean
+  again?: () => MenuItem[]; closed?: () => void } | null
+
+let open: Open = null
+const subs = signal()
+const set = (o: Open) => {
+  const was = open
+  open = o
+  if (was?.closed && was.closed !== o?.closed) was.closed()
+  subs.notify()
+}
+const icon = "size-5 shrink-0 md:size-4"
+
+export function openMenu(at: MenuAt, items: MenuItem[], up = false, again?: () => MenuItem[], closed?: () => void) {
+  if (!items.length) return
+  if (!open) release = holdFocus()
+  // A Mac opens the menu as the right button goes down: letting go on a row picks it.
+  armed = pressed ? { ...pressed, at: performance.now() } : null
+  set({ at, items, up, again, closed })
+}
+/** The open menu's items swapped for others, if it's still the one showing `was` (what came in after it opened: a
+ *  block's sources). */
+export function replaceMenu(was: MenuItem[], items: MenuItem[]) {
+  if (open?.items !== was) return
+  if (items.length) set({ ...open, items, again: undefined })
+  else closeMenu()
+}
+/** A menu is showing. */
+export const menuShowing = () => open !== null
+/** A menu is showing, as a hook (what it was opened from holds still meanwhile). */
+export const useMenuShowing = () => subs.use(() => open !== null)
+let redrawing = false
+const closeMenu = ({ chosen, blink = true, now = false }: { chosen?: HTMLElement; blink?: boolean; now?: boolean } = {}) => {
+  if (open && !now) {
+    const lists = [...document.querySelectorAll<HTMLElement>("[data-menu-list]")]
+    const lit = chosen ?? lists.flatMap((l) => [...l.querySelectorAll<HTMLElement>(":scope > button")]).find((b) => b.matches(":hover, :focus-visible"))
+    fadeAway(lists, { lit, blink: !!chosen && blink })
+  }
+  armed = null
+  set(null); if (release) { const r = release; release = null; r() }
+}
+let release: (() => void) | null = null
+const openState = () => open
+let pressed: { x: number; y: number } | null = null
+let armed: { x: number; y: number; at: number } | null = null
+const AIMED_PX = 5, AIMED_MS = 300
+type Opening = Pick<MouseEvent, "clientX" | "clientY" | "preventDefault" | "stopPropagation">
+/** For onContextMenu: the menu at the pointer (nothing if there are no items; never the browser's). */
+export const menuFor = (items: () => MenuItem[]) => (e: Opening) => {
+  e.preventDefault(); e.stopPropagation()
+  openMenu({ x: e.clientX, y: e.clientY }, items(), false, items)
+}
+export const menuOnCard = (items: () => MenuItem[]) => (e: MouseEvent) => {
+  e.preventDefault(); e.stopPropagation()
+  const r = e.currentTarget.getBoundingClientRect()
+  const up = r.top + r.height / 2 > innerHeight / 2
+  openMenu({ x: r.left, y: up ? r.top - 8 : r.bottom + 8 }, items(), up, items)
+}
+const redraw = (items: () => MenuItem[]) => { redrawing = true; try { return items() } finally { redrawing = false } }
+
+/** One thing a checklist turns on or off; `icon`: what it is (a panel's, as the rail shows it), beside its check. */
+export type CheckItem = { key: string; label: string; hint?: string; disabled?: boolean; icon?: IconType }
+const listed = new Map<string, { rows: CheckItem[]; more: CheckItem[][] }>()
+
+/** Which things are on, as menu rows: on ones ticked, in order, then More ▸ with `off`. Each is a checkbox keeping the
+ *  menu open and its place till it closes, so several change at once; `set`'s `before` null: at the end. */
+export function checklist(id: string, { on, off = [], set }: {
+  on: CheckItem[]; off?: CheckItem[][]; set: (key: string, on: boolean, before: string | null) => void
+}): MenuItem[] {
+  const was = redrawing ? listed.get(id) : undefined
+  const now = (c: CheckItem) => on.find((o) => o.key === c.key) ?? off.flat().find((o) => o.key === c.key) ?? c
+  const placed = (k: string) => !!was && (was.rows.some((c) => c.key === k) || was.more.some((g) => g.some((c) => c.key === k)))
+  const rows = was ? [...was.rows.map(now), ...on.filter((o) => !placed(o.key))] : on
+  const more = was ? was.more.map((g) => g.map(now)) : off.map((g) => g.filter((c) => !on.some((o) => o.key === c.key)))
+  listed.set(id, { rows, more })
+  const isOn = (k: string) => on.some((o) => o.key === k)
+  const row = (c: CheckItem, before: () => string | null, sep?: boolean): MenuItem => ({
+    label: c.label, hint: c.hint, icon: c.icon, disabled: c.disabled, checked: isOn(c.key), keep: true, sep,
+    run: () => (isOn(c.key) ? set(c.key, false, null) : set(c.key, true, before())),
+  })
+  const list = rows.map((c, i) => row(c, () => rows.slice(i + 1).find((r) => isOn(r.key))?.key ?? null))
+  const extra = more.filter((g) => g.length).flatMap((g, gi) => g.map((c, i) => row(c, () => null, gi > 0 && i === 0)))
+  if (extra.length) list.push({ label: "More", icon: Ellipsis, sep: list.length > 0, run: () => {}, items: extra })
+  return list
+}
+
+// Under iOS's own hold (~500ms: text selection, a link's preview), so the menu comes first.
+const HOLD_MS = 450
+const OWN_HOLD = "input, textarea, select, [contenteditable=''], [contenteditable='true'], .cm-editor, [data-term], [data-own-hold]"
+const READING_HOLD = ".cm-content[contenteditable=false] :is([data-wiki], [data-url], [data-tag], a[href], .cm-image-wrap)"
+const holdMenu = (el: Element) => el.closest("[data-hold-menu]") ?? el.closest(READING_HOLD)
+const ownHold = (el: Element) => {
+  if (el.closest("[data-own-hold]")) return true
+  const own = el.closest(OWN_HOLD), menu = holdMenu(el)
+  return !!own && !(menu && own.contains(menu))
+}
+const held = new WeakSet<Event>()
+
+// iOS never sends contextmenu, so a finger held still dispatches one.
+function watchHolds() {
+  let timer = 0, from = { x: 0, y: 0 }, target: Element | null = null
+  const root = document.documentElement
+  const stop = () => { clearTimeout(timer); timer = 0 }
+  // iOS's own selection begins just after a hold: data-held stops it (index.css), and what it selects anyway is dropped.
+  const marked = () => root.hasAttribute("data-held")
+  const mark = (on: boolean) => { if (marked() !== on) root.toggleAttribute("data-held", on) }
+  const selecting = () => { const s = getSelection(); if (s && !s.isCollapsed && marked()) s.removeAllRanges() }
+  const lift = (e: globalThis.PointerEvent | TouchEvent) => { if (!("touches" in e && e.touches.length)) { stop(); mark(false) } }
+  const down = (e: globalThis.PointerEvent) => {
+    stop()
+    const t = e.target
+    if (e.pointerType !== "touch" || !e.isPrimary || !(t instanceof Element)) return
+    mark(false)
+    if (ownHold(t)) return
+    from = { x: e.clientX, y: e.clientY }
+    target = t
+    // Marked as the finger lands: that's when WebKit judges whether the text under it is selectable.
+    if (holdMenu(t)) mark(true)
+    timer = window.setTimeout(() => {
+      timer = 0
+      // A press during a view transition targets the document itself: look again at what's under the finger.
+      const now = document.elementFromPoint(from.x, from.y)
+      const at = now && now !== document.documentElement ? now : target
+      if (!at?.isConnected || ownHold(at)) { mark(false); return }
+      const ev = new globalThis.MouseEvent("contextmenu", { bubbles: true, cancelable: true, composed: true, view: window, clientX: from.x, clientY: from.y, button: 2, buttons: 2 })
+      held.add(ev)
+      at.dispatchEvent(ev)
+      if (!ev.defaultPrevented && !fingerHolding()) { mark(false); return }
+      mark(true)
+      haptic(fingerHolding() ? "medium" : "light")
+      getSelection()?.removeAllRanges()
+      const swallow = (c: Event) => { c.preventDefault(); c.stopPropagation() }
+      const unswallow = () => { removeEventListener("click", swallow, { capture: true }); removeEventListener("pointerdown", unswallow, { capture: true }) }
+      addEventListener("click", swallow, { capture: true, once: true })
+      // Only this finger's lifting click: Chrome on Android sends none after a hold.
+      addEventListener("pointerdown", unswallow, { capture: true, once: true })
+      setTimeout(unswallow, 800)
+    }, HOLD_MS)
+  }
+  const move = (e: globalThis.PointerEvent) => { if (timer && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 10) stop() }
+  // Android's hold and a mouse send their own contextmenu: no second one.
+  const native = (e: Event) => { if (!held.has(e)) stop() }
+  const opts = { capture: true, passive: true }
+  addEventListener("pointerdown", down, opts)
+  addEventListener("pointermove", move, opts)
+  addEventListener("pointerup", lift, opts)
+  // pointercancel comes while the finger is still down: the mark stays till touchend.
+  addEventListener("pointercancel", stop, opts)
+  addEventListener("touchend", lift, opts)
+  addEventListener("touchcancel", lift, opts)
+  addEventListener("scroll", stop, opts)
+  addEventListener("contextmenu", native, { capture: true })
+  document.addEventListener("selectionchange", selecting)
+  const untrack = trackSoon("a held finger's menu", () => timer !== 0)
+  return () => {
+    stop()
+    untrack()
+    mark(false)
+    removeEventListener("pointerdown", down, opts)
+    removeEventListener("pointermove", move, opts)
+    removeEventListener("pointerup", lift, opts)
+    removeEventListener("pointercancel", stop, opts)
+    removeEventListener("touchend", lift, opts)
+    removeEventListener("touchcancel", lift, opts)
+    removeEventListener("scroll", stop, opts)
+    removeEventListener("contextmenu", native, { capture: true })
+    document.removeEventListener("selectionchange", selecting)
+  }
+}
+/** For a … button: the menu under it. */
+export const menuBelow = (e: MouseEvent, items: MenuItem[]) => {
+  const r = e.currentTarget.getBoundingClientRect()
+  openMenu({ x: r.left, y: r.bottom + 4, flip: r.top - 4 }, items)
+}
+/** For a … button: right-clicks it, so the menu under it is whatever right-clicking its row or heading shows. */
+export const rightClickBelow = (e: MouseEvent) => {
+  e.preventDefault(); e.stopPropagation()
+  const r = e.currentTarget.getBoundingClientRect()
+  e.currentTarget.dispatchEvent(new globalThis.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom + 4 }))
+}
+/** For a button at the bottom (the status bar): the menu above it. */
+export const menuAbove = (e: MouseEvent, items: MenuItem[]) => {
+  e.preventDefault(); e.stopPropagation()
+  const r = e.currentTarget.getBoundingClientRect()
+  openMenu({ x: r.left, y: r.top - 4, flip: r.bottom + 4 }, items, true)
+}
+
+const typing = (t: EventTarget | null) =>
+  t instanceof Element && !!t.closest("input, textarea, [contenteditable=''], [contenteditable='true'], .cm-content")
+
+export const ContextMenus = memo(function ContextMenus() {
+  const o = subs.use(() => open)
+  const dragging = useDragging()
+  useEffect(() => { if (dragging) closeMenu({ now: true }) }, [dragging])
+  useEffect(() => {
+    // Bubble phase on document: React's handlers, at its root, run first.
+    const block = (e: globalThis.MouseEvent) => { if (!e.defaultPrevented && !typing(e.target) && !held.has(e)) e.preventDefault() }
+    document.addEventListener("contextmenu", block)
+    const unhold = watchHolds()
+    const down = (e: globalThis.PointerEvent) => { if (e.pointerType === "mouse") pressed = { x: e.clientX, y: e.clientY } }
+    const up = (e: globalThis.PointerEvent) => {
+      pressed = null
+      const a = armed
+      armed = null
+      if (!a || e.pointerType !== "mouse" || (Math.hypot(e.clientX - a.x, e.clientY - a.y) < AIMED_PX && performance.now() - a.at < AIMED_MS)) return
+      const at = document.elementFromPoint(e.clientX, e.clientY)
+      const row = at?.closest<HTMLButtonElement>("[data-menu-list] > button[data-index]")
+      if (!row || row.disabled || (row.hasAttribute("aria-haspopup") && (!row.hasAttribute("data-split") || at!.closest("[data-menu-more]")))) return
+      e.preventDefault(); e.stopPropagation()
+      row.click()
+    }
+    const opts = { capture: true }
+    addEventListener("pointerdown", down, opts)
+    addEventListener("pointerup", up, opts)
+    return () => { document.removeEventListener("contextmenu", block); unhold(); removeEventListener("pointerdown", down, opts); removeEventListener("pointerup", up, opts) }
+  }, [])
+  return o ? createPortal(<Menu key={`${o.at.x},${o.at.y}`} at={o.at} items={o.items} up={o.up} again={o.again} />, document.body) : null
+})
+
+function Menu({ at, items, up, again }: { at: MenuAt; items: MenuItem[]; up?: boolean; again?: () => MenuItem[] }) {
+  usePageLock()
+  useEffect(() => {
+    // preventDefault: else Escape's close request reaches the sheet's <dialog> once the menu's is gone.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); closeMenu() } }
+    const onResize = () => closeMenu({ now: true })
+    addEventListener("keydown", onKey)
+    addEventListener("resize", onResize)
+    return () => { removeEventListener("keydown", onKey); removeEventListener("resize", onResize) }
+  }, [at])
+  // Over a modal <dialog> the rest of the page is inert: the menu needs a modal dialog of its own.
+  const [over] = useState(() => [...document.querySelectorAll("dialog[open]")].some((d) => { try { return d.matches(":modal") } catch { return false } }))
+  const layer = useRef<HTMLDialogElement>(null)
+  // After showModal: a shut <dialog> has no size to place the list in.
+  const [ready, setReady] = useState(!over)
+  useLayoutEffect(() => { if (over) { layer.current?.showModal(); setReady(true) } }, [over])
+  const body = (
+    <>
+      <button type="button" aria-label="Close menu" tabIndex={-1} className="fixed inset-0 z-[60] cursor-default" onClick={() => closeMenu()}
+        onContextMenu={(e) => { e.preventDefault(); closeMenu() }} />
+      <MenuList items={items} at={at} up={up} again={again} focus />
+    </>
+  )
+  if (!over) return body
+  return (
+    <dialog ref={layer} data-menu-layer onCancel={(e) => { e.preventDefault(); closeMenu() }}
+      className="fixed inset-0 m-0 size-full max-h-none max-w-none overflow-visible border-0 bg-transparent p-0 outline-none backdrop:bg-transparent">
+      {ready && body}
+    </dialog>
+  )
+}
+
+const LONG = 10
+type Found = { it: MenuItem; at: number[] }
+function found(items: MenuItem[], q: string): Found[] {
+  const out: (Found & { score: number; where: string })[] = []
+  const walk = (its: MenuItem[], at: number[], where: string, skip?: string) => its.forEach((it, i) => {
+    if (it.caption || it.field || it.colors || it.segments || it.label === skip) return
+    const m = fuzzy(q, it.label)
+    if (m) out.push({ it, at: [...at, i], score: m.score, where })
+    if (it.items) walk(it.items, [...at, i], it.label, it.split ? it.label : undefined)
+  })
+  walk(items, [], "")
+  const twice = (label: string) => out.filter((f) => f.it.label === label).length > 1
+  return out.sort((a, b) => b.score - a.score)
+    .map(({ it, at, where }) => ({ at, it: { ...it, sep: false, hint: it.hint ?? (where && twice(it.label) ? where : undefined) } }))
+}
+
+function MenuList({ items, at, up, beside, again, focus, onBack, onHover }: {
+  items: MenuItem[]; at?: MenuAt; up?: boolean
+  beside?: DOMRect
+  again?: () => MenuItem[]
+  focus?: boolean
+  onBack?: (refocus: boolean) => void
+  onHover?: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const timer = useRef(0)
+  const [drill] = useState(() => !beside && !isDesktop())
+  const [trail, setTrail] = useState<number[]>([])
+  const shown = trail.reduce<MenuItem[]>((its, i) => its[i]?.items ?? its, items)
+  const parent = trail.length ? trail.slice(0, -1).reduce<MenuItem[]>((its, i) => its[i]?.items ?? its, items)[trail[trail.length - 1]] : null
+  const [query, setQuery] = useState("")
+  const field = useRef<HTMLInputElement>(null)
+  const [inField, setInField] = useState(false)
+  const [width, setWidth] = useState<number>()
+  const hits = query ? found(shown, query) : null
+  const rows = hits ? hits.map((f) => f.it) : shown
+  const lead = rows.some((it) => it.icon || it.items)
+  const bestAt = rows.findIndex((it) => !it.caption && !it.field && !it.colors && !it.segments && !it.disabled)
+  const trailing = rows.some((it) => it.checked !== undefined && it.icon)
+  const [sub, setSub] = useState<{ label: string; rect: DOMRect; focus: boolean } | null>(null)
+  const subAt = sub ? rows.findIndex((it) => it.label === sub.label) : -1
+  const into = (i: number) => { setTrail([...trail, ...(hits ? hits[i].at : [i])]); setQuery("") }
+  const back = () => { setTrail(trail.slice(0, -1)); setQuery("") }
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    let x: number, y: number
+    if (beside) {
+      x = beside.right + r.width + 8 <= innerWidth ? beside.right - 2 : beside.left - r.width + 2
+      y = beside.top - 5
+    } else {
+      x = at!.x
+      y = up ? at!.y - r.height : at!.y
+      const f = at!.flip
+      if (f !== undefined && (up ? y < 8 && f + r.height <= innerHeight - 8 : y + r.height > innerHeight - 8 && f - r.height >= 8)) y = up ? f : f - r.height
+    }
+    setPos({ x: Math.max(8, Math.min(x, innerWidth - r.width - 8)), y: Math.max(8, Math.min(y, innerHeight - r.height - 8)) })
+  }, [at, up, beside, items, trail])
+  // After placing: a visibility:hidden list can't take focus.
+  const placed = pos !== null
+  useLayoutEffect(() => {
+    if (placed && (focus || trail.length)) ref.current?.querySelector<HTMLElement>(`${drill ? "" : ":scope > [data-menu-field] input, "}:scope > button:not(:disabled)`)?.focus({ preventScroll: true })
+  }, [placed, focus, trail])
+  const toField = useRef(false)
+  useLayoutEffect(() => {
+    if (toField.current && field.current) { const n = query.length; field.current.focus({ preventScroll: true }); field.current.setSelectionRange(n, n) }
+    else if (!ref.current?.contains(document.activeElement)) ref.current?.querySelector<HTMLElement>(":scope > button:not(:disabled)")?.focus({ preventScroll: true })
+    toField.current = false
+  }, [query])
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const open = (i: number, el: HTMLElement, focusFirst: boolean) => { clearTimeout(timer.current); setSub({ label: rows[i].label, rect: el.getBoundingClientRect(), focus: focusFirst }) }
+  const type = (q: string, focusField = false) => {
+    if (!query) setWidth(ref.current?.offsetWidth)
+    toField.current = focusField
+    setQuery(q)
+  }
+  const best = () => ref.current?.querySelector<HTMLElement>(":scope > button[data-index]:not(:disabled)")
+  const onFieldKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation()
+    if (e.nativeEvent.isComposing) return
+    const all = [...(ref.current?.querySelectorAll<HTMLElement>(":scope > button:not(:disabled)") ?? [])]
+    if (e.key === "Enter") { e.preventDefault(); best()?.click() }
+    else if (e.key === "ArrowDown") { e.preventDefault(); all[query && all.length > 1 ? 1 : 0]?.focus() }
+    else if (e.key === "ArrowUp") { e.preventDefault(); all[all.length - 1]?.focus() }
+    else if (e.key === "Escape" && query) { e.preventDefault(); type("") }
+    else if (e.key === "Escape" && trail.length) { e.preventDefault(); back() }
+    else if (e.key === "Escape" && onBack) { e.preventDefault(); onBack(true) }
+    else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu() }
+  }
+  const later = (fn: () => void) => { clearTimeout(timer.current); timer.current = window.setTimeout(fn, 120) }
+  const onKey = (e: React.KeyboardEvent) => {
+    const all = [...(ref.current?.querySelectorAll<HTMLElement>(":scope > button:not(:disabled)") ?? [])]
+    const at = all.findIndex((b) => b === document.activeElement), cur = all[at]
+    if (at < 0 && e.target !== ref.current) return
+    e.stopPropagation()
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key !== " " || query)) { e.preventDefault(); type(query + e.key, true); return }
+    if (e.key === "Backspace" && query) { e.preventDefault(); type(query.slice(0, -1), true); return }
+    if (e.key === "Escape" && query) { e.preventDefault(); type(""); return }
+    if (e.key.toLowerCase() === "a" && (isMac ? e.metaKey : e.ctrlKey)) { e.preventDefault(); field.current?.focus(); field.current?.select(); return }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault()
+      const i = at
+      const above = e.key === "ArrowUp" && i === 0 && ["[data-menu-segments] [aria-checked=true]", "[data-menu-colors] [aria-checked=true]", "[data-menu-colors] button", "[data-menu-field] input"]
+        .map((q) => ref.current?.querySelector<HTMLElement>(q)).find(Boolean)
+      ;(above || all[(i + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length])?.focus()
+    } else if (e.key === "ArrowRight") {
+      const i = Number(cur?.dataset.index)
+      if (rows[i]?.items?.length) { e.preventDefault(); if (drill) into(i); else open(i, cur, true) }
+    } else if ((e.key === "ArrowLeft" || e.key === "Escape") && trail.length) {
+      e.preventDefault(); back()
+    } else if ((e.key === "ArrowLeft" || e.key === "Escape") && onBack) {
+      e.preventDefault(); onBack(true)
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault(); all[e.key === "Home" ? 0 : all.length - 1]?.focus()
+    } else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu() }
+  }
+  return (
+    <div ref={ref} role="menu" data-menu-list tabIndex={-1} onKeyDown={onKey} style={{ ...(pos ? { left: pos.x, top: pos.y } : { left: 0, top: 0, visibility: "hidden" }), minWidth: width }}
+      onPointerEnter={() => { clearTimeout(timer.current); onHover?.() }}
+      className="glass-strong fixed z-[61] max-h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)] min-w-56 overflow-y-auto overscroll-contain rounded-[12px] p-1 shadow-xl outline-none md:min-w-48 md:rounded-[10px]">
+      {parent && (
+        <button type="button" onClick={back}
+          className="flex h-11 w-full cursor-pointer items-center gap-3 rounded-[8px] px-3 text-left text-[17px] font-medium whitespace-nowrap text-muted-foreground hover:bg-foreground/[0.07] focus-visible:bg-foreground/[0.07] focus-visible:outline-none">
+          <ChevronLeft className={icon} strokeWidth={2} />
+          <span className="flex-1">{parent.label}</span>
+        </button>
+      )}
+      {parent && <div role="separator" className="mx-2.5 my-1 h-px bg-border" />}
+      {(query || (!drill && shown.length >= LONG && !shown.some((it) => it.sep))) && <>
+        <div data-menu-filter className="flex h-11 items-center gap-3 px-3 text-[17px] whitespace-nowrap md:h-7 md:gap-2.5 md:px-2.5 md:text-[13px]">
+          <Search className={cn(icon, "text-muted-foreground")} strokeWidth={2} />
+          <input ref={field} value={query} placeholder="Type to filter" aria-label="Filter" spellCheck={false} autoComplete="off"
+            onChange={(e) => type(e.target.value)} onKeyDown={onFieldKey} onFocus={() => setInField(true)} onBlur={() => setInField(false)}
+            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" />
+        </div>
+        <div role="separator" className="mx-2.5 my-1 h-px bg-border" />
+      </>}
+      {hits && !hits.length && <p className="px-3 py-2 text-[17px] text-muted-foreground md:px-2.5 md:py-1 md:text-[13px]">No matches</p>}
+      {rows.map((it, i) => (
+        <Fragment key={hits ? hits[i].at.join() : it.label}>
+          {it.sep && <div role="separator" className="mx-2.5 my-1 h-px bg-border" />}
+          {it.field ? <MenuField it={it} first={() => ref.current?.querySelector<HTMLElement>(":scope > button:not(:disabled)")} />
+          : it.colors ? <MenuColors it={it} redraw={again} />
+          : it.segments ? <MenuSegments it={it} redraw={again} />
+          : it.caption ? (
+            <p className="flex max-w-80 gap-3 px-3 py-2 text-[15px] leading-5 text-muted-foreground md:max-w-72 md:gap-2.5 md:px-2.5 md:py-1.5 md:text-[12px] md:leading-4">
+              {it.icon ? <it.icon className={cn(icon, "md:mt-px")} strokeWidth={2} /> : lead && <span className={icon} />}
+              <span className="flex-1">{it.label}</span>
+            </p>
+          ) : <button type="button" data-index={i}
+            role={it.checked === undefined ? "menuitem" : it.keep ? "menuitemcheckbox" : "menuitemradio"} aria-checked={it.checked}
+            data-tip={it.label} data-tip-trunc data-tip-side="right"
+            aria-haspopup={it.items ? "menu" : undefined} aria-expanded={it.items ? subAt === i : undefined} data-split={it.split || undefined}
+            disabled={it.disabled}
+            onPointerEnter={(e) => {
+              // A tap fires pointerenter too: its hover timer would close what the click opens.
+              if (drill || e.pointerType === "touch") return
+              const el = e.currentTarget
+              if (it.items && !it.disabled) { if (subAt === i) clearTimeout(timer.current); else later(() => open(i, el, false)) }
+              else if (sub) later(() => setSub(null))
+            }}
+            onClick={(e) => {
+              const more = it.items && (!it.split || !!closestOf(e.target, "[data-menu-more]"))
+              if (it.items && more && drill) { into(i); return }
+              if (more) { if (subAt === i) setSub(null); else open(i, e.currentTarget, e.detail === 0); return }
+              if (it.keep && again) { runOrSay(it.run, it.label); if (openState()) set({ ...openState()!, items: redraw(again) }); return }
+              closeMenu({ chosen: e.currentTarget, blink: !(e.nativeEvent instanceof PointerEvent && e.nativeEvent.pointerType === "touch") }); runOrSay(it.run, it.label)
+            }}
+            onAuxClick={it.middle && !it.disabled ? (e) => { if (e.button !== 1) return; e.preventDefault(); closeMenu(); runOrSay(it.middle!, it.label) } : undefined}
+            className={cn("relative flex h-11 w-full cursor-pointer items-center gap-3 rounded-[8px] px-3 text-left text-[17px] whitespace-nowrap hover:bg-foreground/[0.07] focus-visible:bg-foreground/[0.07] focus-visible:outline-none disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent md:h-7 md:gap-2.5 md:rounded-[4px] md:px-2.5 md:text-[13px]",
+              it.danger && "text-destructive", (subAt === i || (inField && query && i === bestAt)) && "bg-foreground/[0.07]")}>
+            {!trailing && it.checked !== undefined && <Check className={cn(icon, !it.checked && "invisible")} strokeWidth={2.5} />}
+            {(trailing || it.checked === undefined) && (it.icon ? <it.icon className={icon} strokeWidth={2} /> : lead && <span className={icon} />)}
+            <span className="min-w-0 flex-1 truncate">{it.label}</span>
+            {it.hint && <span data-rebind={it.keysOf} className="-mr-1 ml-3 shrink-0 px-1 text-muted-foreground">{it.hint}</span>}
+            {trailing && it.checked !== undefined && <Check className={cn(icon, "-mr-1", !it.checked && "invisible")} strokeWidth={2.5} />}
+            {it.items && (it.split
+              ? <span data-menu-more className="-mr-3 flex h-11 w-11 shrink-0 items-center justify-center border-l-[0.5px] border-border md:-mr-2.5 md:h-7 md:w-7 md:border-l-0">
+                  <ChevronRight className={cn(icon, "text-muted-foreground")} strokeWidth={2} />
+                </span>
+              : <ChevronRight className={cn(icon, "-mr-1 text-muted-foreground")} strokeWidth={2} />)}
+            {it.progress !== undefined && <MenuProgress value={it.progress} />}
+          </button>}
+        </Fragment>
+      ))}
+      {/* Portalled: the list's backdrop-filter would be the fixed submenu's containing block. Into the menu's
+          dialog when there is one: outside it is inert. */}
+      {sub && !drill && rows[subAt]?.items && createPortal(
+        <MenuList key={sub.label} items={rows[subAt].items!} beside={sub.rect} focus={sub.focus} again={again} onHover={() => clearTimeout(timer.current)}
+          onBack={(refocus) => {
+            const i = subAt
+            setSub(null)
+            if (refocus) ref.current?.querySelector<HTMLElement>(`:scope > button[data-index="${i}"]`)?.focus()
+          }} />,
+        document.querySelector("dialog[data-menu-layer]") ?? document.body,
+      )}
+    </div>
+  )
+}
+
+function MenuProgress({ value }: { value: number }) {
+  const known = value >= 0
+  return (
+    <span aria-hidden data-menu-progress={known ? Math.round(value * 100) : "unknown"}
+      className="pointer-events-none absolute inset-x-3 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-foreground/[0.1] md:inset-x-2.5 md:bottom-[3px] md:h-[2px]">
+      <span className={cn("block h-full rounded-full bg-primary [transition:width_var(--motion)_linear]", !known && "w-full animate-pulse opacity-60")}
+        style={known ? { width: `${Math.max(2, Math.min(100, value * 100))}%` } : undefined} />
+    </span>
+  )
+}
+
+function MenuField({ it, first }: { it: MenuItem; first: () => HTMLElement | null | undefined }) {
+  const f = it.field!
+  const [v, setV] = useState(f.value)
+  return (
+    <div data-menu-field className="px-1 pt-1 pb-1.5 md:px-0.5 md:pt-0.5 md:pb-1">
+      <input value={v} placeholder={f.placeholder} aria-label={it.label} spellCheck={false} autoComplete="off"
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => { setV(e.target.value); f.set(e.target.value) }}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.nativeEvent.isComposing) return
+          if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); closeMenu() }
+          else if (e.key === "ArrowDown") { e.preventDefault(); first()?.focus() }
+        }}
+        className="h-10 w-full rounded-[8px] bg-foreground/[0.06] px-3 text-[17px] outline-none ring-primary/60 placeholder:text-muted-foreground focus:ring-2 md:h-7 md:rounded-[6px] md:px-2 md:text-[13px]" />
+    </div>
+  )
+}
+
+function MenuSegments({ it, redraw }: { it: MenuItem; redraw?: () => MenuItem[] }) {
+  const { options, pick } = it.segments!
+  const [value, setValue] = useState(it.segments!.value)
+  const choose = (v: string) => {
+    if (v === value) return
+    setValue(v)
+    runOrSay(() => pick(v), it.label)
+    if (redraw && openState()) set({ ...openState()!, items: redraw() })
+  }
+  return (
+    <div data-menu-segments className="px-1 pt-1 pb-1.5 md:px-0.5 md:pt-0.5 md:pb-1"
+      onKeyDown={(e) => {
+        const el = e.currentTarget, menu = el.closest("[role=menu]"), rows = [...menu?.querySelectorAll<HTMLElement>(":scope > button:not(:disabled)") ?? []]
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); (e.key === "ArrowDown" ? rows[0] : rows.at(-1))?.focus(); return }
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+        e.preventDefault(); e.stopPropagation()
+        const i = options.findIndex((o) => o.value === value), next = options[(i + (e.key === "ArrowRight" ? 1 : -1) + options.length) % options.length]
+        choose(next.value)
+        requestAnimationFrame(() => el.querySelector<HTMLElement>("[aria-checked=true]")?.focus())
+      }}>
+      <Segmented big label={it.label} value={value} options={options.map((o) => ({ value: o.value, label: o.label }))} onChange={choose} className="[&>button]:px-3" />
+      {options.some((o) => o.value === value && o.note) && (
+        <div className="grid max-w-80 px-2 pt-1.5 text-[15px] leading-5 text-muted-foreground md:max-w-72 md:px-1.5 md:pt-1 md:text-[12px] md:leading-4">
+          {options.map((o) => <p key={o.value} aria-hidden={o.value !== value} className={cn("[grid-area:1/1]", o.value !== value && "invisible")}>{o.note}</p>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MenuColors({ it, redraw }: { it: MenuItem; redraw?: () => MenuItem[] }) {
+  const { value, pick } = it.colors!
+  const choose = (c: Color) => {
+    runOrSay(() => pick(c), it.label)
+    if (redraw && openState()) set({ ...openState()!, items: redraw() })
+  }
+  return (
+    <div role="radiogroup" aria-label={it.label} data-menu-colors
+      onKeyDown={(e) => {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          const menu = e.currentTarget.closest("[role=menu]"), rows = [...menu?.querySelectorAll<HTMLElement>(":scope > button:not(:disabled)") ?? []]
+          e.preventDefault(); e.stopPropagation()
+          ;(e.key === "ArrowDown" ? rows[0] : menu?.querySelector<HTMLElement>("[data-menu-field] input") ?? rows.at(-1))?.focus()
+          return
+        }
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+        e.preventDefault(); e.stopPropagation()
+        const all = [...e.currentTarget.querySelectorAll<HTMLElement>("button")], i = all.findIndex((b) => b === document.activeElement)
+        all[(i + (e.key === "ArrowRight" ? 1 : -1) + all.length) % all.length]?.focus()
+      }}
+      className="grid grid-cols-5 justify-items-center gap-1 px-1 pb-1 md:flex md:gap-0.5 md:px-1 md:pb-0.5">
+      {COLORS.map((c) => (
+        <button key={c} type="button" role="radio" aria-checked={c === value} aria-label={COLOR_NAMES[c]} data-tip={COLOR_NAMES[c]} data-color={c}
+          tabIndex={c === (COLORS.find((x) => x === value) ?? COLORS[0]) ? 0 : -1}
+          onClick={() => choose(c)}
+          className="group/swatch grid size-11 cursor-pointer place-items-center rounded-full outline-none md:size-6">
+          <span className="on-tint grid size-7 place-items-center rounded-full transition-transform duration-(--motion-fast) group-hover/swatch:scale-110 group-active/swatch:scale-95 group-focus-visible/swatch:outline-2 group-focus-visible/swatch:outline-offset-2 group-focus-visible/swatch:outline-primary/60 md:size-[18px]"
+            style={{ "--tint": colorVar(c), background: colorVar(c), ...(c === value ? { boxShadow: `0 0 0 2px var(--popover), 0 0 0 3.5px ${colorVar(c)}` } : {}) }}>
+            {c === value && <Check className="size-4 md:size-3" strokeWidth={3} />}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}

@@ -1,0 +1,217 @@
+// Files, tabs and the editor on a desktop and a phone, with subjects from the vault (People/Qa person*.md if none).
+// WRITES to the vault: throwaway server only.
+//   node web/qa/files.mjs <base url> <vault path> [out dir]   (a fresh copy of the vault each run: it renames files)
+import { readFileSync } from "node:fs"
+import { SHOTS, qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+import { pageHash, subjects } from "./subjects.mjs"
+const { args: [B, VAULT, OUT = SHOTS], browser, check, done } = await qa(import.meta.url)
+const read = (p) => readFileSync(`${VAULT}/${p}`, "utf8")
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+let v = await subjects(B)
+const fit = (p) => p.entry && p.plain
+if (!v.people.some(fit) || !v.people.some((p) => fit(p) && p.hasWant && p !== v.people.find(fit)) || v.people.length < 3) {
+  for (const [name, want] of [["Qa person", ""], ["Qa person two", "want_to: Say hi\n"], ["Qa person three", ""]]) {
+    await fetch(`${B}api/file`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: `People/${name}.md`,
+      text: `---\ntype: person\nrelation: friend\n${want}---\n\n\`\`\`block-person\n\`\`\`\n\nMet at a meetup.\n\n## Timeline\n\n- 2026-09-20 · call · 20 min · Caught up\n` }) })
+  }
+  v = await subjects(B)
+}
+if (!v.linked || v.state.notes.length < 6) {
+  const who = v.people.find(fit) ?? v.people[0]
+  for (const [name, body] of [["Qa idea", "An idea worth linking to.\n"], ["Qa linking", `Links to [[Qa idea]] and to [[${who.name}]].\n`],
+    ["Qa spare", "A note to rename.\n"], ["Qa pointer", "Points at [[Qa spare]].\n"]]) {
+    await fetch(`${B}api/file`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: `Notes/${name}.md`,
+      text: `---\ntype: note\n---\n\n${body}` }) })
+  }
+  v = await subjects(B)
+}
+const person = v.people.find(fit)
+const other = v.people.find((p) => fit(p) && p.hasWant && p !== person)
+const third = v.people.find((p) => p !== person && p !== other)
+const linking = v.need(v.linked, "a note that links to another note and to a person")
+const withLinks = v.state.notes.find((n) => v.links(n.body ?? "").some((l) => l.note || l.person)).id
+const linkedTo = new Set(v.state.notes.flatMap((n) => v.links(n.body ?? "").map((l) => l.note?.id)))
+const spare = v.state.notes.filter((n) => ![linking.note.id, linking.idea.id, withLinks].includes(n.id))
+const rename = v.need(spare.find((n) => linkedTo.has(n.id)) ?? spare[0], "a fourth note (to rename)").id
+const topFile = (v.tree.files.find((f) => !f.path.includes("/") && !/^(AGENTS|CLAUDE)\.md$/.test(f.path)) ?? v.tree.files.find((f) => !f.path.includes("/"))).path.replace(/\.md$/, "")
+const out = { errs: [] }
+
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+  const page = await ctx.newPage(), ui = app(page)
+  page.on("pageerror", (e) => out.errs.push(String(e)))
+  page.on("console", (m) => m.type() === "error" && out.errs.push(m.text()))
+  const shot = (name) => page.screenshot({ path: `${OUT}files-desktop-${name}.png` })
+  await page.goto(B); await until(() => page.locator("aside [role=tree]").count(), 10_000); await ui.idle()
+  await shot("start")
+  out.tree = await page.locator("aside [role=tree]").count()
+  const dirs = person.path.split("/").slice(0, -1)
+  for (let i = 0; i < dirs.length; i++) {
+    const next = i + 1 < dirs.length ? dirs.slice(0, i + 2).join("/") : person.path
+    if (!(await page.locator(`aside [role=tree] [data-tree-path="${next}"]`).count())) {
+      await page.locator(`aside [role=tree] [data-tree-path="${dirs.slice(0, i + 1).join("/")}"] > button`).first().click(); await ui.idle()
+    }
+  }
+  await page.locator(`aside [role=tree] [data-tree-path="${person.path}"] > button`).first().click(); await ui.idle()
+  out.personHash = await page.evaluate(() => location.hash)
+  out.tabs = await page.locator("[role=tablist] [role=tab]").allInnerTexts()
+  out.timelineWidget = await page.locator(".cm-block-section").count()
+  out.header = await page.locator("article :text('Last in touch')").count()
+  await shot("person")
+  await page.locator(".cm-block-section").first().click({ position: { x: 300, y: 60 } }); await ui.idle()
+  out.rawAfterClick = await page.locator(".cm-line", { hasText: person.entry }).count()
+  await shot("person-editing-timeline")
+  const before = read(person.path)
+  await page.locator(".cm-line", { hasText: person.plain }).first().click(); await page.keyboard.press("End"); await page.keyboard.type(" Loves hiking.")
+  await ui.idle()
+  const after = read(person.path)
+  out.typedSaved = after.includes(`${person.plain} Loves hiking.`)
+  out.onlyThatChanged = after === before.replace(person.plain, `${person.plain} Loves hiking.`)
+  await page.locator("section[aria-label=Properties]:visible > button").first().click(); await ui.idle()
+  await shot("person-properties")
+  await page.keyboard.press("ControlOrMeta+o"); await ui.idle()
+  await page.keyboard.type(withLinks.split("/").pop()); await ui.idle()
+  await page.keyboard.press("Enter"); await ui.idle()
+  out.noteHash = await page.evaluate(() => location.hash)
+  out.tabs2 = await page.locator("[role=tablist] [role=tab]").allInnerTexts()
+  await shot("note")
+  out.wikilinks = await page.locator(".cm-wikilink").count()
+  await page.locator("aside button[aria-label='New note']").click(); await ui.idle()
+  out.newHash = await page.evaluate(() => location.hash)
+  out.titleFocused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))
+  await page.keyboard.type("QA test note"); await page.keyboard.press("Enter"); await ui.idle()
+  out.renamedHash = await page.evaluate(() => location.hash)
+  await page.locator("#main-scroll .cm-content").click(); await page.keyboard.type(`Hello [[${person.name.slice(0, 3)}`); await ui.idle()
+  out.autocomplete = await page.locator(".cm-tooltip-autocomplete li").allInnerTexts()
+  await page.keyboard.press("Enter"); await page.keyboard.type(" and **bold**."); await ui.idle()
+  await page.locator("#main-scroll article h1, #main-scroll article textarea").first().click(); await ui.idle()
+  await shot("new-note")
+  try { out.newNoteText = read("QA test note.md") } catch (e) { out.newNoteText = String(e) }
+  await ctx.close()
+}
+
+{
+  const { writeFileSync } = await import("node:fs")
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+  const page = await ctx.newPage(), ui = app(page)
+  page.on("pageerror", (e) => out.errs.push(String(e)))
+  const shot = (name) => page.screenshot({ path: `${OUT}files-desktop-${name}.png` })
+  await page.goto(`${B}#file/${encodeURIComponent(other.path)}`); await page.locator(".cm-content").first().waitFor(); await ui.idle()
+  const k = read(other.path)
+  await ui.sees(other.path, () => writeFileSync(`${VAULT}/${other.path}`, k.replace(/## Timeline\n+/, "## Timeline\n\n- 2026-09-29 · call · 20 min · From Claude while open\n")))
+  out.externalShown = await page.locator(".cm-block-section", { hasText: "From Claude while open" }).count()
+  await page.locator(".cm-line", { hasText: other.plain }).first().click(); await page.keyboard.press("End")
+  await page.keyboard.type(" Met at a conference.")
+  const k2 = read(other.path)
+  await ui.sees(other.path, () => writeFileSync(`${VAULT}/${other.path}`, k2.replace("- 2026-09-29 · call", "- 2026-09-29 · meet")))
+  const k3 = read(other.path)
+  out.bothKept = k3.includes("Met at a conference.") && k3.includes("- 2026-09-29 · meet · 20 min")
+  await page.locator("section[aria-label=Properties]:visible > button").first().click(); await ui.idle()
+  const before = read(other.path)
+  const want = page.locator("[role=row]", { has: page.locator("input[value=want_to]") }).locator("[role=cell] input").first()
+  await want.fill("Ask about the camp"); await want.press("Enter"); await ui.idle()
+  const after = read(other.path)
+  out.propertyLine = after === before.replace(/want_to: .*\n/, "want_to: Ask about the camp\n")
+  out.headerFollows = await page.locator("article :text('Ask about the camp')").count()
+  await shot("other-properties")
+  await page.goto(`${B}#file/${encodeURIComponent(`${rename}.md`)}`); await ui.idle()
+  const t = page.locator("textarea[aria-label='File name']")
+  await t.fill(`${rename.split("/").pop()} (maybe)`); await t.press("Enter"); await ui.idle()
+  out.renameHash = await page.evaluate(() => location.hash)
+  out.renameTabs = await page.locator("[role=tablist] [role=tab]").allInnerTexts()
+  const notes = await (await fetch(`${B}api/notes`)).json()
+  await page.goto(`${B}#new/file/${encodeURIComponent(`${notes[0].id}.md`)}`); await until(() => page.evaluate(() => !location.hash.includes("/file/"))); await ui.idle()
+  out.sheetLinkHash = await page.evaluate(() => location.hash)
+  out.sheetLinkWant = `#file/${encodeURIComponent(`${notes[0].id}.md`)}`
+  out.sheetLinkSheet = await page.evaluate(() => !!document.querySelector("dialog")?.open)
+  await page.locator("aside [role=tree] button", { hasText: new RegExp(`^${esc(topFile)}$`) }).first().click({ button: "middle" }); await ui.idle()
+  const n = await page.locator("[role=tablist] [role=tab]").count()
+  await page.locator("[role=tablist] button[aria-label^=Close]").first().click(); await ui.idle()
+  out.closedTab = n >= 2 && (await page.locator("[role=tablist] [role=tab]").count()) === n - 1
+  await page.goto(`${B}#file/${encodeURIComponent(third.path)}`); await ui.idle()
+  await page.locator("#main-scroll .cm-content").click(); await page.keyboard.press("ControlOrMeta+End"); await page.keyboard.type("Mine.")
+  await ui.idle()
+  const m = read(third.path)
+  writeFileSync(`${VAULT}/${third.path}`, m.replace("Mine.", "Theirs."))
+  await page.keyboard.type(" More")
+  const banner = page.locator("[role=alert]", { hasText: "changed elsewhere while you typed" })
+  await until(async () => await banner.count() > 0, 10_000)
+  out.conflictBanner = await banner.count()
+  out.diskKept = read(third.path).includes("Theirs.") && !read(third.path).includes("Mine. More")
+  await page.locator(".cm-clash-mine button", { hasText: "Keep" }).click(); await ui.idle()
+  out.keepMine = read(third.path).includes("Mine. More") && !read(third.path).includes("Theirs.")
+  await page.goto(`${B}#file/${encodeURIComponent(person.path)}`); await ui.idle()
+  await ui.menu.open(page.locator("[role=status] button[aria-label^='Current view']"))
+  await page.locator("[role=menu] button", { hasText: "Source mode" }).click(); await ui.idle()
+  out.sourceShowsFm = await page.locator(".cm-line", { hasText: /^type: / }).count()
+  await shot("source")
+  await ui.menu.open(page.locator("[role=status] button[aria-label^='Current view']"))
+  await page.locator("[role=menu] button", { hasText: "Live preview" }).click(); await ui.idle()
+  await ctx.close()
+}
+
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage(), ui = app(page)
+  page.on("pageerror", (e) => out.errs.push(String(e)))
+  const shot = (name) => page.screenshot({ path: `${OUT}files-390-${name}.png` })
+  const here = () => page.evaluate(() => ({ hash: decodeURIComponent(location.hash), sheet: !!document.querySelector("dialog")?.open, title: document.querySelector("[data-phone-title]")?.textContent, tabs: Number(document.querySelector("[data-tabs-button]")?.innerText) }))
+  await page.goto(`${B}#view/files`); await page.locator("main [role=tree]").waitFor(); await ui.idle()
+  await shot("files")
+  {
+    const dirs = other.path.split("/").slice(0, -1)
+    for (let i = 0; i < dirs.length; i++) {
+      const next = i + 1 < dirs.length ? dirs.slice(0, i + 2).join("/") : other.path
+      if (!(await page.locator(`main [role=tree] [data-tree-path="${next}"]`).count())) {
+        await page.locator(`main [role=tree] [data-tree-path="${dirs.slice(0, i + 1).join("/")}"] > button`).first().tap(); await ui.idle()
+      }
+    }
+  }
+  const atTree = await here()
+  await page.locator(`main [role=tree] [data-tree-path="${other.path}"] > button`).first().tap(); await ui.idle()
+  out.phoneTree = await here()
+  out.phoneTreeOk = !out.phoneTree.sheet && out.phoneTree.hash === `#file/${other.path}` && out.phoneTree.title === other.path.split("/").pop().replace(/\.md$/, "") && out.phoneTree.tabs === atTree.tabs + 1
+  await shot("other")
+  await page.goBack(); await ui.idle()
+  out.phoneTreeBackOk = (await here()).hash === "#view/files"
+  await page.goto(`${B}#${await pageHash(B, "People")}`); await ui.idle()
+  await page.locator("main button", { hasText: person.name }).first().tap(); await ui.idle()
+  out.phonePeople = await here()
+  out.phonePeopleOk = !out.phonePeople.sheet && out.phonePeople.hash === `#file/${person.path}`
+  await shot("person-from-people")
+  await page.goto(`${B}#file/${encodeURIComponent(`${linking.note.id}.md`)}`); await ui.idle()
+  const atNote = await here()
+  await page.locator("main .cm-wikilink").first().tap(); await ui.idle()
+  out.phoneLink = await here()
+  out.phoneLinkOk = !out.phoneLink.sheet && out.phoneLink.hash.startsWith("#file/") && out.phoneLink.hash !== atNote.hash && out.phoneLink.tabs === atNote.tabs
+  await shot("link")
+  await page.goBack(); await ui.idle()
+  out.phoneLinkBackOk = (await here()).hash === atNote.hash
+  await ctx.close()
+}
+const hash = (p) => `#file/${encodeURIComponent(p)}`, name = (p) => p.split("/").pop().replace(/\.md$/, "")
+check("no page errors", !out.errs.length, out.errs.slice(0, 5))
+check("desktop: the sidebar has the file tree", out.tree >= 1)
+check("the person opens from the tree, in a tab", out.personHash === hash(person.path) && out.tabs.includes(person.name), [out.personHash, out.tabs])
+check("…with its profile header and its timeline drawn", out.header >= 1 && out.timelineWidget >= 1, out)
+check("clicking into the timeline shows its raw lines", out.rawAfterClick >= 1)
+check("typing is saved, and only that changed", out.typedSaved && out.onlyThatChanged)
+check("the switcher opens a note in a tab, its links drawn", out.noteHash === hash(`${withLinks}.md`) && out.tabs2.includes(name(withLinks)) && out.wikilinks > 0, [out.noteHash, out.tabs2, out.wikilinks])
+check("New note: an untitled note, its name focused", out.newHash.startsWith("#file/Untitled") && out.titleFocused === "File name", [out.newHash, out.titleFocused])
+check("…named by typing", out.renamedHash === hash("QA test note.md"), out.renamedHash)
+check("[[ suggests the person", out.autocomplete.some((t) => t.includes(person.name)), out.autocomplete)
+const newBody = out.newNoteText.replace(/^---\n[\s\S]*?\n---\n\n?/, "")
+check("…and the link and text are saved", newBody.startsWith(`Hello [[${person.name}`) && newBody.endsWith("and **bold**."), out.newNoteText)
+check("a line written elsewhere shows in the open timeline", out.externalShown >= 1)
+check("an edit elsewhere while typing: both kept", out.bothKept)
+check("a property edit changes its line only, the header follows", out.propertyLine && out.headerFollows >= 1)
+check("renaming from the title: the tab follows", out.renameHash === hash(`${rename} (maybe).md`) && out.renameTabs.includes(`${name(rename)} (maybe)`), [out.renameHash, out.renameTabs])
+check("a phone's sheet address opens the file's tab", out.sheetLinkHash === out.sheetLinkWant && !out.sheetLinkSheet, out.sheetLinkHash)
+check("a tab closes", out.closedTab)
+check("the same line changed on disk and here: shown, the disk's kept until Keep yours", out.conflictBanner >= 1 && out.diskKept && out.keepMine)
+check("source mode shows the frontmatter", out.sourceShowsFm >= 1)
+check("phone: a file from the tree opens in a tab, Back returns", out.phoneTreeOk && out.phoneTreeBackOk, out.phoneTree)
+check("phone: a person from People opens in a tab", out.phonePeopleOk, out.phonePeople)
+check("phone: a [[link]] opens in the same tab, Back returns", out.phoneLinkOk && out.phoneLinkBackOk, out.phoneLink)
+await done()

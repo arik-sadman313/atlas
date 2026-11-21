@@ -1,0 +1,131 @@
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { SearchQuery } from "@codemirror/search"
+import { onTabLayoutChange, textRanges, useHeldFocus } from "@vaultite"
+import { lit, paintLit, pattern, reveal, scroller } from "./FindBar"
+import { countText, FindField, FindTools, floatingBar, MAX } from "./tools"
+
+type Spec = { search: string; caseSensitive: boolean; regexp: boolean; wholeWord: boolean }
+
+function pageRoot(): HTMLElement | null {
+  const sheet = [...document.querySelectorAll<HTMLElement>("dialog[open]")].reverse().find((d) => d.getClientRects().length > 0)
+  const root = sheet ?? document.getElementById("main-scroll")
+  return root && !root.querySelector("[data-term]") ? root : null
+}
+
+class PageFind {
+  root: HTMLElement
+  spec: Spec = { search: "", caseSensitive: false, regexp: false, wholeWord: false }
+  ranges: Range[] = []
+  current = -1
+  valid = true
+  host: HTMLElement
+  react: Root
+  watcher: MutationObserver
+  timer: ReturnType<typeof setTimeout> | null = null
+  unfollow: () => void
+  focusN = 0
+
+  constructor(root: HTMLElement) {
+    this.root = root
+    this.host = document.createElement("div")
+    document.body.append(this.host)
+    this.react = createRoot(this.host)
+    this.watcher = new MutationObserver(() => {
+      if (this.timer) clearTimeout(this.timer)
+      this.timer = setTimeout(() => { this.timer = null; this.find(false) }, 150)
+    })
+    this.watcher.observe(root, { childList: true, subtree: true, characterData: true })
+    this.unfollow = onTabLayoutChange(() => { if (!this.root.isConnected || pageRoot() !== this.root) close() })
+  }
+
+  find(seek: boolean) {
+    const q = new SearchQuery(this.spec)
+    this.valid = !this.spec.search || q.valid
+    const re = pattern(q)
+    const was = this.ranges[this.current]?.getBoundingClientRect().top
+    this.ranges = re ? textRanges(this.root, re, MAX, "[data-view-bar]").filter((r) => r.getClientRects().length || r.startContainer.parentElement?.closest("details:not([open])")) : []
+    const sc = scroller(this.root, "y") ?? this.root
+    const top = sc.getBoundingClientRect().top
+    const after = seek || was === undefined ? top : was - 1
+    const i = this.ranges.findIndex((r) => r.getBoundingClientRect().top >= after)
+    this.current = !this.ranges.length ? -1 : i < 0 ? 0 : i
+    this.paint()
+    if (seek && this.current >= 0) this.show()
+    this.draw()
+  }
+  step(dir: 1 | -1) {
+    if (!this.ranges.length) return
+    this.current = (this.current + dir + this.ranges.length) % this.ranges.length
+    this.paint()
+    this.show()
+    this.draw()
+  }
+  show() {
+    const r = this.ranges[this.current]
+    if (r) reveal(r, this.root, scroller(r.startContainer.parentElement, "y"), this.host.firstElementChild)
+  }
+  paint() {
+    lit.set(this, { all: this.ranges, current: this.ranges[this.current] ?? null })
+    paintLit()
+  }
+  set(spec: Partial<Spec>) { this.spec = { ...this.spec, ...spec }; this.find(true) }
+  draw() { this.react.render(<PageBar find={this} focus={this.focusN} />) }
+  destroy() {
+    if (this.timer) clearTimeout(this.timer)
+    this.watcher.disconnect()
+    this.unfollow()
+    lit.delete(this)
+    paintLit()
+    const react = this.react, host = this.host
+    setTimeout(() => { react.unmount(); host.remove() }, 0)
+  }
+}
+
+let open: PageFind | null = null
+
+export function openPageFind() {
+  const root = pageRoot()
+  if (!root) return
+  if (open && open.root !== root) close()
+  if (!open) open = new PageFind(root)
+  open.focusN++
+  open.draw()
+}
+function close() { open?.destroy(); open = null }
+
+function spotOf(root: HTMLElement) {
+  const box = root.getBoundingClientRect()
+  const probe = document.createElement("div")
+  probe.style.cssText = "position:absolute;visibility:hidden;height:var(--vau-panel-top,0px)"
+  root.append(probe)
+  const under = root.tagName === "DIALOG" ? 0 : probe.offsetHeight
+  probe.remove()
+  const width = Math.min(440, box.width - 24)
+  return { top: box.top + under + 8, left: box.right - width - 12, width }
+}
+
+function PageBar({ find, focus }: { find: PageFind; focus: number }) {
+  useHeldFocus()
+  const [text, setText] = useState(find.spec.search)
+  const ref = useRef<HTMLInputElement>(null)
+  const [spot] = useState(() => spotOf(find.root))
+  useEffect(() => { ref.current?.focus(); ref.current?.select() }, [focus])
+  const { spec, ranges, current, valid } = find
+  const total = ranges.length
+  const none = !!spec.search && valid && !total, bad = none || !valid
+  const status = countText({ search: spec.search, valid, total, current, more: total >= MAX })
+  const keys = (e: KeyboardEvent) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); return }
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    find.step(e.shiftKey ? -1 : 1)
+  }
+  return (
+    <div data-page-find data-overlay data-find-bar className={`fixed z-(--z-page-float) ${floatingBar}`} style={{ top: spot.top, left: spot.left, width: spot.width }}>
+      <FindField inputRef={ref} value={text} placeholder="Find in page" status={status} bad={bad} onKeyDown={keys}
+        onChange={(t) => { setText(t); find.set({ search: t }) }} />
+      <FindTools spec={spec} set={(o) => find.set(o)} total={total} step={(by) => find.step(by)} close={close} />
+    </div>
+  )
+}

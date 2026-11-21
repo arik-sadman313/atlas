@@ -1,0 +1,23 @@
+{
+  "id": "terminal",
+  "icon": "square-terminal",
+  "category": "system",
+  "alwaysOn": true,
+  "name": "Terminal",
+  "description": "A shell in a tab, opened in the vault's folder, to run a coding agent (Claude Code, Codex, OpenCode, Cursor) on your notes. Runs on this machine, or on your other machines (Machines); closing the tab keeps the shell going. An agent started here is told it runs inside Vaultite, plus each plugin's line for agents: Show what agents in terminals are told has it word for word.",
+  "replaces": { "obsidian": ["terminal"] },
+  "runsOnServer": true,
+  "requires": ["find"],
+  "exports": ["fold"],
+  "enhances": [
+    "machines"
+  ],
+  "settings": {
+    "shell": { "local": true, "type": "string", "choices": "terminals/shells", "unset": "Default", "label": "Shell", "description": "for new terminals; those already running keep theirs" },
+    "cursor": { "type": "enum", "values": ["block", "bar", "underline"], "default": "block", "preview": true, "label": "Terminal cursor", "description": "its shape in every terminal" },
+    "cursorBlink": { "type": "boolean", "default": true, "label": "Blink the terminal cursor", "description": "while the terminal has the keyboard" },
+    "scrollback": { "type": "number", "default": 10000, "min": 100, "max": 1000000, "label": "Scrollback", "description": "lines of history each new terminal keeps" },
+    "allowRemote": { "local": true, "type": "boolean", "default": false, "group": "Who may open terminals", "label": "Anyone who reaches the app", "description": "only on a network you trust; any device that reaches the app may open terminals" },
+    "allowUsers": { "local": true, "type": "list", "group": "Who may open terminals", "when": { "allowRemote": [false] }, "label": "Other tailnet logins", "description": "others on your tailnet, like someone@example.com" }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "startup": {
+    "api": 11,
+    "apiKB": 26,
+    "assets": 121,
+    "socket": 10
+  },
+  "reload": {
+    "requests": 11,
+    "api": 10,
+    "apiKB": 3,
+    "socket": 9
+  },
+  "open": {
+    "api": 6,
+    "apiKB": 6,
+    "socket": 6
+  },
+  "typing": {
+    "api": 6,
+    "apiKB": 5,
+    "socket": 6
+  },
+  "open another": {
+    "api": 5,
+    "apiKB": 3,
+    "socket": 7
+  },
+  "switch tabs": {
+    "requests": 2,
+    "api": 2,
+    "socket": 9
+  },
+  "idle": {
+    "requests": 2,
+    "api": 2,
+    "socket": 3
+  },
+  "outside change": {
+    "requests": 3,
+    "api": 3,
+    "apiKB": 2,
+    "socket": 3
+  }
+}

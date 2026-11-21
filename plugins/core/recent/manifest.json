@@ -1,0 +1,13 @@
+{
+  "id": "recent",
+  "icon": "rotate-ccw-clock",
+  "category": "navigation",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "name": "Recent files",
+  "description": "A sidebar panel with the files you opened lately in this workspace, or the vault's recently changed ones: the same lists a new tab shows.",
+  "replaces": { "obsidian": ["recent-files-obsidian"] },
+  "settings": {
+    "limit": { "type": "number", "default": 50, "min": 1, "max": 200, "label": "Files listed", "description": "before a Show more row; a workspace remembers the last 200 opened" }
+  }
+}

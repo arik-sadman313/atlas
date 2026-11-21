@@ -1,0 +1,180 @@
+// The Vim plugin outside the editor: reading view's j/k, ]], link hints, /, :e, ?, i; j still types in a field.
+// WRITES "Qa vimapp/" and plugins.json's `enabled`: throwaway only.
+//   node web/qa/vimapp.mjs <base url> [out dir]
+import { apiAt, qa, SHOTS, command } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+const { args: [B, OUT = SHOTS], browser, check, watch, noErrors, done } = await qa(import.meta.url)
+const LONG = "Qa vimapp/Long.md", TARGET = "Qa vimapp/Target.md"
+const json = { "Content-Type": "application/json" }
+const put = (path, text) => fetch(`${B}api/file`, { method: "POST", headers: json, body: JSON.stringify({ path, text }) })
+// Vim is built in, off until in plugins.json's `enabled`: switched there, the rest of the list kept.
+const vim = async (on) => {
+  const api = apiAt(B), conf = await api("GET", "config/plugins")
+  return api("PATCH", "config/plugins", { enabled: [...(conf.enabled ?? []).filter((x) => x !== "vim"), ...(on ? ["vim"] : [])] })
+}
+
+const para = (i) => `Paragraph ${i} of the long note, with enough words in it to take a line or two of the page.`
+const sections = []
+for (let s = 1; s <= 8; s++) {
+  const lines = [`## Section ${s}`, ""]
+  for (let i = 1; i <= 8; i++) lines.push(para(`${s}.${i}`), "")
+  if (s === 1) lines.push("See [[Target]] for more.", "")
+  if (s === 3 || s === 6 || s === 8) lines.push("A needle in this section.", "")
+  // (found in a drawn table's cell; not in a link's address, which isn't shown)
+  if (s === 2) lines.push("A [link](https://needle.example) out.", "")
+  if (s === 5) lines.push("| Thing | Where |", "| --- | --- |", "| hay | barn |", "| needle | table |", "")
+  sections.push(lines.join("\n"))
+}
+for (const p of [LONG, TARGET]) await fetch(`${B}api/file?path=${encodeURIComponent(p)}`, { method: "DELETE" })
+await put(LONG, sections.join("\n"))
+await put(TARGET, "The target note.\n")
+await vim(true)
+
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
+const page = watch(await ctx.newPage()), ui = app(page)
+const top = () => page.evaluate(() => document.getElementById("main-scroll").scrollTop)
+const hash = () => page.evaluate(() => decodeURIComponent(location.hash))
+
+await page.goto(`${B}#file/${encodeURIComponent(LONG)}`); await page.locator(".cm-content").first().waitFor(); await ui.idle()
+await command(page, "Switch to reading", 0); await ui.idle()
+check("the note is in reading view", await page.locator(".cm-content[contenteditable=false]").count() > 0)
+// Where a reader would click: on the text.
+await page.locator(".cm-line", { hasText: "Paragraph 1.2" }).first().click(); await ui.idle()
+
+const t0 = await top()
+await page.keyboard.press("j"); await page.keyboard.press("j"); await ui.idle()
+const t1 = await top()
+check(`j scrolls down (${t0} -> ${t1})`, t1 > t0 + 80)
+await page.keyboard.press("k"); await ui.idle()
+check("k scrolls up", (await top()) < t1)
+await page.keyboard.press("Shift+G"); await ui.idle()
+const bottom = await top()
+check(`G goes to the bottom (${bottom})`, bottom > 1000)
+await page.keyboard.press("g"); await page.keyboard.press("g"); await ui.idle()
+check("gg goes to the top", (await top()) === 0)
+await page.keyboard.press("d"); await ui.idle()
+check("d scrolls half a page", (await top()) > 200)
+await page.keyboard.press("g"); await page.keyboard.press("g"); await ui.idle()
+
+// ]] twice: Section 2's heading near the top.
+await page.keyboard.press("]"); await page.keyboard.press("]"); await ui.idle()
+await page.keyboard.press("]"); await page.keyboard.press("]"); await ui.idle()
+const near = await page.evaluate(() => {
+  const s = document.getElementById("main-scroll").getBoundingClientRect().top
+  const h = [...document.querySelectorAll(".cm-line")].find((l) => l.textContent.trim() === "Section 2")
+  return h ? Math.round(h.getBoundingClientRect().top - s) : null
+})
+check(`]] goes to the next heading (Section 2 at ${near}px)`, near !== null && near >= -5 && near < 60)
+await page.keyboard.press("["); await page.keyboard.press("["); await ui.idle()
+const back = await page.evaluate(() => {
+  const s = document.getElementById("main-scroll").getBoundingClientRect().top
+  const h = [...document.querySelectorAll(".cm-line")].find((l) => l.textContent.trim() === "Section 1")
+  return h ? Math.round(h.getBoundingClientRect().top - s) : null
+})
+check(`[[ goes back (Section 1 at ${back}px)`, back !== null && back >= -5 && back < 60)
+
+// f: hints, then the one on the [[Target]] link.
+await page.keyboard.press("f"); await ui.idle()
+const hintCount = await page.locator("[data-hint]").count()
+check(`f shows hints (${hintCount})`, hintCount > 5)
+await page.screenshot({ path: `${OUT}vimapp-hints.png` })
+const label = await page.evaluate(() => {
+  const link = [...document.querySelectorAll("[data-wiki]")].find((e) => /Target/.test(e.dataset.wiki))
+  if (!link) return null
+  const r = link.getBoundingClientRect()
+  let best = null, d = Infinity
+  for (const h of document.querySelectorAll("[data-hint]")) {
+    const b = h.getBoundingClientRect()
+    const x = Math.hypot(b.left - r.left, b.top - r.top)
+    if (x < d) { d = x; best = h.dataset.hint }
+  }
+  return best
+})
+check(`a hint is on the link (${label})`, !!label)
+if (label) await page.keyboard.type(label)
+await ui.idle()
+check("typing its label opens the link", (await hash()).includes("Target"))
+check("the hints are gone", await page.locator("[data-hint]").count() === 0)
+await page.keyboard.press("f"); await ui.idle(); await page.keyboard.press("Escape"); await ui.idle()
+check("Escape puts hints away", await page.locator("[data-hint]").count() === 0)
+
+// : runs :e and :q.
+await page.keyboard.press("Shift+;"); await ui.idle()
+check(": opens the command line", await page.locator("input[aria-label=Command]").count() === 1)
+await page.keyboard.type("e Lon"); await page.keyboard.press("Tab"); await ui.idle()
+check("Tab completes a file name", (await page.locator("input[aria-label=Command]").inputValue()) === "e Long")
+await page.keyboard.press("Enter"); await ui.idle()
+check(":e Long opens the note", (await hash()).includes("Long"))
+await page.locator(".cm-line", { hasText: "Paragraph 1.2" }).first().click(); await ui.idle()
+
+// / finds; n goes from match to match.
+await page.keyboard.press("/"); await ui.idle()
+const bar = await page.locator("[data-vim-find]").boundingBox(), status = await page.locator("[data-status-right]").boundingBox()
+check("the find bar is above the status bar", !!bar && (!status || bar.y + bar.height <= status.y + 1))
+await page.keyboard.type("needle"); await ui.idle()
+check("/ counts the matches, the ones not drawn yet and in a table too, not a link's address", await page.getByText("4 matches").count() === 1)
+await page.keyboard.press("Enter"); await ui.idle()
+const f1 = await top()
+const lit = await page.evaluate(() => CSS.highlights.get("vim-find-current")?.size ?? 0)
+check(`Enter goes to the first match, highlighted (${f1})`, f1 > 500 && lit === 1)
+await page.keyboard.press("n"); await ui.idle()
+const f2 = await top()
+check(`n goes to the next match (${f2})`, f2 > f1)
+const cell = await page.evaluate(() => {
+  const r = [...(CSS.highlights.get("vim-find-current") ?? [])][0], box = r?.getBoundingClientRect()
+  return { cell: !!r?.startContainer.parentElement?.closest(".cm-block-table td"), seen: !!box && box.top > 0 && box.bottom < innerHeight }
+})
+check(`one in a drawn table is lit in its cell, in sight (${JSON.stringify(cell)})`, cell.cell && cell.seen)
+await page.keyboard.press("Shift+N"); await ui.idle()
+check("N goes back", (await top()) < f2)
+await page.screenshot({ path: `${OUT}vimapp-find.png` })
+await page.keyboard.press("Escape"); await ui.idle()
+check("Escape clears the highlights", await page.evaluate(() => !CSS.highlights.has("vim-find")))
+
+// ? opens the keys sheet, ? closes it.
+await page.keyboard.press("Shift+/"); await ui.idle()
+check("? opens the keys sheet", await page.locator("[data-vim-keys]").count() === 1)
+check("it lists the keys outside the editor", await page.getByText("Show link hints").count() >= 1)
+await page.screenshot({ path: `${OUT}vimapp-keys.png` })
+await page.keyboard.press("Shift+/"); await ui.idle()
+check("? again closes it", await page.locator("[data-vim-keys]").count() === 0)
+
+// i: edit where you're reading.
+await page.keyboard.press("g"); await page.keyboard.press("g"); await ui.idle()
+for (let i = 0; i < 3; i++) { await page.keyboard.press("]"); await page.keyboard.press("]"); await ui.idle() }
+const readAt = await page.evaluate(() => {
+  const s = document.getElementById("main-scroll").getBoundingClientRect().top
+  const h = [...document.querySelectorAll(".cm-line")].find((l) => l.textContent.trim() === "Section 3")
+  return h ? Math.round(h.getBoundingClientRect().top - s) : null
+})
+await page.keyboard.press("i"); await ui.idle()
+check("i switches to editing", await page.locator(".cm-content[contenteditable=true]").count() > 0)
+const caret = await page.evaluate(() => {
+  const s = document.getElementById("main-scroll").getBoundingClientRect()
+  const c = [...document.querySelectorAll(".cm-fat-cursor, .cm-cursor-primary")].find((e) => e.getClientRects().length)
+  const h = [...document.querySelectorAll(".cm-line")].find((l) => /Section 3/.test(l.textContent))
+  return { y: c ? Math.round(c.getBoundingClientRect().top - s.top) : null, h: h ? Math.round(h.getBoundingClientRect().top - s.top) : null }
+})
+check(`]] three times: Section 3 at the top (${readAt}px)`, readAt !== null && readAt < 60)
+check(`the cursor is on the line that was at the top, which stayed in place (cursor ${caret.y}px, line ${caret.h}px, was ${readAt}px)`,
+  caret.y !== null && caret.h !== null && Math.abs(caret.y - caret.h) < 30 && Math.abs(caret.h - readAt) < 40)
+await page.screenshot({ path: `${OUT}vimapp-edit.png` })
+await page.keyboard.press("Escape"); await ui.idle()
+check("Escape in normal mode goes back to reading", await page.locator(".cm-content[contenteditable=true]").count() === 0)
+
+// :q closes the tab.
+await page.keyboard.press("Shift+;"); await ui.idle()
+await page.keyboard.type("q"); await page.keyboard.press("Enter"); await ui.idle()
+check(":q closes the tab", !(await hash()).includes("Long"))
+
+// In a text field j types.
+await page.keyboard.press("ControlOrMeta+o"); await page.locator("[role=dialog] input:focus").waitFor(); await ui.idle()
+await page.keyboard.type("jk"); await ui.idle()
+const typed = await page.evaluate(() => document.activeElement?.value)
+check(`j and k type in the quick switcher (${typed})`, typed === "jk")
+await page.keyboard.press("Escape")
+noErrors()
+
+await vim(false)
+for (const p of [LONG, TARGET]) await fetch(`${B}api/file?path=${encodeURIComponent(p)}`, { method: "DELETE" })
+await done()

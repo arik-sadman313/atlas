@@ -1,0 +1,4256 @@
+# Changelog
+
+What changed in Vaultite, newest first: one line per change, as it stands now (a change undone or redone before a
+release is written once, as it ended up). Versions follow [semantic versioning](https://semver.org); the plugin API has
+its own number (`API_VERSION` in `core/version.ts`). The details are in git history and in `vau docs`.
+
+## Unreleased
+
+- Mac: updating from a release works again. Since 0.15.0 the update downloaded, then macOS's installer gave up on a
+  read-only folder in the new app, so 0.13.0 never moved on and said nothing; a release now ships nothing read-only.
+- Desktop: a hidden sidebar no longer peeks out while the pointer is mid-page on a pinch-zoomed web page under a
+  floating card (the mini player, a toast), and clicks there land where the pointer is.
+- Activity: an action repeated all day (an agent polling a browser tab) updates its one line instead of adding a
+  copy every few seconds, so its log no longer fills the disk; it starts a new line each day and no longer lists files
+  something else wrote while it ran.
+- Linux: Arch gets Vaultite from the AUR (`vaultite-bin`, each release's .deb repackaged), updated by pacman rather
+  than by the app.
+
+## 0.15.0 (2026-11-19)
+
+Faster and steadier everywhere, with big vaults above all: windows open on your last screen at once, search answers as
+you type and ignores accents as in Obsidian, and the server stays responsive on iCloud. Workspaces get a page of their
+own, up to nine, synced across machines; version history replaces Review; the companion is one talk across vaults; the
+browser's logins live in containers; phones and terminals are much smoother. Also everything from the unpublished
+0.14.0: Research with References, Zotero and citations, simpler Settings, jobs in the cloud, Vaultite Cloud, block
+references and several cursors as in Obsidian, and Electron 45.
+
+### Changes
+
+- People: how long since a friend who is due, and a birthday's month, read at 4.5:1 contrast in every scheme.
+- Companion: its page's More menu no longer offers Show its chat beside the page's own Chat button.
+- Folders: switching a folder page to columns (⌥⌘3) keeps the keyboard on the thing you were on, instead of losing it
+  now and then while the columns loaded.
+- Desktop app: the first launch after an update or on a new account opens its window about 0.2 s sooner and starts its
+  server about half a second sooner: the code comes with its compiled cache, and the app's own cache no longer grows by
+  about 11 MB with every update.
+- A big vault no longer stalls the app every 10 s: the app's requests stop waiting for the server's periodic check of
+  every file (130 to 300 ms at 15,000 notes), and checking which Claude Code sessions run no longer blocks the server.
+- If the app didn't finish starting last time (a vault plugin froze it), it starts with vault plugins off and says so,
+  with Turn back on, instead of freezing the same way again.
+- Desktop app: a vault's server holds about 50 MB less memory once it has read a big vault (15,000 notes: 285 to 234
+  MB): it no longer keeps the room it used while reading.
+- The note a window opens on draws sooner: its text is read from the vault once at launch, not a second time, and code
+  the app loads while idle (palettes, the agents' chat and terminal) waits until the first screen has drawn.
+- Desktop app: a vault's window opens showing its last screen at once, as you left it, and fades to the live app as soon
+  as that has drawn its file tree and open note, instead of a blank window until the vault has loaded.
+- Search: the search tab shows its first results as you type, with no pause: drawn about 15 ms after a key on a vault of
+  15,000 notes, where it took 300 to 800, as the first files found are shown before the rest are counted, and the names
+  are read ahead while the app is idle. Keys typed in a burst ask once, when it pauses; the switcher searches files
+  0.1 s after the last key, as it shows names at once.
+- Search: a word found in most notes answers about 5 times sooner (the search tab, the switcher, query blocks, vau search):
+  only the shown files' lines are read out, and a page further down reuses the search.
+- Search: accents don't matter, as in Obsidian: "cafe" finds "café" and "café" finds "cafe"; ø, ł and ß match o, l and ss.
+  The quick switcher and the search tab's names ignore accents too.
+- Claude Code: telling which terminals wait for you re-reads only the session files that changed, not all of them each
+  time one does, which on a machine with hundreds of them held the server for about 10 ms several times a second.
+- File history: catching up on a big vault's files, about 10 s after the server starts, no longer holds every other
+  request for up to a second; it lets them through every few milliseconds.
+- Opening a big vault: its files show sooner, the first time and every time after (15,000 notes, the server's start to
+  its first answer: the first time 4.5 s to 1.3 s, after that 1.4 s to 1.0 s; its notes are read on other threads).
+- Settings: a change in a big vault no longer has the app's next request wait while every note's file is looked at
+  again (15,000 notes: about 200 ms each).
+- Desktop: a vault opens sooner at launch: its server starts before the rest of the app loads, its window before the
+  Browser, updates and menus, and the app keeps the code it compiled even when it was stopped or crashed.
+- Pictures of a page (vau html picture): on Windows they use the installed Chrome or Edge, so they work on Windows on Arm,
+  and a page that fails to open says so instead of "nothing on the page matches".
+- Companion and agents: they attach a file from the vault to a web page (a screenshot to a Reddit reply), through
+  the page's own picker button too, where the site hides its file input.
+- Companion: filling in posts, messages or forms for you to review and send happens in your browser in front of you,
+  never as a background job; and a question you ask it always gets words, even when it also acts.
+- Terminal: a full-screen program's terminal (vim, htop, less) no longer opens blank now and then: its picture failed
+  whenever its output had stopped in the middle of an escape sequence. Open terminals move to a terminal server with the fix.
+- Terminal: after an update, open terminals move to the new terminal server up to 4 times sooner (four at a time, not one
+  by one), so they're frozen for less of it.
+- Terminal: a big picture (a PNG shown with kitty's protocol) no longer freezes every other terminal while it's decoded:
+  it's decoded on a thread of its own, and only its own terminal's output waits for it.
+- Terminal: terminals you aren't looking at cost the terminal server about half the CPU they did while their programs
+  draw (a spinner, an agent at work): their screens take output in batches, and still answer a program's questions at once.
+- Terminal: an agent's terminal no page shows (started in the background, or its tab closed) no longer costs the server:
+  its output stops coming there 30 s after the last page leaves, and a page opening it again gets its screen as before.
+- Server: starts answering sooner after an update that changed no part of the web app (2.4 s, now 0.9 s on a 3,000-note
+  vault).
+- Server: an agent's request no longer checks every file of every vault plugin on the main thread (38 file reads each
+  with 3 small plugins, now 8, however many plugins).
+- Server: iCloud is asked for the files it evicted a few at a time, and a file that stays away less and less often (in
+  an hour: 60 asks each, now 6).
+- Server: while iCloud has files to bring down (Optimize Mac Storage), the app's requests no longer each walk the whole
+  vault (78 ms each, now 3).
+- Server: a file iCloud hasn't brought down no longer fails requests and the scheduler's runs ("Unknown system error
+  -11"): what reads it waits for it, the rest goes on.
+- Server: an upload (a voice note from the watch, a photo) no longer holds every save until its bytes arrive.
+- Server: a walk of the vault looks at the disk before it holds the vault, so a save no longer waits behind one on a slow
+  disk (2.4 s, now none).
+- Server: files gone from a folder (moved by hand) ask the disk once, not once each: 1.8 s frozen on a 3,000-note vault,
+  now 0.3 s.
+- Server: a walk of the vault no longer reads every settings file again when none changed (each read a wait on iCloud).
+- Open apps (a phone above all) no longer download all of a big vault's data again after the server restarts for an
+  update: they get only the parts that changed, which is often none (159 KB down to 2 KB on a 2,700-note vault).
+- iPhone notifications and widget updates keep one connection to Apple open and try once more on a new one when it
+  doesn't answer, instead of opening one per notification and failing with "timed out".
+- Updates: a page open from before an update still opens views and sheets it hadn't loaded yet (they failed with
+  "Failed to fetch dynamically imported module"): the server keeps an old build's files for three days.
+- vau: a call takes about a third of the time it did (about 135 ms instead of 350 ms on a busy Linux machine): it no
+  longer loads zod, yaml or Node's HTTP module to start.
+- vau: `vau --help` is a short overview, one line per command; `vau ops` lists each operation in a short line.
+- vau: `vau inbox report --help` (and every other inbox command's) shows that command's own flags, `vau terminal list`
+  works, a group's `--help` ends with the commands under it, and a misspelt one is named (`vau inbox reprot`).
+- vau: `vau upload <file>` takes a file on this machine by its path; a timeout given in milliseconds says it's in
+  seconds; `vau context` points to `vau tabs` (it named a `vau today` that doesn't exist).
+- MCP: the tool list is 13% smaller (no command-line examples, no repeated titles), so every session starts with fewer tokens.
+- Terminals: what an agent in one of the app's terminals is told about Vaultite is half as long.
+- Browser: agents are told to use Vaultite's browser, not Chrome's Claude extension, which a Claude Code with both tried
+  first (in evals, 2 of 6 sessions instead of 6 of 6; some gave up when the extension wasn't connected).
+- Browser: the address bar's suggestions come in half the time from a long history (50,000 pages: 120 to 50 ms a key,
+  each of which held up the app's main process).
+- Browser: an agent's open or act that leaves "Saving…" or "Loading…" on the page waits for it to finish (up to 3 s),
+  so the answer says "Settings saved" instead of needing another call to wait.
+- Workspaces: tabs opened as the app starts (by an agent, a link, or the demo's Browser page with its live sites) are no
+  longer taken away when the workspace's own tabs come in, nor sent back behind the page the app was opened at.
+- Quick switcher: finding notes by name as you type takes about a third of the time it did (over 1,500 notes, 10 ms
+  instead of 31 ms for seven keys).
+- Errors: a part drawn on its own (a note's embed, a table or callout in the editor, a map's pin) logs what failed and
+  where, instead of React's bare "Minified React error #520".
+- Lighter start: Activity's blocks, page and panel load when first shown (39 KB less for the app to load at start),
+  and the server no longer loads the chat keeper's code.
+- A part of the app fetched in the background no longer reloads the page when the server was away for a moment (a
+  restart): only a newer build, or a file gone, does.
+- A note open when Vaultite starts shows sooner: its editor's code comes with the vault, and the note draws the moment
+  it's in (0.46 s instead of 0.74 s on a computer, 1.5 s instead of 1.6 s on a slow phone).
+- Vaultite opens without waiting for a vault plugin whose code is slow to come (a busy machine building it): after
+  1.5 s at most it draws, and that plugin's tabs and blocks fill in when its code arrives.
+- A window left open in view moves to a new build of Vaultite by itself once you leave it alone for 10 minutes with
+  nothing unsaved, so days later a view it hadn't opened yet no longer fails with "couldn't be drawn".
+- Appearance: Snappy animations now reach nearly everything that moves (hovers, toasts, menus, folds, the tab list),
+  not a quarter of it; the phone bar's menu fades out as other menus do; and a few labels read at 4.5:1 in every scheme.
+- Companion: its Do it card for acting in another app is drawn over its answer box, so the box never covers its
+  buttons; and typing it did in another app is checked by what the field holds, so a box that stayed empty is said so.
+- Inbox: answering a question no longer closes other open ones as "settled" when nothing settled them (they showed
+  "Settled by your answer: NONE" with their options hidden).
+- Agents and the companion open things in a split on any side: left and above too, not only right and below
+  (`vau open --split left`, `up`; the same for terminals and jobs).
+- Desktop: an update no longer sometimes runs the app's own older server for a while, then relaunches and shows
+  "A new version of Vaultite is ready" again: a server that started up fast is no longer mistaken for one it can't talk to.
+- Companion: Talk key answers over a note come up to 2 s sooner (a spoken ask no longer waits for the note to save it,
+  only a typed one does), and its close-up is taken at the screen's own resolution, not upscaled, so each ask costs fewer tokens.
+- Desktop: with Cloud sessions open, the app reads claude.ai's sessions when they're due instead of waking each second
+  to see (4 wakeups in 38 s instead of 38).
+- Desktop: the left sidebar's header and bottom bar take what you drag there: Workspaces, Inbox, the Plugins button,
+  or a panel with a rail icon (File explorer, Outline, Tags...), drawn as that icon and opening the panel beside it.
+  Drag them back into either sidebar, or right-click a bar for its list. The vault picker and Settings stay put.
+- Server: a service following a branch (macOS, Linux) takes a new launcher with its code root, instead of keeping
+  the one its checkout had when installed (that checkout needs one update to start doing so).
+- Workspaces: the icon picker starts with the workspace's own number, picked to go back to no icon (Remove icon is gone from its menu).
+- Phone: the workspace menu (the tab list's title) has Rename, as the computer's does.
+- Workspaces: one made, renamed or recoloured on one machine (or the phone) shows on the others at once, instead of
+  waiting for iCloud to bring its file.
+- Agents: a session whose turn is over while its own background work runs (a command, a monitor, a job it handed
+  off and waits on) shows it's waiting and on what, "Waiting on <it>, since 9:58 PM", in its tab, the Terminals and
+  Agents panels, its chat and its job's card, apart from working and from done.
+- Sites: Amazon, Product Hunt, Substack, TikTok and Twitch say who you're signed in as; Stripe, Notion, Figma,
+  Spotify, Netflix and Grok (with x.ai) show signed in, and Slack does even when it won't say who. YouTube sits under
+  your Google account in every container, also where it keeps only its own login cookies.
+- Companion: Show me plays a job's tour live as a guide, waiting for you to click what opens a menu or picker
+  instead of skipping it and stopping at the next step.
+- Settings: a plugin's page draws Updates, About and the rest as the same cards as its settings, with quieter section
+  titles lined up with the rows, and its preview no longer leaves a big empty box.
+- Plugins: a switch never does nothing. It moves at once while it saves, a failed save or allow says why and moves
+  back, one that can't turn on says why when clicked, and turning on a plugin whose code changed since this machine
+  allowed it asks first, naming the files. Another machine's Inbox item (a plugin paused on the M1) opens a sheet about
+  that machine, with its Allow, instead of this machine's plugin page.
+- Browser: an agent's ask, watched from another device, works as the page would there. A link that opens a new tab
+  (Gmail's Log In) or a sign-in popup shows in the same view, with the ask kept and the asked tab a click away. The ask
+  names who asked and opens that agent's terminal or session; it takes Done or "I can't" with a reason, which the agent's
+  wait hears; it says when it was answered elsewhere or the agent's terminal ended. The page fills its pane, and what
+  agents did there reads as words ("Clicked “Log In”", repeats folded) under links to its pages.
+- Browser: listing a container's sites no longer sets up a container that was never used (a new vault made four at
+  launch, and a fifth for agents 20 s later; now none).
+- iPhone: Download on a file or image opens the share sheet (Save Image, Save to Files) instead of showing the
+  file in the app's own window with no way back.
+- iPhone: a voice note shows its words as they're said (through the server's cloud recognizer, Soniox, else the
+  iPhone's own; should the cloud drop, the iPhone's takes over), so stopping sends it at once instead of transcribing
+  first. Sending never holds the screen: Close while it goes, and the recording is kept until it's sent.
+- Dictation: Deepgram, AssemblyAI, OpenAI and ElevenLabs recognize too (the Recognizer setting, each with its key:
+  `vau dictation key --provider deepgram`), through the server so their keys never leave it; the iPhone gets Soniox's with a
+  key that opens one stream, or its own recognizer when On the iPhone says so.
+- Notes: a note whose file changes while you read it (your reply kept in a report, an agent's edit) stays where you
+  were, where it could jump up a little as the blocks near its end were drawn again.
+- Inbox: a session's sheet starts with Open session, then Settle, Pin and Snooze, labelled on phones too; a report has
+  Open session in its top bar. Settle shows a single tick, who delegated a session is in the line under its title, and
+  a subagent that needs you is marked. Disabled buttons, such as Send with nothing typed, are now grey.
+- Middle click works as in a browser across the app. On Back or Forward it opens where they go in a new tab, history
+  and all (⌘-click too, with ⇧ in front). People, tag and query rows, the path bar's folders, embeds, the activity
+  feed, recaps, the calendar, canvas cards and inbox reports open in a new tab on it; in tab search, a split pane's
+  tab menu and the tab switcher's cards it closes the tab.
+- Workspaces page: a split tab with the Workspaces page in one of its panes is listed again, with its other panes.
+- Bad connections: a note or file on its way shows its skeleton, then "Still loading…" with Try again; one that can't
+  be read says why ("Couldn't open this note: the server didn't answer") instead of "isn't in the vault any more", and
+  opens by itself when the connection's back. When the server can't be reached for a while the app says so ("Can't
+  connect to Vaultite · Try now"), and "Reconnected" takes its place. A chat message shows the moment it's sent,
+  "Sending…" under it; one that can't go comes back to the box with why, and one cut off by a reload is back in the
+  box too. A chat tab shows its skeleton while its code comes (a phone fetches it once it has started). The inbox
+  says when it can't be reached, with Try again, instead of "Loading…" for ever, and follows again once the
+  connection's back. Opening the app, a slow start says it's reading the vault, then "Still loading…"; one that can't
+  reach the server says so with Try again, instead of a blank page, and opens the vault by itself once it's back. A
+  change the server doesn't answer gives up within seconds of the connection being lost, never minutes, and is taken
+  back at once; a slow one on a live connection still runs to its end.
+- Bad connections, everywhere else: a block, panel or page whose data can't be read says what and why with Try again
+  (never "Nothing scheduled." or "Couldn't find the daily note."), keeps what it already showed, and asks again by
+  itself (soon after, and as the connection comes back). Search says it's still looking in files, or why it couldn't;
+  Agents keeps its list and says which source it can't reach; a proxy's "Bad Gateway" reads as the server not answering.
+  A command or menu item that fails (New note while the server is stalled) says what failed instead of nothing.
+- Browser: sign-ins work in the user's own tabs. claude.ai's Authorize (Claude Code's login) and other buttons that
+  wait for the page to have focus take the first click even while a toast or an agent's card is over the page; a tab
+  opened from another app's link takes the keyboard; a popup, a new tab or a blocked popup's Open stays in its opener's
+  container; a sign-in that ends in another app's link asks to open it; a login answering this Mac never makes a
+  localhost rule; and Google's "Couldn't sign you in" offers to copy a Google login it already trusts from another
+  container or Mac.
+- Server: moving or renaming a file in a big vault on iCloud Drive no longer freezes the server. Reading the vault's
+  folders and rewriting links to the moved file now happen off the main thread, in steps, so the app, terminals and
+  agents keep their connection meanwhile, where the watchdog used to kill and restart the server after 30 seconds.
+  When the watchdog does kill it, its log line has the local time and names what held the vault, the function the
+  main thread was in and a report of it (`data/reports`, the last 20, without environment variables; SIGUSR2 writes one
+  too), its JS stack kept even when a loaded machine is too slow for the full report. It watches the start as
+  well: one not ready in 20 minutes is restarted, and `GET /api/health` says where a start is before the vault is read.
+  Device sync's hourly shadow check no longer holds the server (it was killed an hour after each start), scheduled jobs
+  wait a minute after a start and start a few seconds apart, and a service whose starts fail because of the machine
+  (the vault unreadable, heavy load) tries again with a growing wait instead of marking its code bad.
+  Hearing of thousands of changed files at once (iCloud touching each) no longer stalls it either. When the watchdog does kill it, its log line has the local time and names what held the vault.
+- Jobs: a follow-up to a job whose agent quit (its terminal back at a shell prompt) starts the agent again in the
+  background, resuming its conversation with the follow-up, instead of typing it into the shell; the job shows failed,
+  not ready for review, when its agent quit mid-work. `vau terminal send` refuses text for an agent that has left its
+  terminal (`--shell` types it into the shell anyway).
+- Workspaces: All tabs is now the Workspaces page, a board of the workspaces side by side in lanes of one height, as
+  many to a row as the pane fits (filled evenly: four are one row, or two by two), the current one outlined. Each lane
+  shows its icon, colour and name: a click on the name renames it, right-click or its … button has the switcher's menu
+  (icon, colour, container, duplicate, delete), and New workspace beside the filter makes one, named in place (both
+  stay where they are while you rename or filter). Drag the switcher's button onto a pane to open the page there.
+- The notch's island stays true: a session that needed you leaves it once you answer it in its terminal, it goes on by
+  itself or ends, and a job's ready card once the job changes or you open it. Clicking one that ended says so instead
+  of opening an empty terminal (a job's resumes); a job notification's button on a question it moved past says so and
+  opens the job. Talking over a session there tells the companion which one it is.
+- The companion's stock lines ("Handed that off to a background agent.", "Passed that on to its job.") play from this
+  Mac once a cloud voice made them, as does any short line it says again, so they cost no voice credits after the
+  first time; another voice or speed makes them anew.
+- Plugins' settings read like Settings' own: grouped under headings, headed by what the plugin does, a short line
+  under each setting. A setting that only matters while another is on sits under it, dimmed until it applies;
+  defaults show as values ("Automatic" where empty means that); lists of sites, logins or codes are chips with Add;
+  what few change folds away (the companion's Jobs, its voices' details); and Edit as JSON opens the settings file.
+- Workspaces: All tabs is now the Workspaces page. Each workspace there shows its icon, colour and name: a click on the
+  name renames it, right-click or its … button has the switcher's menu (icon, colour, container, duplicate, delete), and
+  New workspace at the end makes one, named in place. Drag the switcher's button onto a pane to open the page there.
+- Workspaces: up to nine (⌃1 to ⌃9). The switcher lists only the ones in use and a New workspace row; deleting one
+  moves the ones after it a number lower (Undo puts it back where it was), and `vau workspace delete <n>` does it too.
+- Browser: drag a page's container from its address bar onto a pane, its edge or the tabs to see that container's
+  sites and logins there. The Sites page opens as `view:sites`.
+- Notes: a phone back from another app no longer saves an older copy of a note over newer text (an agent's, another
+  device's): an editor left behind a rename, or one that wasn't typing together, reads and merges what changed first,
+  and every editor reads the note again when the app comes back.
+- The companion looks things up (`vau which`: pages, hidden sidebar panels, settings, commands, operations, and the
+  vault's folders and notes by name) before saying one isn't there or can't be done, then tries it. Opening a view that doesn't exist names the closest real ones instead of an empty tab, a sidebar panel opens
+  by its key, and an open that lands on an empty page or a placeholder says so.
+- The icon picker is a grid of every Lucide icon and every emoji, found by name (`ninja`), the one selected named below
+  it, with buttons to jump to a group and the arrow keys and Tab to move; a colon (`:heart`) finds emoji only, and
+  Settings' Emoji in the icon picker leaves them out.
+- Desktop app: an update's relaunch never comes while you talk to the companion (a key held, its answer coming, or an
+  ask in the last 10 minutes, even with keys untouched); an ask cut short by a quit is told at the next launch, and the
+  companion's exchange numbers go on across restarts instead of starting at 1 again.
+- Tab groups: drag one onto a workspace in the switcher to move it there whole (its tabs, name, colour and fold, with
+  Undo; `vau workspace move <group id> <n>`). A tab held over a folded group lights its row and counts itself in, its
+  card stepping aside so the group shows; held a moment, the group opens to drop among its tabs, and folds again if
+  nothing went in. A dragged group looks like its chip on a stack of its tabs.
+- Workspaces: drag one in the switcher (or Move up and Move down in its menu) to reorder them; its number and ⌃ key
+  follow, on every computer. A workspace's colour tints its row in the switcher and its card on the Workspaces page.
+- Terminals: a session's hover preview shows the pictures it shows (a screenshot an agent read) instead of a block
+  of garbled characters, and `vau terminal capture` writes `[picture]` where one is (as a page, the picture itself).
+- Folders: a folder anywhere on the computer opens in a tab as the vault's folders do (list, grid, columns, gallery),
+  without what its .gitignore leaves out: typed in the switcher, from `vau open ~/Projects/lighthouse`, or asked of the
+  companion, instead of in Finder. Its files open in Vaultite.
+- Workspaces: turning them on never hides a tab: the tabs on screen go into the workspace, as a group named after the
+  device when it has tabs of its own; turning them off keeps the current workspace's tabs. The Workspaces page (⌃0, atop the
+  switcher) shows every workspace's as the Tabs panel does: groups fold on a click (their count in their pill), a row
+  opens its tab or pane, closes on hover or middle-click and has the tab's menu, and drags
+  like the Tabs panel's, to reorder a workspace's tabs or move them and groups to another workspace's, tab search finds them, a speaker marks the workspace playing sound, and a web page
+  whose tab is in no workspace closes. A workspace's settings say where its web pages and terminals open.
+- Browser: logins come only from containers; each workspace's own logins from before become a container named after
+  it, once, on each Mac, so nobody is signed out.
+- Click a shortcut where it shows (the command palette, menus, the sidebar, a new tab, Hotkeys) to change it on the
+  spot: press the new keys, Escape keeps the old ones; keys another command has ask Replace or Keep both, with Undo,
+  Remove and Restore default.
+- Inbox: Mute the <account> account on an agent's thread stops that account's sessions coming to the inbox, with
+  their toasts and notifications, and settles the ones open, Claude Code on the web's claude.ai accounts too; the Agents
+  panel's Notifications lists every machine's accounts and any muted one.
+- The companion is one talk on a Mac: asked in one vault, a follow-up in another knows what was said, and its chat
+  (Show the companion's chat: the Conversations view's Talk) shows every day and every vault's asks, its session's
+  context a button there.
+- Version history replaces Review: a file's history shows who wrote each version (you, an agent by name, another app
+  or device) and what it changed, marked in the note, with Restore this version and Undo, on the Mac and the iPhone; a
+  file an agent changed says so at its top. Nothing waits to be kept or reverted any more (`history.restore` for agents).
+- Companion: switching to another vault's window while an answer is said no longer cuts it over to this Mac's voice,
+  and a voice that fails (out of credits, a refused key) is logged with its provider and why, which `vau companion
+  usage` reports per voice.
+- iPhone: Find in note at the top of a note's More menu, as ⌘F on a Mac.
+- Companion: after opening something it points at and names the pane that really shows it (a new tab, or a pane
+  that moved on), and when no pane shows it yet it says so instead of saying it opened.
+- Companion: a Talk key ask is never left in silence. One you speak at length always gets a line back (only a
+  closing word like "thanks" may pass unanswered), and one cut off by your next press is answered with that press's ask.
+- Companion: a ring or point at words in a web page lands on what the page shows, never on words a dialog's
+  scroller or a carousel hides, and it can ring a page's element by its ref ([ring e12]).
+- Terminal: an agent's terminal no longer goes blank mid-session: terminals opened before 0.14.0 still ran the old
+  terminal server, without its fix for screens that crashed or hung on big pictures; a new one takes them over.
+- Inbox: an agent asking a decision it doesn't wait on is told to do its default now, since the user keeping that
+  default sends it nothing (only an answer changing it comes back).
+- Browser: sites like Google Meet ask for the camera and microphone instead of saying they're blocked, and a site
+  information button in the address bar (and Site permissions in the browser's settings) shows and changes what each
+  site may use: camera, microphone, location, notifications, in each container.
+- Companion: what it draws on the screen for an answer stays with that answer in the chat (Conversations and the
+  Companion page), with a Play button that draws it on the screen again, beat by beat, instead of being gone once it fades.
+- Browser: a link from another app that reaches a sign-in no container is signed in to asks which container to sign in
+  in, the one signed in with a login your passwords have for the site first; a username-first sign-in page shows the
+  address bar's key, a sign-in page with saved logins offers to fill one (the one this container already uses, among several), and agents read a code a site mails with
+  `vau browser code`.
+- Search: a full path typed or pasted in the switcher (/Users/…, ~/…, file://…, or a path in the vault) opens that file
+  or folder from the first row, when it's there; a full web address opens first too, and phones and browsers get it.
+- iPhone: a terminal's key row stays right above the keyboard, and the page no longer pans when you start typing or drag
+  the terminal.
+- Updates: a checkout set right after diverging updates at its next look, without waiting for a newer commit.
+- Updates: an app running from its code store keeps updating after main's history is rewritten with the same files (re-signed
+  commits, say), instead of stopping as diverged.
+- iCloud: a note iCloud is slow to give no longer holds the server up when the vault is read again meanwhile.
+- Faster: what the server looks up on its own (the companion's look at the browser's sign-ins, every 10 minutes) no
+  longer walks the whole vault while the file watcher has heard nothing new.
+- Desktop: a pop-out's tab held over a note in the main window shows where it would land and lands there again.
+- Phone: turned sideways, the app keeps the phone's layout instead of switching to the desktop's, so a video playing (full
+  screen too), a terminal or anything else carries on undisturbed, the page keeps its place, and the header, sidebar,
+  sheets and page keep clear of the notch; notes keep a reading width, while terminals, chats and graphs use the whole
+  screen.
+- Phone: a sideways swipe anywhere on the page opens the sidebar it moves toward (right for the left one, left for the
+  right one), as Obsidian's and Slack's do, not only from the screen's edge; a wide table or code block scrolls first and
+  passes the swipe on at its end, a row's swipe keeps its buttons, selected text and vertical drags open nothing, and a
+  split's last page hands it on too. From the edge it always opens (over a task's checkbox, a terminal, the bottom bar's
+  row). The sidebar follows the finger with no stall as it starts, lands on a spring that carries the finger's speed, can
+  be caught mid-slide, and shuts by a swipe anywhere on it or its shade; swiping a row in it works.
+- Phone: the header is clear at a page's top and gets its frosted glass and a hairline once the page scrolls under it,
+  as iOS's do; a sheet's bar floats like the app's, so the tab list's + sits exactly on the bar's + and Done where the
+  menu is; the tab list's top row lines up with the header and stays as the tabs scroll; the bar's buttons are tinted.
+- Phone: a terminal, the graph, a canvas and other views that fill the screen fit it exactly, ending at the bottom bar,
+  so the page no longer scrolls a little under them.
+- Phone: every field has Done over the keyboard to hide it (the palette, search, sheets, chats), not only notes; the
+  palette stays open with its whole list, and keys over the keyboard fade in once it settles instead of jumping with it.
+- Phone: while you type a note's name, keys over the keyboard put the name back, go to the text, or hide the keyboard.
+- Phone: the bottom bar steps out of sight as soon as the keyboard starts to rise and comes back only once it is down.
+- Phone: a swiped sidebar row shows its buttons at once, even while a slow connection is still loading.
+- Jobs: one that says it's working but has shown nothing for 20 minutes needs you, saying it seems stuck, with Restart it
+  (its conversation kept) and Keep waiting; a follow-up it can't take says so; stop always works on a job at work, and a
+  terminal no longer freezes when its screen falls behind.
+- Notes: Add photo is Add photo or video, so the iPhone's library offers videos too.
+- Updates: a CI run that passes when it is re-run is taken within a few minutes, and shows as running while it re-runs.
+- Voice: on a busy Mac, the end of an ElevenLabs answer is no longer cut off.
+- Notes: a note open twice (a tab and a sheet or sidebar) no longer saves one copy's older text over the other's, or
+  over a change an agent just made.
+- Notes: a row of cells pasted from a spreadsheet goes in as its text again, not as a table of one header row.
+- Notes: a card dragged to another column of a board in a note moves there again, instead of dropping into the note as
+  a link.
+- First run: the look page's layouts fit its card, all four of them, instead of the first and last being cut off.
+- Browser: quitting on a busy computer no longer loses a web tab's last picture, so it shows again while the page loads.
+
+- iPhone: the header and the bottom bar step out of the way while you scroll down a page and come back when you scroll
+  up or tap; the bottom bar floats as a rounded bar, and the header stays in place while the keyboard is up.
+- Phone: a scroll up that carries on past the top brings the pull-down actions, and a finger resting on a sidebar row
+  before swiping no longer lifts a copy of it sliding with nothing behind it.
+- The companion knows which sites the agents' browser is signed in to (`vau browser sites`), and reads a site's
+  dashboard there, changing nothing, when a command line tool has no login.
+- Phone: the screen's edges no longer lie over the page: a tap there reaches what's under it and a scroller there
+  scrolls, while a sideways drag from the edge still opens the sidebar. A held link in a note shows its menu, held Back
+  and Forward list where they go, and the held tabs button has New tab and Close tabs; small buttons and the Files
+  page's More buttons are a finger's size.
+- **Settings, simpler**: each page shows what most people set and folds the rest under Advanced (AI's agent files,
+  inbox and MCP; Files' history, links and tabs), which search still opens. AI's Talk key model and its effort are one
+  menu, as Claude's model picker is. Share & sync is redrawn: Vaultite Cloud's sign-in a row with its button, notes
+  lined up with their titles. Get plugins dims what you have and lists it last, and a pack's card says Get with the
+  plugins it brings where a plugin's Install is.
+- **Cloud jobs**: a job in a cloud session stays working while its session sits idle before its first step, and reads
+  done only once the session answers; one that rests 20 minutes with no answer fails, saying so. A redesign of
+  Vaultite's look runs on one of your Macs rather than in the cloud.
+- **The iPhone app's Downloads page**: its offline media cap is a real 2 GB again (it read as negative, so every sync
+  said the phone kept more than its cap). The page shows how much is kept against the cap by kind, lists each file
+  with a picture or its kind's icon, opens it on a tap, and removes it with a swipe.
+- **Typing on the iPhone**: while the keyboard is up, the bar at the bottom steps aside and toasts sit just above the
+  editing keys.
+- **The Companion page shows what each answer was to**: your edit, your reply or your verdict on its note sits above
+  what it said, beside your asks.
+- **Opening a video on the iPhone no longer makes the app spin**: its download button stopped asking the phone again
+  on every draw.
+- **Mac-only work runs on a Mac**: a job about something only the Mac has (the window's traffic lights, the menu bar,
+  the notch) or about the iPhone app goes to a Mac, even when a Linux machine is idler, and its why there says so.
+- **A server no longer hangs on a slow machine**: a request to another machine that timed out could leave the server
+  stuck in a loop, answering nothing while its memory grew (its fetch now speaks HTTP/1.1, not Node 26's HTTP/2). A
+  service's server that stops answering for 30 seconds anyway is killed and restarted, not left hanging.
+- **Tabs and terminals show what's in them on hover**: resting the pointer on a tab in the tab bar or the Tabs panel, a
+  file in the file tree or a pinned page shows a card with a picture of it and where it is (a web page as it last looked
+  on screen), and a terminal's tab or its row in the Terminals panel shows its last lines, in colour;
+  the tab switcher's terminal cards show them too.
+- **The note switcher previews the highlighted result**: on a wide enough computer window, ⌘O shows the note under the
+  arrow keys or the pointer beside the list, drawn as it reads (a dashboard as a dashboard, an image as itself); a note
+  found by its text shows the passage found, lit.
+- **Conversations, tidied**: a turn's time and what the companion did sit on one line under it, cut to fit, never over
+  the job below; no cursor beside its answers; jobs are quiet rows, the tabs smaller, and each comment a card with who
+  wrote it, its quoted text and its reply.
+- **The slash menu shows what each option makes**: every option has its icon, and the one highlighted (by the arrow
+  keys or the pointer) shows a preview beside it, drawn from a sample: a real heading, table, callout or block.
+- **Cards as see-through as pages**: with translucent pages, a pane shown as a card lets the desktop through as much as
+  one without cards; the tint between the cards no longer sits under them too.
+- **The web demo can be a Mac window**: embedded with `?window=mac`, it lays out as the Mac app does, with the traffic
+  lights drawn in its sidebar's top row (vaultite.com's demo drops its own title bar for it).
+- **A site style's font keeps its own width**: a page whose style puts it in the vault's font no longer squeezes it with
+  the site's width settings (YouTube's titles, in its new narrow font).
+- **The web demo keeps file history**: an edit there keeps the note's earlier text, and search reads long notes whole.
+- **Electron 45**: the desktop app's browser is Chromium 156, up from 152; sharing your screen in it keeps working.
+- **Show me on a change it can't see here**: a change on the iPhone or another machine is said where to see it there,
+  with its recording when it has one, never looked for on the Mac's screen; and a tour that loses its way says why in one
+  plain sentence.
+- **The companion finds its way around Settings**: asked to take you to a setting, it opens Settings at that row in one
+  step, flashed (`vau settings show summoned_model`); it now reads Settings and other app pages, switches and all, and
+  the companion's model for summoned asks sits under its row in Settings, AI.
+- **Simpler pages and settings**: a plugin's page is its name, one line and its switch, then a drawing of where it shows
+  up in the app and its commands to try; settings rows say a few words, the rest on hover. Plugin updates sit at the top
+  of Plugins, Get plugins' categories scroll with arrows, and the Standard layout starts without Inbox or Workspaces
+  (the Inbox button shows when something waits). A note's top bar spans its pane, its line only once it scrolls.
+- **Research, a layout for academics, and References**: cite from Zotero (live on its computer, its zotero.org library,
+  or its Better BibTeX export), JabRef, Mendeley, EndNote or any BibTeX, RIS or CSL file as you type (`[@`), Pandoc's
+  citations shown in APA, Chicago, MLA, Harvard, IEEE, Vancouver or any CSL style, each note's references in the right
+  sidebar and at the end of an exported PDF, literature notes with Zotero's annotations, and references added by DOI,
+  arXiv id or ISBN. Agents search the library and read papers with their citations formatted.
+- **A phone's terminal holds still**: the keyboard coming and going no longer resizes the shell (Claude Code redrew its
+  whole screen each time); the grid slides up to keep the cursor in sight. Back from the background, the terminal stays
+  on the lines you were reading, with no blank flash while it reconnects.
+- **Clipped X posts keep their lists**: a post's lines starting with "- ", "1. " or "> " come through as a list or
+  quote, no longer as "\- Taking lessons".
+- **The app keeps loading after an update**: a server that took a web-only update no longer loses that web build
+  to the next update's cleanup, which left the phone and browsers on "File not found" until it restarted.
+- **Effort for summoned asks**: a companion setting beside Model for summoned asks (low, medium, high; low as before) sets how
+  hard its Talk key's answers think; a new model or effort starts its session afresh. Its pointer lands on Settings, not
+  the sidebar's foot.
+- **Agents' pages keep off the keyboard**: a page out of sight (an agent's, a background tab) loading no longer takes
+  the cursor from what you're typing in; agents' pages act as focused without it.
+- **Agents' snapshots no longer freeze the app**: an agent reading a long page (a snapshot, an act's changes) no longer stalls
+  typing and clicks for half a second; the page builds its snapshot itself.
+- **Search results in a note**: a ```` ```query ```` fence, as in Obsidian, shows the files its search finds and their
+  matching lines, kept up to date; a click opens one; `vau render` lists them for agents. `/Search results` adds one.
+- **Pinned commands in the palette**: a row's pin keeps a command at the top of ⌘P (`.vaultite/palette.json`,
+  `vau palette pin`); an Obsidian vault's pinned commands and, once, its bookmarks (into Pinned) come along.
+- **Notes dragged into a sidebar become panels**: a file dragged between a sidebar's panels (onto a heading), from the file tree, a
+  pinned page, Recent files, links, search or a tab, is drawn there as a panel, the panels making way for it; a tab
+  moves there and closes, as in Obsidian. A sidebar's toggle takes one too, at its end.
+- **Docked notes are editable**: a note in a sidebar is the editor its tab has (live preview, saving, links opening
+  in the main area, a file dropped on its text linked), with its own view on its heading (⌘E while typing in it); a
+  tab of the same note shows what's typed in either as it's typed. Dashboards and plugins' files draw as before.
+- **Notes take several cursors, HTML pastes as Markdown, and inline footnotes and custom callouts draw**: ⌥-click
+  adds a cursor, ⌘⌥↑ and ⌘⌥↓ one above or below, ⌥-drag a column (⇧⌥-drag one alone), and Select next occurrence is
+  in the palette; a web page's formatting pastes as Markdown (⇧⌘V keeps the text) and an address pasted over selected
+  text links it; `^[text]` is a footnote; a callout type of your own keeps its name for snippets to style.
+- **Block references, as in Obsidian**: `[[note#^` suggests a note's paragraphs and list items and gives the picked one
+  a `^id`; `[[##` and `[[^^` find headings and blocks across the vault; Copy link to block (the editor's menu, the
+  palette); `vau block-link` does it for agents.
+- **Files dragged from inside the app onto a note's text go in as links**: from the file tree, search, Links, Pinned
+  and Recent, at the point they're let go; an image or other attachment as an embed.
+- **New link format and Use wikilinks** in Settings, Files: shortest, relative or absolute paths, wikilinks or Markdown
+  links (from Obsidian's settings when unset), for every new link: suggestions, drops, pasted files, copied links.
+- **Backlinks in document**: a Links setting, off by default, shows a note's linked and unlinked mentions under its text.
+- **An app on the internet asking to allow a vault plugin reaches the owner again**: the ask, which names the plugin
+  and what it discloses, failed before it was sent, so the app was only told it couldn't.
+- **Errors the app catches are kept in Errors, and a base's failed edit says so**: a Vim command that couldn't be set up
+  or a view that couldn't close cleanly showed only in the browser's console; a property edited in a base that couldn't
+  be saved went back without a word.
+- **A delegated task's answer is entered again when its parent's input still shows it**: when the parent agent's Enter
+  didn't take (a dialog over its input), the answer sat there unsent; Vaultite now presses Enter once more.
+- **`vau inbox` counts settled results as the inbox does**: it counted only settled events, so it said 1 where the
+  page's Settled said 2; `--done` lists both.
+- **A settled result's file no longer keeps `pinned: null`**: settling a pinned or snoozed result removes those keys.
+- **On Linux, terminals no longer hold the desktop app's sockets and files**: the terminal keeper and its shells
+  inherited them, so a closed app's debugging port stayed open until the keeper exited.
+- **A tap as a toast leaves reaches what's under it**: a leaving toast took taps meant for the bar under it, such as
+  the phone's tabs button.
+- **An agent's sign-in with submit waits for the page it leads to**: on a busy machine, or a site whose submit starts
+  late, `vau browser login --submit` answered on the sign-in page still.
+- **Updates download less, and the app starts from fewer files**: a change to one part of the interface re-downloads
+  about 40 KB rather than 150 KB, and a first start loads 45 files instead of 103.
+- **An agent done in its terminal stays done**: on a busy machine, its state file read again late made a terminal back at
+  its shell show working again for a few seconds; a read with nothing new written is now ignored.
+- **Terminals and chats open on a busy machine**: the terminal server and the chat keeper are waited for as long as they
+  take to start, rather than given up on after a few seconds; one that ends as it starts says so at once.
+- **Edit source and a found line land on their line on a slow machine too**: when the file took more than 4 s to show,
+  the cursor stayed at its top; it now waits for the file, until you press or type something else.
+- **A site's own full-screen button works in the video player's window on a busy Mac too**: the player no longer
+  takes the video back while the window is still turning full screen, which made the site's request fail.
+- **A busy Mac no longer cuts the end of what the cloud voice says**: a piece whose last audio came while the app was
+  held up ended before saying it.
+- **The app loads 84 KB less JavaScript before it draws**: its files no longer list, for each feature loaded later,
+  the files the app has loaded already.
+- **Open search in a tab goes to the search tab you have**: with a query typed, it opened a second one.
+- **Unlinked mentions skip #tags**: a note's name inside a tag (`#lighthouse/launch`) counted as a mention, and Link
+  rewrote the tag into a link; tags are now left alone, like links and code.
+- **The companion's cursor and your words show after an update**: when the menu-bar helper started while the server
+  restarted, its overlay never loaded and drew nothing while the window hid its own cursor; it now loads again by itself.
+- **A follow-up to a job arrives whole**: after a terminal's screen started over, a long message typed to a job reached it
+  as only its last part; the screen now keeps its program's paste mode, and a follow-up's context comes before the ask.
+- **A terminal whose screen had to start over shows its program again**: when its screen couldn't read some output and
+  started again blank, an agent done with its turn left the terminal blank with only a cursor; its program now redraws it.
+- **"Sign in with Google" buttons open their sign-in popup in the built-in browser**: a press on one did nothing, as
+  pages were offered FedCM with no account chooser and Google's button frame was told a different browser than its site.
+- **Editing a plugin's notes no longer pauses it, and a paused plugin can't go unnoticed**: a vault plugin waits to be
+  allowed again only when its code changes, not its Markdown notes (an agent's brief) or settings; one that does stays in
+  the inbox until it's allowed (its row's Allow button does it; Settle says it stays paused), and Errors and the schedule list say each run it misses;
+  a Python command no longer pauses its own plugin by writing bytecode into its folder.
+- **The Mac's traffic lights and the sidebar button sit at the window's top again**: with panes as cards and the left
+  sidebar pinned, they no longer sit a gap low in the window's corner.
+- **An update being prepared is never cut short**: the app no longer relaunches or restarts its servers while it builds
+  the next commit, and a build still running when it quits ends with it rather than running on alone (and crashing).
+- **Show me says plainly why a merged change isn't on this Mac yet**: what changed, that the app picks it up at its
+  next update, and how to get it now, never commit ids or file names; and `vau version` names the commit the menu-bar
+  helper really runs after it reloads onto an update, so a change already live there no longer reads as missing.
+- **The companion and agents see where a page's links go**: what they read of a web page or a note (the text under the
+  pointer, a page's text and snapshot, a panel) has each link's host and path beside its words, without tracking parameters.
+- **Stopping the companion as its session starts ends that session**: the session it was starting no longer stays up
+  after a stop, and an ask whose message was still being made isn't sent once it's stopped.
+- **A job whose terminal ends while it fixes CI forward says it needs you**: its card no longer keeps saying it's
+  going live; it says no fix landed.
+- **The companion teaches and plans with you in a note beside you**: asked to explain a topic, a paper, a recipe or a
+  trip plan, it opens a new note in a split and writes it a section at a time as it talks, instead of handing it to a
+  background job; a quick tweak to the page or note in front of you is made live too, with only the lasting fix handed
+  off; code and long research still go to jobs, and "do it here" or "in the background" decides either way.
+- **The companion's cursor no longer flies to a page's top left corner**: when it opens a page or looks at a whole
+  pane, it stays where it was over that pane (or comes to its middle), and the summoned cursor stays by the pointer.
+- **The companion shows real pictures from the web on the screen**: an image card fetches its picture in Vaultite, so
+  sites that refuse hotlinks still show, and `src: "search: star trek phaser"` finds one on Wikipedia or Wikimedia Commons.
+- **A site's style opens beside its page**: "Style this site…" no longer shows its new file as gone, a style's
+  shorthand holding a variable (`background: var(--vault-background)`) applies with longhands after it, and agents and
+  the companion are told to fix a page's dark mode through its style.
+- **An update's server restart always brings the desktop window's server back**: a restart whose server didn't come
+  back (its exit unheard, a start that failed, one that won't stop or doesn't answer) is started again, and only
+  repeated failures tell the user; restarts asked together are one; the main process logs its servers' lives in main.log.
+- **A plugin's scheduled job can run at a time the user picks in its settings**: a manifest's `at` of `"{morning}"`
+  follows that setting, so a brief's time changes in its settings sheet; a value that isn't HH:MM holds the job, saying why.
+- **The sidebar's search field sits evenly under its header**: first in the sidebar, it's as far under the header's
+  icons as it is in from the sidebar's edge, no longer low.
+- **A browser page under its toolbar has square top corners**: with panes as cards, its top corners no longer curve a
+  second time below the toolbar's rounded ones.
+- **The "Closed 3 tabs" toast goes once they're back, however late**: held under the pointer past 10 seconds, it
+  stayed after ⌘⇧T reopened them, its Undo doing nothing.
+- **The Mac's traffic lights sit cleanly beside a sidebar rail with panes as cards**: with no tab bar they and the
+  sidebar's button move into the top-left card's title row instead of straddling its corner, and the sidebars' top
+  rows line up with the cards' title rows.
+- **A terminal showing big pictures no longer freezes the window**: a terminal's screen with a long history and a
+  large picture in it (Claude Code reading screenshots) could crash or loop forever on the next lines of output.
+- **The companion says a handoff once**: when its own words already said it handed something off, the app no longer
+  adds its "Handed that off" line, and several jobs in one answer get one line.
+- **A job you talk with keeps its cursor** instead of losing it to the companion's minute check mid-talk.
+- **An agent's cursor stops showing it writing once its words are in the note**: after Put in note, taking a
+  proposal's change or a kept highlight, it no longer stays on writing till the agent next does something.
+- **The app loads about 190 KB less script at start**: it bundles only the plugin modules vault plugins may import.
+- **An agent's browser ask no longer toasts over its own card** when the window wasn't in front as it came: the
+  card says it, and away from the window the system notification does.
+- **Jobs no longer flip to waiting when a busy machine is slow**: a terminal server counts as unreachable only when it
+  misses a quick check too, not after one slow screen capture, and a job's card says so only after 30 s of that.
+- **A job's card counts only its own changes**, not main's progress after it rebased or landed, and Show me with no
+  demo to play says in plain words what changed and where to see it, never commit ids or diff counts. A job whose
+  terminal never reports its state leaves Starting once its agent is at work.
+- **The Talk key's companion answers each ask once, and never leaves one unanswered**: no words said twice, no late
+  mark over a retry, and asks behind a failure are answered or told why.
+- **A follow-up a job's terminal didn't take leaves the job as it was**: one already on main no longer offers Keep and
+  merge again.
+- **Settings' AI section has a little robot for its icon** instead of sparkles.
+- **Remote access in Settings is now Share & sync**: its page says plainly that Vaultite Cloud and shared folders are
+  optional, and that without them Vaultite stays on your own network.
+- **A faded file bar comes back from anywhere along its pane's top**: the margins left of Back and right of the
+  last button bring it too, not only the bar itself.
+- **On Linux, a closed terminal's shell ends at once**: the terminal server no longer keeps open the ptys of
+  shells the app's server ran itself when it started it.
+- **An Inbox request says which session asked, with Go to session**: a request for your yes (to share a folder, log in
+  to a site, run a tool) and a decision name the session that asked, and Go to session opens its terminal.
+- **The desktop app's first-run window and screen sharing's pages open again**: since updates began downloading only
+  the files that changed, they stopped on an error as they started.
+- **A shared folder's link opens again for its guests**: since updates began downloading only the files that changed,
+  a guest's page stopped at "Vaultite couldn't load".
+- **A new vault's welcome card shows on a Mac even when it opens right after the vault is made**: it no longer
+  depends on the very first view of the vault having heard the offer.
+- **A big vault opens again in a fraction of the bytes**: its state comes in pieces named by their content, which the
+  phone or browser keeps, so opening the app after an agent wrote a note fetches only the pieces that changed (a tenth
+  or less) instead of the whole vault's state again; a small vault's comes whole, as before.
+- **Terminals over a phone's network move a seventh of the bytes**: the app's live connections are compressed when they
+  cross the network (a terminal's output, the live state); on the Mac itself nothing changes.
+- **Faster starts after an update, on a phone above all**: the app comes in a file per folder whose names last, so an
+  update downloads only the files it changed (about a fifth of the app, often much less) instead of all of it again.
+- **Jobs start from the newest pushed commit**: a coding job over a checkout nothing pulls starts from its branch's
+  remote tip, not days behind, and reads the repo's job rules there; a closed job's worktree is removed once nothing in
+  it exists only there.
+- **Connections over Vaultite Cloud**: opened at `<you>.vaultite.app`, Connections and Remote access list the AI apps
+  connected (access, last used) and end any of them, link to your Vaultite account, and say calmly what's set on the
+  Mac itself (a new app's code, more access, owner tools, signing in or out) instead of an error; so do Settings'
+  layouts, Get plugins and Shared folders there, with no "Couldn't list the bundles" toast.
+- **A note open in two windows no longer loses what others wrote**: when a window that had only watched (yours, or a
+  guest's) was left alone in a note, it saved its old text over what the other window typed and what an agent or vau
+  wrote meanwhile.
+- **Downloads show as they go**: a download in the browser says it started, then the page bar's Downloads button fills
+  a ring as it goes and the status bar names it; its list shows each one's progress and time left, with Open, Show in
+  Finder, Pause, Cancel and Retry, and a toast says when it's done (Open) or failed.
+- **Sharing works through Vaultite Cloud**: signed in, the people you share a folder with open it at
+  `share-<you>.vaultite.app`, an address of its own, with no tunnel to set up. The new Shared page (the palette, or
+  Connections' Remote access) lists every share: who, what they may do, until when, when they were last there and who's
+  in one now, with the guests' address to copy; change access, extend it, remove it, or give someone a new link
+  (`vau share new-link`) when theirs is lost.
+- **Quiet panel headings**: Settings > Sidebars can make the sidebars' panel names a slim gap that shows its name only
+  when you point there or hold ⌥, as browsers' vertical tabs look, one look for every panel; right-click a panel to
+  fold it. Panels ▸ says which ticked panel is hidden while empty. Inbox, Links and other panels whose content needs a
+  name keep theirs, and an empty Inbox takes no room.
+- **Jobs can run in the cloud**: set Jobs' cloud account and a coding job in a repo whose `.vaultite-jobs.json` says
+  `"cloud": true` may run as its own Claude Code on the web session (after the always-on machines with room), followed
+  from here: its questions, follow-ups and landing as any job's, its card opening the session.
+- **Menus, the palette and dialogs close the way a Mac's do**: they fade out instead of vanishing, a menu's chosen row
+  blinks first, and a right press slid onto a row and let go picks it. The focus ring settles in, what's selected
+  greys while the window is in the background, and a name a file can't take (already there, a dot first, too long)
+  shakes its field and keeps what you typed.
+- **The companion's short notices sit at the top right again**: "Saved in Captures" and every other word it shows for a
+  moment (Noted, Sent to, Couldn't save it) no longer land in the screen's top left corner, over the menu bar.
+- **Updates no longer stall on GitHub's hourly limit**: a server with a signed-in gh keeps its larger allowance of
+  calls to GitHub, whatever GitHub answers, so new commits reach it within minutes.
+- **The screen recorder's buttons stay out of what it records**: they sit outside the box (above it, else below or
+  beside it), never inside where they'd be in the video, and a grip after the close button drags the box.
+- **The Mac's window buttons no longer blink out** when you pin the left sidebar while it's slid in from the edge.
+- **A split's pane tabs stay put in the sidebar**: a split whose panes have tabs of their own lists them under its row
+  until you click a cell's +n, which folds them into the row (and lists them again) with a motion; switching tabs no
+  longer opens and closes them, and the +n steps aside for the X on hover instead of hiding under it.
+- **Jobs go to the machine with room for them**: a job goes to a machine that's on and has what it needs (its repo, this
+  vault for notes, the macOS its repo's `.vaultite-jobs.json` asks for), the least loaded first, then your order in
+  Jobs' machines; a coding job may run on a machine with another vault, its knocks, inbox asks and demo reaching you here.
+- **Sidebar panels fold and open smoothly**: Pinned's tiles stay in place as it opens, the panels below no longer jump,
+  and Inbox's unread dots don't pop in again each time.
+- **Jobs wait on every kind of background work**: a job also stays working, not ready for review, while its agent waits
+  on a Monitor or on a command its timeout moved to the background, and until a stopped task ends.
+- **A kept drawing looks in Excalidraw as it did on the screen**: Keep saves a video card as its first frame with a
+  play badge, linked to the video, a picture as itself, and copy, open and choice buttons as buttons; every label
+  wraps inside its box, and a box grows to fit its words.
+- **An always-on Mac's app restarts into its update**: with automatic updates, a build that got ready while every
+  window was already idle no longer waits forever for one to be touched; it restarts once the Mac is quiet, and
+  update.log says what a restart is waiting on.
+- **Tries run on your own machines first**: `npm run verify -- --try` runs an OS's part of CI's tests on an idle machine
+  of your Machines with that OS (or one reached by ssh only, a Windows VM), in a fresh worktree, and sends only the
+  rest to GitHub's runners; `VAULTITE_TRY_MACHINES=off` turns it off, `"try": false` on a machine leaves it out.
+- **`vau version <commit>` counts a web-only update as live**: a commit is live once the updates took it and each part
+  its change reaches (the server, the web app, the desktop app) runs it or a later commit, so a web build taken without
+  a restart no longer waits for one, and a desktop app behind holds only a commit that changes it.
+- **Split panes move smoothly**: switching to another tab fades its panes in, a pane's other tab (a pinned page opened
+  in a split) fades in under a bar that stays put, and opening or closing a split slides each page under its bar
+  instead of jumping. Reduce motion and animations off keep it still.
+- **Jobs no longer wait on "Trust this folder?" in your own repos**: a job you or the companion hand off in a checkout
+  already on that machine is trusted in its Claude Code account before it starts; a folder that isn't a checkout, or a
+  handoff from a script or another agent, still asks.
+- **Jobs over a live site run in the repo that deploys it**: work asked over a page like your website, in another
+  browser or the app's own web viewer, goes to the checkout whose deploy config names its address (its wrangler route
+  or CNAME), on a machine that has it, never a repo of the site's name guessed from the page's title; when no machine
+  has that checkout, the companion is told so instead of starting it in the wrong repo. An idea for a product's website
+  asked anywhere ("the Vaultite website", "vaultite.com") goes to the checkout deploying that site, not the app's repo
+  of the same name: the companion picks repos from every machine's checkouts by what each is (its README, the sites it
+  deploys), and the job's "why there" says why it moved.
+- **Jobs about Vaultite itself run in Vaultite's repo**: work asked about the app's own look or behaviour (a sidebar
+  panel, a menu, a pane's bar, the web viewer's own bar, the companion) goes to your checkout of Vaultite, whatever page
+  or note the pane shows, not the vault; your notes and errands still run in the vault.
+- **Windows: the app's shared plugin modules load once**: the tab list's devices, the web viewer's containers and settings, and the terminal's folding were each built in twice on Windows, so the two copies could disagree; the build now refuses a module bundled twice.
+- **Jobs that land themselves end when they push**: the server waits for the commit to go live, marks the job live
+  (or says why not), and sends CI's failures on it back to the job to fix forward.
+- Companion: a job that lands itself no longer records a demo video; Show me plays its demo live once it's in (the setting Jobs' demo videos: auto, always or never).
+- **Claude Code sessions the app starts read the vault's rules once**: a terminal's or chat's session no longer gets
+  the plugins' lines again in its system prompt when its CLAUDE.md already has them, and its `vau mcp` server leaves
+  them out of its instructions.
+- **The companion remembers where its marks landed**: each ask tells it what it pointed at or drew on your screen in
+  the last few minutes and where each landed, so asked "why did you draw there?" it answers from what you saw. A mark at
+  a pane lands on the pane you see, never a hidden copy of it.
+
+- **The inbox stops filling with status**: a session's turn its own watcher or schedule started, or one saying nothing
+  needs you, stays on its row instead of under Needs you; a claude.ai session is one quiet row, not a message each
+  turn; and terminals started while the terminal server can't are one error in Errors, not a message each.
+## 0.13.0 (2026-11-11)
+
+A first run made for anyone: a new vault asks before any AI and writes only what you chose, AI off really is off at
+once, narrow Settings reaches Plugins and every section, and Markdown links count as links in backlinks and the graph,
+as in Obsidian. Also device sync, an Agents panel across every machine with groups and muting, jobs that land
+themselves and show a demo video as proof, Claude chats that read like the Claude app's, a bookmarks bar in the Browser,
+tabs dragged into pop-out windows, and graph, canvas, title and template polish.
+
+- **A stuck terminal no longer freezes the others**: each terminal's screen in the terminal server runs on its own, so
+  one stuck on some output starts again blank instead of stopping every terminal. A terminal server that stops
+  answering is said in `vau errors` and `vau terminal`, new terminals start at once rather than after 20 s, and a job
+  whose terminal it holds says it can't be reached rather than working.
+- **Agents open things where you say**: "in a new tab in the left pane", "beside the one showing the brief", or a web
+  page "in my Personal container" (`vau open --in left`, `--container Personal`, and the companion's open); a pane or
+  container that isn't there is an error naming the ones that are.
+- **Linux: a relaunch reopens its vault**: the desktop app run from a checkout with `--vault <folder>` comes back on
+  that vault after an update's relaunch, not on its own code folder.
+- **Long browser waits last**: `vau browser wait --helped --timeout 600` (and other waits) waits as long as asked,
+  instead of failing after 90 s saying the desktop app didn't answer.
+- **Narrow Settings opens every section**: in a pane too narrow for the menu beside it (the first window, both sidebars
+  open), Plugins, Get plugins and each other section open in the menu's place, with a way back; so does the sidebar's
+  Plugins button, which did nothing there.
+- **AI off means off at once**: turning Use AI off (or answering Not now in the welcome) takes away the agents'
+  commands and keys (Open Claude Code, Ask the companion), the Agents panel, Agents at work, Screen, who wrote a line
+  (Provenance), Review, MCP Apps, the Inbox panel and the settings in Settings > AI right away, not at the next
+  reload. Dictation, the inbox's notices and Live answers stay; MCP still serves agents you run yourself. With AI
+  on, the status bar's Unlabeled chip says it's who wrote the file, you or an AI.
+- **A missing coding agent says where to get it**: opening Claude Code (or another agent) that isn't installed says so
+  in its terminal and in a toast whose Open goes to its site.
+- **Links in properties**: `owner: "[[Alice Park]]"`, a list of links and web addresses are drawn as links, as in
+  Obsidian; a click beside one edits the text.
+- **`vau notify --action-open` takes a file anywhere**: an absolute path outside the vault keeps its leading slash and
+  opens in the desktop app (one that isn't there is refused); a path inside the vault is its vault path.
+  Plugins button, which did nothing there. Plugins' number says what it counts (7 on), and Remote access says it's
+  optional. A setting's place from the palette (⌘↩) and Permissions open in Settings too, not over it.
+- **A cleaner first vault**: it opens on one Start here tab, not two; a layout looked at on the welcome card and left
+  leaves nothing behind (switching layouts takes back the guide the last one added, while unchanged; Undo puts it
+  back; a guide opens only the first time); Start here says only what's true (Settings > AI, no word of AI until you say to use an agent); the agent's
+  page and AGENTS.md and CLAUDE.md come only with Use it; and answering Not now no longer marks Standard as Changed.
+  Without AI its example notes are about notes (links, properties, daily notes, templates, the graph). A vault new to
+  the app has AI off until the welcome card's yes, and skipping the card is Not now; turning AI on adds no pages. Set up
+  Vaultite is one page with no page dots, and says it adds vau (installed as you go on, not as it opens).
+- **Note dates is off in new vaults**: nothing is written into a new vault's notes unless you turn it on (Plugins);
+  vaults that had it keep it.
+- **A note's name shows once**: a note whose text opens with its name as a heading (`# Lighthouse` in Lighthouse.md, as
+  Obsidian notes often do) shows it as its title only; the heading stays in the file, in source mode, and with Show
+  inline title off.
+- **Graph names never pile up**: a name that would overlap another fades out, the file with more links keeping its own,
+  and comes back as you zoom in or hover its dot.
+- **New notes keep their template's spacing**: daily notes and New note from template no longer add a blank line after
+  the frontmatter; the template's text comes as written.
+- **Canvas cards follow the pointer**: a dragged or resized card moves with it, settling on the grid only near a line.
+- **Move to Applications never replaces a newer or open copy**: a newer Vaultite already there is kept unless you choose
+  to replace it, and one that's open is left alone, with a word on why.
+- **Timelines read bold dates**: a line like `- **2026-04-22** | Meeting notes — Pricing chat` (as many write by hand,
+  and GBrain's pages do) reads as an entry instead of a line not understood.
+- **Markdown links count as links**: `[text](Note.md)` and `![](image.png)` (relative, from the top, without `.md`)
+  make backlinks, graph edges and database views' `file.links`, as wikilinks do and as in Obsidian.
+- **A cleaner Conversations tab**: the talk reads as a chat, its line stays at the foot clear of the status bar,
+  and when, where and what the companion did show only as you hover a turn.
+- **The companion fades away in place**: an idle cursor fades out gently where it was, never gliding off to the status
+  bar first, in the window or over other apps.
+- **Proposals come as pictures**: `vau html picture` turns an HTML mockup, or a prototype's page, into PNGs a note
+  embeds (each option its own), and jobs show a UI change that way, in plain sentences, never as ASCII sketches.
+- **Feedback after Show me goes to that job**: what you say with the Talk key right after a job's demo is taken as about
+  that job, not the note behind it, and the job is told you just watched it; its choice card says so under its answers.
+- **Jobs wait for their own background work**: a job whose agent still runs a verify, a subagent or a try stays working
+  (saying what it waits on) instead of showing ready for review or done, and one landing itself shows done once it lands.
+- **Silence**: a companion answer with no spoken words says Silence in Conversations, not a sentence about it.
+- **The companion knows when you didn't hear it**: asked why it said nothing, it says its answer was kept quiet for a
+  call (in which app, when), or that its voice was off or failing then, and offers to say it now.
+- **The companion's marks by words land only where all its words are**: a mark at "4:24 PM · Agents" finds those words
+  in order, across a row's pieces (a time, a dot, a place), in any pane or page, its Conversations page's tags too; never
+  on an Agents panel by your pointer that says one of them. Words shown nowhere draw nothing, and it's told to aim again.
+- **Group, sort and mute agents**: the Agents panel's menu groups its agents by state, repository, machine or account,
+  sorts them by status or the latest first, and shows only the kinds you pick; its Notifications mutes a Claude Code
+  account, whose sessions then never notify you nor show in the inbox (Inbox setting Muted accounts).
+- **Filtering finds what you mean**: every list you type to filter (the palette, the quick switcher, pickers, the slash
+  menu, panels) meets a word in another form (files finds File explorer, terminals Open terminal) and ranks whole words
+  above a name's start; in the palette, commands and panels come before settings that match as well.
+- **The inbox holds only what needs you**: an agent's answer or status that only tells you something is done quietly,
+  unread on its row in the Agents panel, with no badge, toast or notification; what asks you something, waits on you
+  or failed still comes. Inbox setting Agents' answers puts them back in the inbox.
+- **A Now note**: `Now.md` says what you're on now, in at most four tracks (each with why, its next action and when it
+  last moved), then what agents promised you. Agents read it with ME.md and keep it current as things move, and the
+  companion is told it when a talk starts, so "what should I do next?" gets one thing (`vau docs now`).
+  or failed still comes. Inbox setting Agents' answers puts them back in the inbox. The notch agrees: an
+  unread answer there is calm (ready), never needs you.
+- **Updates no longer stall on busy days**: with a signed-in gh the server asks GitHub up to 300 times an hour (20
+  anonymously, as before), and asks nothing of a commit a newer one superseded or of a run still queued.
+- **Jobs can land themselves**: with Jobs land themselves on (the companion's settings; off by default), a coding job
+  whose checks pass merges its change and cleans up, done instead of waiting for your review, asking only on a real
+  tradeoff. "Go ahead" about the ready jobs it just named lands them, with no set phrase to say.
+- **A decision says what each choice does**: a decision reads top down: the question, who asked (the agent and its
+  session), why in plain words, what its report said when it asked (a click opens it), then its options as one list,
+  each with what picking it does beneath and the one it went with marked. Agents asking without these are refused and
+  told how.
+- **A job says who told it each thing**: its handoff and every follow-up keep who sent them (the companion, another
+  agent's vau from its terminal, a script, you in the app or in its terminal), shown in `companion job` (told last (by
+  ...)), its JSON and the jobs list, so the companion no longer claims what another session sent.
+- **Turning the companion's voice off or on answers in the new state**: "stop talking" is confirmed as text, "talk
+  again" out loud, at once (`vau voice off`, `vau voice on`), without it looking through the docs first.
+- **A model named as people say it reaches Claude Code**: "Fable 5.2", "opus 55" or "sonnet" starts Claude Code on
+  its id (claude-fable-5-2) or alias, in a job, a terminal, a delegate or a chat; a name it can't run is refused at once,
+  saying what it takes, instead of a job that fails a second in.
+- **The companion calms rather than adds**: told you're overwhelmed or asked what to do next, it names one thing and
+  the smallest step to take now, without opening notes or pointing around, and offers to take it off you when a job
+  can. A task's state it learned earlier comes with its age ("as of this morning"), or it checks again.
+- **A quieter Agents panel**: one list, no Needs you or Done headings, no filter or machine names: a small dot says
+  where each agent stands and a short time ends its row (how it runs and where in its tooltip). Agents done and read
+  over 5 minutes ago (Coding agents' setting Fold finished agents: from a minute to an hour, or never), with nothing
+  for you and no tab, fold under Earlier, in the Terminals panel too (never one
+  waiting on you, with an answer unread, failed or a job ready for review, which now shows the unread dot). Amber
+  "needs you" is only an agent waiting on you (a permission, a question, a login), in both panels and the status bar:
+  a finished turn not yet read is blue, unread. Rows hold still while you're in the list (the pointer, a menu or a
+  finger on it) and glide to their new places once you leave. The filter and machines stay on the Agents tab.
+  over half an hour ago fold under Earlier. Rows hold still while you're in the list (the pointer, a menu or a finger
+  on it) and glide to their new places once you leave. The filter and machines stay on the Agents tab.
+- **The menu-bar helper updates without a relaunch**: on Vaultite Main's code store, a change only the helper runs (the
+  companion over the screen, its keys and voice) reloads it in place once it's idle, never mid-press, dictation or
+  speech; the app and its windows go on as they were.
+- **A quieter Agents panel**: one list, no Needs you or Done headings, no filter or machine names: a small dot says
+  where each agent stands and a short time ends its row (how it runs and where in its tooltip). Agents done and read
+  over half an hour ago fold under Earlier. The filter and machines stay on the Agents tab.
+- **A service following a branch runs from code roots**: `vau service install --updates <branch>` on macOS and Linux
+  makes each commit once into a read-only folder of its own and runs the newest that works, taking a web-only change in
+  place; a commit whose server won't start is left for the last good one, and the checkout is free to work in. Install
+  the service again to move an existing one onto it.
+- **The desktop app's update relaunch keeps its servers**: Vaultite Main relaunching onto a new version (its code
+  store's, a Dev instance's) leaves each vault's server running and takes it over in under a second, so nothing is read
+  again and `vau`, the phone and agents never see it go; only a real service (`vau service`'s, another app's) holds
+  its updates to the commit it runs, never a server the app started itself.
+- **Agents don't see the app's restarts**: `vau` and `vau mcp` run by the app (its terminals, agents and hooks) wait up
+  to 30 s for a server that's restarting (an update, the app relaunching) rather than fail at once; elsewhere a server
+  that isn't there is said at once.
+- **`vau version --wait` rides out the server's restart**: a wait cut by an update's restart, directly or through
+  Tailscale Serve (its 502), or through `--machine`, goes on with the time left and answers from the new server; when
+  the server stays down it says so and for how long, never an empty error. The verdict is the output's last line.
+- **A page just opened misses no change**: what changed between the app reading the vault and its live connection
+  coming up is shown once it's up, as a page back from away already had it.
+- **Settings > About shows what's running**: the server's commit (a tap copies it), its subject and age, whether this
+  window or the phone app runs the same build, the server's updates (waiting and why, failed and why, the last one)
+  and, in the desktop app, its own update.
+- **A new version reaches open pages at once**: a web build the server takes without restarting is told to every open
+  page within seconds. A page you're not looking at (the phone app in the background, a hidden window) reloads into it
+  by itself when that loses nothing (edits not saved, a form in a sheet, a recording, dictation or sound playing hold
+  it), so the next look is the new version; one in view offers Reload.
+- **`vau version <commit>` says whether it's live**: here or on another machine (`--machine`), and with `--wait` waits
+  until it is or the updates say why it won't be (a failed update, CI red on it, or a checkout with uncommitted
+  changes or commits not on the branch, named), exiting 1 with the reason; no polling loop of your own.
+- **`vau version` names the commit that runs**: after an update that only rebuilt the web app, it and Machines name the
+  new commit, not the one the server started on. In a checkout it also says, for the server and the desktop app (and its
+  menu-bar helper), whether code it runs changed since it started, naming the first such file.
+- **A server following a branch updates sooner and says why it waits**: it takes a commit once CI's tests for its own
+  OS passed, even while the rest of the run goes on (another OS's failure is said in `vau version` and its log, and
+  doesn't hold it back), and an update of the web app alone goes through while an agent uses the browser; a restart
+  waits only for an agent's call under way and a minute after its last one, and vau sends a call the restart kept from
+  the server again (one that only reads, even if it may have reached it). It looks every 3 minutes instead of 10 (asking GitHub at most 20 times an hour), `vau update`
+  looks now, and its log has each change of state with the commits and why; when the checkout blocks it, it names the
+  uncommitted files or the commits not on the branch.
+- **Claude chats show each answer once**: a chat opened just as its session changed (a turn ending, a new title) no
+  longer lists its answers a second time below the conversation.
+- **The companion knows why it's silent**: asked why it isn't speaking, it says what it is (an app with the mic open
+  read as a call, its voice off, the realtime voice out of credits) instead of guessing.
+- **Quiet for a call, said plainly**: the companion's box says why it's quiet, naming the app with your mic ("Quiet:
+  Chrome has your mic"), with Not a call to have it speak again until that app lets go. Its play button turns to Stop
+  while an answer is said. Apps that keep the mic open all day (Krisp, SoundSource) and a tab holding it for hours no
+  longer count as a call.
+- **Live editing shows each change as you ask**: a job asked over a preview you're watching edits the checkout
+  serving it, so the page reloads as it goes, with no worktree, demo or ready knock in the way.
+- **Companion tours stop cleanly when they can't play**: a tour whose things aren't on your screen says so once and
+  stops, instead of the companion apologizing at every step, and anything you ask stops it, its step's answer
+  included, so that answer never mixes into the reply to you. A name you say that the companion doesn't know (a
+  company, a person) is searched in your vault before it guesses what you mean.
+- **Work handed to a machine that's offline waits for it**: a companion job or follow-up for a machine that's away is
+  kept, shown waiting in Jobs, and sent by itself once that machine is back, instead of failing for you to retry. A
+  busy machine that misses one check (a load of test runs) no longer reads as offline.
+- **The companion answers questions about itself**: asked what it can do while also asking for more work for a job, it
+  answers you and passes on only the work, without your question. It can start a job in any Claude Code account on
+  that machine, and opens Claude Code on the web with your prompt ready to send for a cloud session.
+- **Companion jobs find each machine's own copy of a repo**: a repo named by another Mac's folder (or by its name) runs
+  in this Mac's own checkout of it, wherever it keeps it, and the companion says where it looked and what that Mac has
+  instead of guessing. With Jobs' machine on auto, a job naming a repo runs on the always-on machine when it has that
+  repo too and nothing the job needs is unpushed here; the job says why it runs where it does.
+- **The companion says several handoffs in one line**: passing one message on to three jobs says "Passed that on to
+  three jobs: ..." once, not the same line three times. Asked to merge it all, it lands every job ready for review,
+  and what it says about jobs comes from their list, never memory.
+- **Files dropped on a note go into it**: a screenshot's thumbnail, files from Finder or an image from a browser,
+  dropped anywhere on a note (its margins and the space below a short note too, being read as well), are saved as its
+  attachments and embedded on a line of their own where they land, a line showing where while you drag. Dropped where
+  no note is, a file still opens in a tab.
+- **Dictation keeps your words when you're far from the Mac**: with Soniox, all of the mic's audio reaches it, not
+  only what the pause detector took for speech; in a noisy room, words said away from the mic were dropped after the first few.
+- **Show me's video stays put, and its choice keeps off Clear**: a job's demo video no longer blinks out and back while
+  its words are said, and Keep and merge, Needs changes and Not yet come as one card with the question, clear of the
+  video and of Keep and Clear (they sat on the Clear button).
+- **A job on another machine sees what you pointed at**: when the companion hands an ask to a job on another of your
+  Macs, the ask's picture of your screen and its close-up are copied there, so the job can look at them.
+- **Dark pages stay dark after every load**: a page that loaded in a fresh process (often a link to another site, or
+  a site like LinkedIn opening its next page) could come out light and tinted, a pale beige, until Dark pages was
+  turned off and on again.
+- **Tags and graph filters complete as you type**: # in a note suggests the vault's tags, most used first, and the
+- **Tags, properties and graph filters complete as you type**: # in a note suggests the vault's tags, most used first;
+  Properties suggest the vault's property names, the values a property has in other notes, and tags in a tags list; the
+  graph's filter box and groups suggest tag:, type:, folder: and the other operators, then the vault's tags, types and
+  folders for them. Each with how many files have it.
+- **A bookmarks bar in the Browser**, as Chrome's: under the page bar on a new tab, always with ⇧⌘B or its right-click
+  menu; folders open as menus, bookmarks drag along it or into a folder, and a tab dropped on it is bookmarked. Bookmark
+  folders can be made (New folder… in the star's card and the bar), renamed and deleted (`vau bookmark folder`).
+- **Sync holds a mass delete however it's seen, and a note put back comes back**: many files going missing are held
+  for your yes even when sync looks while they're still going (it let them through in parts before), and a note
+  deleted and then put back with the same text, by you or an undo, is back on every device instead of deleted again.
+- **Sync's conflicts list holds while a note's history is still arriving**: a device that had a version but not
+  yet its parent (made on a third device) failed listing conflicts, and could stop syncing.
+- **The companion's chat writes notes no window shows**: an edit its Claude Code chat session makes to a note that
+  isn't on screen is saved to the file, where it was sometimes refused as the plugin writing on its own.
+- **The companion sees small things you point at**: a Talk key ask comes with a sharp close-up, at the screen's full
+  resolution, of what you ring or point at, your ring or pointer drawn on it, so it can name a small logo or icon there
+  instead of guessing.
+- **`vau limits`**: each Claude Code account's plan limits, how much of its week is left and when it renews, most
+  room first, so an agent can pick the account a new session runs on (also MCP `claude_limits`).
+- **Clicks under the notch island and the companion land again**: their see-through windows take the pointer only while
+  it's over a bar, card or button they show, as the app sees the pointer; before, one could keep taking every click
+  under it (a web page's buttons and fields by the notch did nothing) after a card went away under a still pointer,
+  its page crashed or reloaded, or it was hidden mid-hover.
+- **The notch card closes, and the menu bar shows a dot, not a number**: a card by the notch has a close button that
+  folds it into the island at once (still listed there, Not now in its list); the menu bar icon marks what's new with a
+  dot on the stone, its count in the tooltip and menu.
+- **The companion's video and choice cards answer to you**: a video card shows its speaker, plays muted until you ask
+  for sound ("unmute it", or its speaker), and pauses or plays on a press or your word, the companion changing that card
+  rather than opening another player; hidden or dismissed, it stops. A choice comes as one card by your pointer, its
+  question atop answers that say what each sends, and its question is always said.
+- **Agents you type to can close a job on your word**: "close it" typed to a terminal agent now closes a job ready for
+  review (read from that agent's own conversation, not words another agent typed into it), and a refusal says why. A
+  job the companion hands off long after your last ask no longer carries that ask.
+- **Jobs that landed their change close by themselves**: a job whose commit is on main is done, not left ready for
+  review, however long ago it was ready, with its terminal gone or on another machine, and when someone else rebased
+  or squashed it and removed its branch. One whose terminal is gone counts as ended. Pinned agent tabs keep their account, so a job's pinned tab
+  is its own terminal and ending it closes the job.
+- **Device sync**: machines keep one vault without iCloud moving the notes: each trades its files' versions with the
+  others over your network (the hub, any peer, or an iCloud mailbox), merges them by line or key, and keeps a real
+  clash in the note to settle. Try it beside iCloud first with `vau sync shadow` (`vau sync`, `vau sync compare`).
+  The iPhone app keeps a copy (notes in full, media by `vau sync keep` rules, a Downloads page) and opens it offline.
+- **Claude chats take pictures, and what Claude asks waits by the composer**: paste, drop or attach pictures (made
+  small enough in the browser, shown as thumbnails to remove), and send them with or without words. A permission,
+  question or plan docks over the composer with its keys (Enter allows, Esc denies, a number picks); a message sent
+  while Claude works waits there as queued (Stop gives it back to edit). The header stays pinned, a phone shows it in
+  its own bar, a new chat puts the composer under its prompt, and an error, a chat that won't load or a machine that
+  isn't answering says so with Try now and Open in terminal.
+- **A chat's turns read like the Claude app's**: a line under a working turn says what Claude does now (thinking,
+  with its latest words; writing; running which call) and for how long; once done, its work folds into "Worked for 1m 12s" above the answer.
+  Each call says what came of it (+2 −1, 42 passed, exit 1, 120 lines) and shows running, done or failed; commands
+  show their output in one box, edits a monospaced diff, files numbered lines. Words flow in as they're written with a
+  dot after the last one, the chat glides down with them (scrolled up, it stays and offers Jump to latest), folds open
+  and shut smoothly, code scrolls sideways (fading where it's cut) instead of wrapping, and a message's pictures show
+  above it.
+- **Messages sent while Claude works stay where you sent them**: in a chat, what you send mid-turn is read back from
+  its transcript in its place, instead of falling to the bottom or going missing once the chat reloads.
+- **The notch island is calm, the menu bar menu short**: at rest the island is one still count of the agents working,
+  orange only when one waits on you; no faces, spinners or countdowns. A hover lists who needs you (Answer), what's
+  ready (Show me), what each one works on and what's done. The menu bar menu has who needs you, one row of how many
+  work, the companion's controls with Mute for an hour, and Settings; Open at login is in Settings, About. Each agent
+  keeps one colour of its own, the same on its cursor, by the notch and in the Agents panel.
+- **A job's proof is a demo video**: its worker records its change playing on its own copy (headless, silent, its
+  steps captioned and marked), so Show me plays it by the notch, narrated, even before it's merged or when it ran on
+  another machine; the same video is in its report. "Show me it live" still plays the tour on your screen.
+- **Dictations keeps what you said**: every dictation's words, newest first, with where they went (a note, a
+  terminal, a field, another app) and the ones that never landed (the app closed, cancelled, only copied), beside your
+  asks to the companion. Search them, Copy, or Insert again where you were typing. Kept 30 days on this Mac only, never
+  in the vault; Keep dictations turns it off and Clear dictations empties it (Show dictations, Settings > Dictation).
+- **Chats with Claude keep up as a terminal does**: a reload shows the conversation as it happened (asks and failed turns in place), a message sent as Claude finishes shows it working
+  with Stop, Stop gives back the messages it hadn't started on, and a phone back from the background or another
+  machine's blip reconnects on its own. Messages can carry pictures (`images` on `vau chat start` and `send`).
+- **Questions over a job's page get a quick answer**: live editing sends only changes ("make this blue") and unclear
+  asks to the job; a plain question ("what does this button do?") goes to the companion, which knows what the job did
+  there. A job taking a long run of edits starts fresh with a summary instead of slowing down or compacting mid-ask.
+- **The companion offers to keep your screen when you need it**: "that, just now" or "make what I just did a skill"
+  with Keep the last 30 s of screen off (still the default) says so in one line, aloud and on a card by your pointer;
+  its Turn it on, or a spoken yes, turns it on from that moment and says the seconds before weren't kept. Agents offer
+  the same (`vau screen keep`).
+- **Dictation learns from fixes in other apps too**: fix a word just dictated into Slack, Mail or a browser's field
+  and it's added to your dictionary, said where the dictation box was. Only that field is read, only while its window
+  is in front, for a minute; never a password field or a private app's, and nothing is kept but the word.
+- **Dictation's Microphone setting lists your Mac's mics**: Automatic and System default (each saying which mic that
+  is now), then every input by name, kept up to date as mics come and go; one chosen and unplugged stays chosen. In a
+  browser or on the phone, where mics can't be listed: Automatic, System default, Built-in mic or a name typed in.
+- **The tab on screen stands out in every colour scheme**: in dark ones (Paper, Amethyst and the rest) it's lifted
+  clearly off the tab bar, not a shade apart.
+- **Tabs go into pop-out windows by dragging**: a main window's tab held over a pop-out shows there where it would
+  land and lands there. In the desktop app, a window a tab is held over comes to the front after a moment, so the
+  place to drop it is in sight.
+
+- **Vault plugins import a set list of npm packages** (plugin API 10): React, Lucide, CodeMirror's, Excalidraw, YAML
+  and the others `vau docs plugin-api` lists, at the versions the app ships: what an app update keeps for them. One
+  importing another package is told to copy that library into its own folder.
+- **An Agents panel shows every agent on every machine**: terminals, chats and cloud sessions in one list in the right
+  sidebar, the ones that need you first, then the ones working, then the ones done, each with its machine; a click
+  opens it in its terminal or its chat.
+- **Agents' clicks are faster when nobody watches**: the pointer's glide before a click or fill is waited for only while
+  someone sees the page (its tab or the agents card on a Mac someone is at, or a live view from another device).
+- **Passwords' KeePass files are read and written by Vaultite's own code** (kdbxweb, brought in and hardened): damaged
+  or hostile files are refused clearly, tabs in notes are kept, and KDBX 4.1 files save with dates KeePass accepts.
+  Unlocking, locking and listing are near instant: a file's key is derived once per save, five times faster, and
+  never stalls the app.
+- **The inbox is for decisions**: each question an agent asks is its own item, its options as buttons and the default
+  it takes if you don't answer. The ones it waits on come first, with a toast and a push to your phone; the ones where
+  it went with the default already wait quietly, with Accept all defaults. The same question from two agents is one
+  item, and one later work settled closes itself, saying why. Reports go straight to the archive, one line each in the
+  morning brief and under Reports today (a failure or something that went out publicly still comes to the inbox); an
+  agent's progress shows on its own row, and what agents work on is the Agents panel's, no longer listed in the inbox. The companion knocks "three decisions waiting" and walks you through them.
+- **Terminals show pictures**: Claude Code shows the PNGs it reads and the ones you paste, and whatever else draws
+  with the kitty graphics protocol (`kitten icat`, yazi) shows too, on the phone as well, after a reload or elsewhere.
+  A terminal server from before pictures is taken over with its shells still running, so new terminals show them at once, and big screenshots
+  are kept at the size they show, so a long session's older ones don't go blank.
+- **A damaged workbook no longer hangs Vaultite**: one that's cut short or corrupt says it couldn't be read, where it
+  could freeze the app or take the server down while search read it, and a big one opens without freezing the app.
+  SheetJS, which reads them, now ships inside Vaultite instead of coming from its own server at install.
+- **Terminals run on libghostty-vt 1.0**: Ghostty's first stable release of its terminal engine, in place of a
+  pre-release build: a bit faster on fast output, with the same screens, copy and search.
+- **A job's ready card stays up to be read**: "Ready to show you …" comes at your next pause and stays 15 seconds
+  (held while your pointer is on it or nobody is at the Mac) before it folds by the notch, one card at a time.
+- **Every coding job works in its own worktree**: a job never edits or switches the checkout it was asked over (on an
+  always-on machine, its live server's); its change reaches main only by Keep and merge, landed from its worktree,
+  which is then removed.
+  which is then removed.
+- **Only the companion's own handoffs speak for it**: a job another agent or a script starts says nothing in the
+  companion's voice, isn't filed under your last ask, and its worker gets just its task, not your words from earlier.
+
+## 0.12.0 (2026-11-07)
+
+The companion shows its work: ready jobs knock by the notch and show you their change on screen, you can talk with a
+job by voice in its own cursor and voice, and it teaches by showing, plays tours and runs QA walks. Live editing sends
+your asks over a page to its job; the companion works in a window behind yours, acts on any app's controls, stays out
+of screen shares and draws like a hand. Also dictation that learns your words, a job's session opening in a split, and
+each bundle's page on vaultite.com showing that bundle.
+
+- **Each bundle's page on vaultite.com shows that bundle**: its demo is its own, so Standard or Zen no longer shows the
+  Glass a visit before left; Reset starts that bundle again, and Browser's page opens its live sites, as the home
+  page's picker does.
+- **The menu bar menu's headings are bold**: Companion and Jobs read as titles at the menu's text size, where macOS
+  drew them small and semibold.
+- **The list of sessions by the notch holds any number**: with many background sessions the list a hover opens no
+  longer runs off the bottom, cut square: it shows about nine, keeps its rounded edge and scrolls the rest.
+- **The companion's box over the screen moves and closes**: drag it by its name to put it where you like (it stays
+  there), or close it with its X. Two quick bounces of ⌃⌥ just after letting go no longer open it listening
+  hands-free, and while it does listen hands-free, holding ⌃⌥ and letting go sends what you said, where before only
+  a double tap did.
+- **A job's session opens beside you**: "open that session on the right" now opens a job's terminal in a split
+  (right or below) instead of a new tab; right-click a job's card for Open to the right or Open below. Show me on a
+  session by the notch opens its terminal again (it did nothing).
+- **Every handoff says so**: the companion answers each job it hands off with one short line, "Handed that off to
+  a background agent." (a follow-up: "Passed that on to its job."), where a routine one used to be silent.
+- **Talk with a job**: ask the companion "let me talk to it" (or point at a job in the island) and that job takes the
+  floor: your Talk key's words go to it, and it answers by its own cursor, in a voice of its own, pointing and marking
+  as it explains; the companion stays quiet till you say "back", and the job leaves a line in its inbox thread.
+- **The companion says what it marks, and deletes to the Trash**: "Discard throws this one away", not "throws this one
+  away", when a mark stands for the word; files it deletes go to the Trash, and deleting for good asks on a card. Ask
+  for an app's logo and it shows the app's real icon; asked how to do something, it suggests Vaultite's own way first.
+- **A split's count of other tabs no longer sits under its close button**: in vertical tabs, hovering a pane of a
+  split showed its +1 under the X; the count now steps aside while the X shows.
+- **Proof, not claims**: a job that's done knocks by the notch, "Ready to show you the blue save button". Say "show
+  me" and the companion plays its change on your screen, a picture of how it looked before flipped over how it is
+  now as it talks you through it; then Keep and merge (that same job merges it, and closes once it's in), Needs
+  changes to record what's wrong and send it back to that job, or Not yet; one already on main says "It's already
+  in" and asks only Keep or Needs changes. It shows only the job you ask about, says
+  when the change isn't on this Mac yet (offering to merge it first), and never closes a job you haven't decided on.
+- **Teach by showing**: say "watch me" and what it's for with the Talk key, do it while you talk, then "that's it":
+  the companion keeps it as a draft tour (in Guides) or a skill an agent can run, each step found again by what it is
+  even after the app changes. "Make what I just did a skill" works from the timeline's last minutes.
+- **Terminals of a Mac's `vau service` run at full speed**: macOS held back the timers of what they started (a
+  browser there animated at 15 fps); the service is an interactive job now (after `vau service install` and a restart).
+- **QA walks**: say "start a QA walk" with the Talk key, then go around any app talking; each sentence is noted with
+  the thing under your pointer and a frame of it, "scratch that" drops the last, and "done" sends them as one job per
+  project (Vaultite, your site...), all kept in Captures. The island by the notch counts them as you go.
+- **Live editing**: once a job works on a page (a preview in your browser, or a note it changed), what you ask over it
+  with the Talk key goes straight to that job as you say it, ask after ask, with no wait for the companion; when the
+  page reloads, the change is ringed. "Undo that" takes back exactly the last ask's change, never your own edits or
+  other asks'.
+- **Sessions by the notch**: agents working in the background (terminals, jobs) show as small faces beside the notch
+  (top centre on a Mac without one; right of Vorssaint's island when it's there), each working, needing you or done.
+  When one asks for you (`vau companion knock`), its line comes up there at a pause, never while anyone talks: say or
+  click "Not now" and it comes back at your next break, "show me" opens it.
+- **The companion stays out of screen shares and keeps quiet on calls**: its cursors, drawings, cards and boxes never
+  show in a screen share, a recording or a screenshot (only you see them). While another app has the mic (a call in
+  Zoom, FaceTime, Meet, Slack or Discord, a recording), its answers show in its box with a play button instead of being
+  said, with no sounds; your Talk key still works. Settings: Hidden from screen shares, Quiet on calls.
+- **The companion works in a window behind yours**: asked to do something in an app you aren't looking at, it clicks
+  and types there without your pointer or bringing that app forward, a small live picture of that window by the corner
+  showing its cursor and each step; every step is read back, and one it can't confirm it offers to do in front.
+- **The companion's pen draws like a hand**: rings take the shape of what they circle (a rounded box round a row or a
+  button, an ellipse round an icon), its cursor gets to each far mark before the ink starts there, and you can hear
+  the pen faintly as it draws (off with Sounds). What it points at fades once the screen there changes (another
+  page, a window over it, even as it's drawn), and a mark on a button or a row follows it as you scroll.
+- **The companion shows pictures and videos, draws any shape, and diagrams like Excalidraw**: ask for your latest
+  screenshot (or a vault file, a file of yours, a link) and it's a card by its cursor, a video muted and looped,
+  pressed to hear it; it draws logos and animals from path data, clean or sketched, and diagrams of boxes, diamonds
+  and bound arrows in Excalidraw's hand. Its cards stay up past your next ask, so "make it blue" or "add a step"
+  changes the drawing in place (erasing runs the pen backward); you can drag or dismiss any card, and put one anywhere.
+  Each session draws on its own layer, which it can hide and show again; Keep opens it all as an editable .excalidraw.
+- **Dictation learns your words**: fix a word right after dictating it (in a note, a terminal or a field) and it's
+  added to your dictionary, Dictionary.md, with a toast to undo it; every recognizer expects its words from then on,
+  and misheard again, what it was misheard as is replaced. Your people's and projects' names are expected too, the
+  companion adds a word you spell out, and dictation's Replacements setting moved into the dictionary.
+- **The companion does things on your Mac**: asked by its Talk key, it opens apps, files, folders and any System
+  Settings pane, then points at the setting itself; it runs commands too, and one that needs your yes (any change to
+  your Mac's settings) shows as "Run `…`?" by your pointer: say yes or click Run. It waits there till you answer,
+  even once the companion stops talking, and after a spoken yes it says how it went. Keys and secrets never run.
+- **Clicks work while you talk to the companion**: with the Talk key held, a drag still draws or makes the capture
+  box, but a plain click goes through to the app as a normal click (never a Control-click), and the companion is
+  told what you clicked. It no longer says its own working-out aloud between steps, and a handoff to a folder that
+  isn't on this Mac runs on the machine that has it, instead of leaving a failed job.
+- **The companion acts on any app's controls the same way, and checks they worked**: in Vaultite and in other Mac
+  apps it finds a button, tab, row, switch or section by its role and name, presses the part that does it (a panel's
+  heading, not the panel), and reads the state back, so it says "I pressed Files but it didn't open" instead of
+  claiming it did; opening, folding, ticking and selecting do nothing when it's already so. `vau companion check`
+  checks one state (`expanded "Files"`, `selected tab "Notes"`, `shows "Saved"`). Sidebar panels are named groups
+  their headings open and fold, for screen readers too.
+- **Show the companion a glitch instead of describing it**: hold the Talk key and drag to draw a box, which stays on
+  screen to move or resize. Say "record this" (narrate as you go, "stop" ends it) or "that, just now" for the last 25 s;
+  the clip, its frames at each change and your words go to the job working on that page, else a new job, else
+  Captures, and it only says where. The last 30 s (screen, pointer, clicks, apps, your words) stay in memory only while
+  you turn that on, and agents can ask for a stretch (`vau screen timeline`).
+- **Control dictates**: pick Left or Right Control in dictation's keys (for keyboards whose fn never reaches macOS).
+  A tap does nothing, a double tap dictates hands-free until the next double tap, in whichever app (or a press of
+  another dictation key), and held alone it listens until you let go; Control with a key, a click or a scroll never dictates.
+- **Moving your mouse no longer cancels the companion's take-over**: steps it does through Accessibility ignore your
+  mouse; one that needs the real pointer or keys waits while you use them ("Paused, you're using the mouse" by its
+  cursor), looks again once you've been still a second, and carries on. A click, Esc, or typing where it types stops
+  it. Each step says what it does by its cursor ("Clicking Files"), the pointer glides from yours, and comes back where
+  you left it when done. A scroll goes where your pointer is and says when nothing moved; a click at a point lands on it.
+- **The companion knows another app's floating panel**: asked over a tray, a palette or the Dock, it reads that app
+  (by its name, not only its bundle id) instead of the Vaultite window behind it, and an ask elsewhere on the screen
+  says which apps' panels float over it, so "what's this thing?" gets the app's real name rather than a guess.
+- **Tours**: "save that as a tour" keeps a walkthrough the companion just gave as a note in Guides/, and it plays back
+  fast without the model (`vau companion tour`): show me, guide me (it waits for your click or typing), or do it. Each
+  step finds its target again where it is now, asks you to scroll when it's off screen, and asks the model only when it's
+  gone. The same language waits and checks (`vau companion wait 'click "Share"'`, `companion check`), and things it
+  pointed at stay findable (`companion anchor`). A tour can name what you'd say for it (`ask:` "what's new?"): said
+  with the Talk key anywhere, it plays at once, and its steps can show cards and drawings of their own (`(draw: …)`).
+- **The companion opens a sidebar panel when asked**: "open files" unfolds the Files panel (its sidebar shown if
+  closed), and it's told the panel's rows so it can point at them; a click there used to land on nothing. Its summoned
+  session may also look in your Desktop, Downloads, Pictures and screenshots folder, and when it can't look somewhere it
+  says which folder, never that a mode blocks it.
+- **Closing a web page's tab no longer shows "Skip to content"**: on Linux, Chromium gave the keyboard to the window's
+  first stop as the page went, as if Tab had been pressed; the skip link now shows only for a Tab, else the keyboard
+  goes on to the pane.
+
+## 0.11.0 (2026-11-07)
+
+The companion walks you through a screen in step with its voice, its marks landing on what it names; it remembers
+your talk for the hour and shows it in the Conversations panel, and runs its jobs on your always-on machine. Also glass
+bundles and live sites in the web demo, Zen's floating card back, versions iCloud kept out of sight shown in the note,
+faster agent browsing, and videos and notes embedded in callouts.
+
+- **The companion's frames fit what they name**: over Vaultite it knows the window's regions (the sidebar's panels, panes,
+  the status bar), so a frame round one is exact; frames side by side keep a hairline apart, and each label is a small
+  tag snug at its frame, never on another. Its answer box is never cut off by a screen's edge, shows only its name, and
+  no longer opens on its own after a shortcut that used the Talk key's modifiers.
+- **The companion's pen draws smoothly on any machine**: each mark's ink repainted the whole screen under its glow every
+  frame it drew, so a slower Mac drew it at half speed; it now repaints only the mark.
+- **A terminal tab loads as two files, not thirteen**: the terminal's libghostty-vt side is one file again, as xterm.js
+  was, so a window started with less to fetch.
+- **The companion never reads a mark out loud**: a mark naming a long line of text, or one it got wrong, was spoken as
+  words ("frame, the Morning report bug..."); it's now drawn, or dropped.
+- **A Talk key ask is never lost to a restart**: one asked as the companion's session ended (an update restarting it) or
+  failed goes to a fresh session by itself, so you don't ask again; if none can answer it says so in a few words, never
+  an error read aloud.
+- **The companion's marks show when it answers with them alone**: a ring or frame drawn without words waited for words
+  that never came and went with the exchange a second later, so you saw nothing; it now draws at once and stays a few
+  seconds. A mark off your screen or on nothing isn't drawn nor said to be, and it tells you instead of going silent.
+- **A job asked over a preview or an editor's project runs on your always-on machine**: when it has the repo checked out
+  and everything here is pushed, so you can close your laptop; it previews there and says where. With changes not yet
+  pushed, it stays here and says why.
+- **A job stopped on a prompt is answered where you are**: its notification shows the prompt (a folder's trust, its
+  CLAUDE.md imports, a permission, its question) with its choices as buttons, or you tell the companion which; the
+  choice is pressed in its terminal with the cursor checked on it first, never Enter on a default No.
+- **The companion's cursor shows only when it does something**: following you to another note or coming back from the
+  screen no longer pops it into your note, a quiet one whose line scrolls away hides instead of waiting at the pane's
+  edge, and what it said by your pointer counts as read (the unread dot is on its status bar arrow only).
+- **A chat session waiting on background work keeps running**: a Claude Code session the app runs (a chat tab, a
+  companion's job, one an inbox reply resumed) was ended after 20 minutes idle even while a Monitor or a background
+  command it started still ran, so what it waited for never came back to it; it now waits for them. `vau chat list
+  --machine all` lists every machine's such sessions, and agents in terminals are told they exist.
+- **Telling a job more is quicker and loses nothing**: the companion hands on your own words, where you were and your
+  screen's picture with a short note, instead of retelling your ask first (seconds slower, and slips crept in).
+- **The companion walks you through a screen in step with its voice**: each mark lands as its words are heard, with any
+  voice (Soniox's and this Mac's too), one mark per thing it names, the earlier ones stepping back as the next comes; a
+  drawing it had to retry is never said twice, and its cursor stays by you until it flies straight to the next mark.
+- **The companion's spoken answers play to their end**: with ElevenLabs' voice an answer often stopped a second or so
+  in (or a few seconds, on a longer one), and two says in a row cut each other short. A job's news now waits for the
+  answer being said instead of cutting it off; pressing the Talk key still stops it at once. A voice that makes no sound
+  (out of credits) hands on to the next, and when none can speak a notice says so once and the answer shows in its box.
+- **The companion stays quiet about routine work**: a handoff says nothing unless there's something to hear (a question,
+  an unexpected place); its job card and the seen tick show it was heard. Its jobs' news is never said aloud: a job that
+  needs you or failed is a silent notification. The setting Job news says it aloud again, done and ready too, or off.
+- **The companion hears what you meant and checks before it acts**: a dictation slip is read by sound and what's on
+  screen, every part of an ask is done, and before cutting or rewriting what you pointed at it marks it (and asks when
+  unsure). It looks things up instead of guessing (read-only commands anywhere in your home, never keys), and stays quiet
+  about routine work.
+- **The companion's marks land on what you mean**: words it marks are found where they show now, in any pane (a web
+  page, a terminal, a note, the app), the one by your pointer when two say them, never its own words or what's hidden
+  behind a page; a box it reads off your screen's picture is no longer drawn off by where that picture starts; what you
+  circle is framed whole, round the things inside it; a corrected mark replaces the last; and a mark it can't place
+  tells it, so it checks with you before acting on it.
+- **The companion's jobs end as they did and run on the always-on machine**: a worker that closes its own session after
+  its answer (as one shipping all the way does) is done, or ready for review with its changes, instead of failed; only
+  a crash or an end with nothing to show fails. A job nothing ties to your laptop (a note, research, a GitHub page
+  checked out there) runs on an always-on machine serving your vault (the setting Jobs' machine); a preview or an
+  editor's project still runs where it's served.
+- **Finished jobs close their terminals, and the companion knows how a job goes now**: a done job's terminal closes by
+  itself after two minutes, unless it's on your screen, you typed in it or it still runs something in the background;
+  the job stays in Jobs with its result, and opening it or telling it more resumes its conversation. Asked how a job
+  goes, the companion reads what its worker said and was told last and the questions it asks, instead of its first title.
+- **A clipped X post keeps its video**: with the Videos plugin on, the post's video (and its transcript) is saved into
+  the clip's own note a few minutes later, not a second note; the Web clipper's Save videos setting turns it off.
+- **On a phone, the caret that follows your reading sits on a line's text**: past a quote's mark or a list item's bullet
+  and box too, not only a heading's #s, where nothing could find it on screen.
+- **Sidebar panels that aren't lists keep their room**: when the Conversations panel's talk (or another panel that
+  isn't rows) was taller than the room left, it folded to its heading and showed nothing; it now takes the room and
+  scrolls, and the wheel at the talk's end brings its ask line in.
+- **Glass bundles look like glass in the web demo**: the demo has no desktop under its window, so Full glass and
+  Glass now show a soft wallpaper (on vaultite.com's bundle pages, the page's own) through blurred, see-through bars.
+  Asking for a bundle the demo already has replaces its copy, so switching back and forth works.
+- **The web demo's Browser shows real sites**: its tabs hold neodisk.app and olimpicos.net live (sandboxed, sending no
+  referrer), beside a note about the page you're on; and the demo follows the site that embeds it, its light or dark
+  look and its visitor's answer about AI (`?theme=`, `?ai=`).
+- **Zen floats its page as a card again**: its old snippet had stopped matching the panes, leaving the page on the
+  window's colour under a page-coloured bar. Zen now uses the app's own pane cards (a vault using Zen moves over by
+  itself, its other snippets kept), and the bar above a file has a faint line under it.
+- **Clicks in agents' pages land again**: a page an agent opened while no spare was ready never drew on a Mac, so
+  every click there was dropped (an Allow in a Claude Code session "changed nothing"). Each now starts from a ready
+  view, and one that stopped drawing (its window out of sight a while) is shown again before an agent acts in it or
+  you come back to its tab.
+- **The companion's marks feel placed, not scribbled**: asked what something is, it frames the whole of it with a clean
+  box its cursor drags open, which glows as it lands; its label springs out beside it, to the right where there's room,
+  and types in. Its spoken answers end on the answer, with no "want me to…?" tails, and say what went wrong plainly.
+- **Agents browse faster**: a click answers about 300 ms sooner (it watches the page settle while it waits for a
+  navigation the click may set off, not after), page loads and closes answer as they end (10 to 100 ms sooner), and a
+  site's open stream (a live channel, a long poll) no longer holds an answer for 4 seconds.
+- **Versions iCloud kept out of sight show in the note**: when two Macs change a note in iCloud Drive at once, iCloud
+  shows one and hides the other, which nothing showed until now. The note says so at its top: merge the other in (where
+  both changed the same lines, you choose in place, as with an agent's edit) or keep the note as it is; the other's text
+  goes to the note's history first. `vau conflicts` lists the files that have one.
+- **Recaps are written by one machine only**: `vau recap --write` on another Mac is passed on to the machine that writes
+  them (Machines' first, which runs their job), so two Macs never write a day's recap at once.
+- **Search reads web pages for their words**: an HTML file is searched for the text it shows (its title and body), not
+  its markup, scripts or styles, so a page that is an app no longer matches on its code, and the first search after a
+  start holds less in memory.
+- **The server starts faster after an update**: a vault plugin's styles are kept by what they're made of, so an update
+  no longer restyles every vault plugin as the server starts (half a second less with 27 of them).
+- **The companion's take-over offer waits for your answer**: it stays by your pointer until you click Do it or Not now,
+  say yes or no, press Esc, click elsewhere or ask something else, instead of going after 30 seconds, even mid-sentence.
+- **The Talk key's companion answers every ask**: one it handled with a tool alone (closing a job, following a pane)
+  now gets a few words of what it did, and a turn that ends with nothing said tells you so, instead of silence.
+- **The Talk key's companion opens its own page where you say**: asked to show your talk with it, it opens the
+  Companion page itself, in a split beside or below when you ask (`vau companion page --split right`), instead of
+  having its command refused and handing the job to a worker.
+- **The companion remembers the talk**: its Talk key's session lasts the hour its cache does (was ten minutes or eight
+  asks), and a fresh one (after that, a restart, or once its context grows) is told who you are (ME.md) and the talk
+  so far from its log, with what it did (what it opened, the jobs it started), instead of the last few lines of the
+  last ten minutes. Small talk the realtime voice answered shows on the Companion page too.
+- **The Conversations panel shows your talk with the companion**: Talk, beside a note's Comments, is today's asks and
+  its answers as a chat, newest at the bottom and coming in live, with the jobs it started, a line to ask it, and its
+  page a click away. A note with comments opens on them, any other on the talk.
+- **Agents at work in terminals no longer keep the app busy**: the whole window no longer draws again every 2 s while
+  one prints, and a terminal tab not shown wakes no frames; switching tabs and opening menus do less work too.
+- **The companion acts where you are**: asked over another app, it's told you're there, not in the note Vaultite shows
+  behind it, and a web page you ask for from your browser opens there, in a new tab, rather than in a Vaultite pane.
+- **The companion's marks land on what it means**: it rings a button, a row or a panel by name, in any app and in
+  Vaultite's own sidebars, or by the words on screen; a ring at a guessed spot goes round what you circled there, or
+  the thing it's on, rather than a small circle in between. They also land right with Vaultite's interface size changed.
+- **A foldable callout opened stays open, with no empty gap**: scrolled away and back, or its note left and opened
+  again, a section you opened is still open, and one shut is drawn at its shut height instead of held at its open one
+  for a few seconds, so the page no longer jumps under you.
+- **A video or note embedded in a callout shows in the editor, and loads only once opened**: the editor drew it as a
+  bare link, and elsewhere (sheets, previews, the Companion page, an embedded note) a folded callout's videos loaded
+  while hidden. An embed seen in a split pane, then drawn wider (or narrower), is no longer held at the other width's
+  height for a few seconds, an empty gap or text pushed down when it let go.
+- **The Companion page's plan limits put its accounts first**: the Claude Code accounts its chat and its jobs run in,
+  as its settings say now, come first, tinted and labelled Companion chat and Jobs, the others after them
+  (`block-agent-limits` with `for: companion`).
+- **Clicking Do it on the companion's take-over offer no longer stops it at once**: your hand coming off the button
+  isn't taking over (a click or a key still is). The offer grows to fit a long ask, so its buttons are never cut off,
+  wears the companion's colour as a ring instead of a dot, and it and the border fade in and out.
+- **The companion's cursor no longer turns up at a stale spot in the window**: back from answering in another app, or
+  its place gone from view, with no status bar to rest in it fades out instead of showing its words where it was minutes
+  ago, and a pane not shown is pointed at by its tab. Its words and cursor draw over a web page they reach. A Talk key's
+  answer, once said by your pointer, no longer shows again by the status bar, and its cursor comes back by your note
+  only while that note is on screen, else home, instead of flying to a corner of the window.
+
+## 0.10.0 (2026-11-06)
+
+The companion summoned anywhere on your Mac: hold ⌃⌥ to ask about what's on screen and a realtime voice answers at
+once, its answers drawn on the screen, jobs that run as real terminals you can open, a Companion page with every press,
+and doing a step for you in any app. Also dictation into the editor, terminals and any app, your KeePass passwords in
+the Vaultite browser, Do it on a task, mini-apps placed anywhere, terminals drawn by Ghostty's engine, and panes as
+cards with tabs of their own.
+
+- **Agents start in a terminal whose shell is sh or dash**: a ready `sh` shell was told to `source` the agent's start,
+  which only bash, zsh and fish know, so the agent never started there (Linux with `/bin/sh` as the terminal's shell).
+- **A quick tap of the Talk key on a busy Mac stays a tap**: the key's press and release carry when they happened, so a
+  Mac slow to hear them no longer reads a tap (its box) as a hold (listening).
+- **A conflict you haven't settled holds up nothing else**: leaving the editor for a page view (a plugin's) during one
+  shows Keep yours and Keep theirs, which save what you did there too; someone joining to type with you waits until
+  it's settled instead of taking over the text; and an agent's edit is refused with a reason rather than said to be
+  done and left unsaved.
+- **A window left open across an update no longer breaks on a plugin updated meanwhile**: a vault plugin written for a
+  newer plugin API waits instead of drawing names the window lacks (Next actions failed to draw with Dataview's new Do
+  it), and the window reloads once into the new build when nothing would be lost.
+- **The companion tells you a job's news aloud**: when one needs you, is ready for review, done or failed, its voice says
+  so in a line while you're at the Mac (you held its Talk key in the last 15 minutes) and not in a focus block; else the
+  menu bar's notification waits for you. Off with the setting Say a job's news.
+- **A server following a branch keeps up with a busy one**: when the newest commit hasn't passed CI yet (pushes coming
+  faster than CI runs), `vau service`'s updates take the newest one that has, rather than waiting for a quiet moment.
+- **Typing together, then alone, saves without a false conflict**: once the others leave a note, or the connection
+  drops (often on a phone), what you type on saves on top of what you all typed, rather than asking you to settle a
+  conflict over it, and text typed just as someone joins no longer shows up twice (plugin API 9: `keepLive` returns
+  a hold, `live()` and `handBack(base)`).
+- **A finished agent's tab never starts it again after a restart**: a session you ended stays ended when its tab comes
+  back after Vaultite restarts (a deploy), rather than resuming the conversation by itself.
+- **A reply to a handed-off agent is never cut off**: replying from the Inbox before its turn ended no longer lets that
+  turn's end close the terminal under your reply.
+- **An agent never clicks the wrong row**: in lists that reuse their rows (Gmail, Slack), a control it saw that now
+  shows another item is refused with "take a new snapshot", and a snapshot taken as the page changed is read again.
+- **Taking over a page from an agent stops it at once**: its act stops at the next click or key rather than running to
+  its end, so a form it was filling never selects and deletes what you start typing.
+- **Terminals come back clean after a restart**: output still being drawn when the connection dropped no longer lands
+  on top of the replay (a garbled screen), keys you type while it replays reach the program, and closing a terminal's
+  last tab while the server is slow to answer never ends what runs in it.
+- **Your passwords in Vaultite**: your own KeePass file (the one KeePassXC and Strongbox open) in a tab of the desktop
+  app (Show passwords), unlocked with Touch ID or its password: entries searched and listed by group, their username,
+  password, one-time code and websites to copy or open, edited or made with a generator, deleted to the recycle bin
+  with Undo, which agents used each one, and a switch to let agents use an entry without asking. The browser fills
+  your logins from it (a key in the address bar, or Fill login) and offers to save a new sign-in or update a password;
+  each change is written into the file (its old copy kept) and into the group KeePassXC shares with agents, so they
+  use it at once. `vau secret` can be answered from your passwords (with Touch ID) or kept there. Agents never see
+  what's filled.
+- **An agent's click in a page no longer says "nothing changed" when it did**: it waits for the data the click fetched
+  (an iframe moving meanwhile no longer cuts it short, nor does a page's first click), for a web component's change, and
+  for a page that goes elsewhere a moment after the click, which used to hang it.
+- **The companion can do it for you in any app**: ask it over the screen and it offers ("Want me to do it while you
+  watch?"); say yes or click Do it, and it presses buttons and fills fields through Accessibility (the pointer only
+  when it must), with a border on the screen while it drives. Move the mouse or press Esc and you have it back at once;
+  it asks every time before sending, posting or deleting, and never acts in private apps or password fields.
+- **A window reload no longer ends an agent's page in a background tab**: after a deploy's reload, a page an agent is
+  at work in (or asking you something on) waits for its tab, instead of being closed with its work and its ask.
+- **Do it**: an open task line (hover it; on a phone, the caret's line) or a suggestion in the inbox has a Do it that hands
+  it to a worker: the line goes in progress and the worker ticks it (`vau companion do`, `vau inbox add --do`).
+- **Browser tabs' pages are no longer lost or left behind**: after a deploy's reload, a page an agent is
+  at work in (or asking you something on) waits for its tab, instead of being closed with its work and its ask. A tab closed
+  while its page was still opening no longer leaves a hidden page behind, and a restored tab whose page failed to
+  load no longer stays without its title.
+- **Extensions can tell an agent's tab**: in Vaultite's browser `tabs.get` says `vaultiteAgent` on an agent's page, so a
+  site blocker can leave agents alone and still hold the user's tabs.
+- **The Companion page**: your talk with the companion a day at a time (what you asked, what it said and did, its jobs
+  as cards), each press's details (its steps, timings, cost, picture and audio) and what its services used this week
+  with what's left. Its menu in the status bar, or `vau companion page`.
+- **An agent that stops no longer shows as working**: one that quits, crashes or is interrupted back to its shell is
+  idle at once, even with no app open (the phone asleep), so its Inbox row, `vau terminal wait` and a delegated task's
+  parent all hear its turn ended; a terminal server that dies says its terminals were lost, not that they exited cleanly.
+- **Autosave loses nothing in the gaps**: closing a note while it saves keeps what an agent's write merged in (and its
+  `updated:` date), a save that failed is sent again on its own (with backoff, on reconnecting and when the app is shown
+  again), a change on disk heard while a save waited is still merged in, and an old read no longer takes a note back.
+- **Mini-apps go anywhere**: any file can be drawn in a sidebar (a file's menu, Show in the sidebar; `vau panels right
+  Apps/Weather.html`), so one .html page or note with a genui or mcp-app block is an embed, a tab or a panel.
+- **The Talk key's companion is never left halfway**: each press runs one state machine (held, sending, thinking,
+  answering, open, closed), every step in its press log; one stuck (a lost key-up, an ask with no answer) ends with a
+  word rather than a cursor thinking forever. If the recognizer stops while you hold the key, its cursor says so and
+  what it heard goes when you let go, never mid-sentence; a press just after a restart waits for Vaultite to reconnect.
+- **The companion clicks Vaultite's own buttons, tabs and sidebar rows, and you see what it does**: its cursor flies to
+  what it opens or clicks first (even when it acts through the CLI), it hands work off again from the Talk key, and with
+  nowhere to be it fades where it is rather than flying to the window's corner.
+- **The companion's jobs are real terminals you can open and type in**: a handoff starts Claude Code (Opus, high; Codex
+  when asked) in a terminal of the app, where the ask was over (a preview's address leads to the repo serving it, on its
+  machine; a GitHub page to its checkout; a note to the vault), and a folder you rule out is refused. Each job goes
+  starting, working, needs you, ready for review (its diff and preview link), done, failed or stopped, the same in the
+  menu bar (with where it runs and what it does now), `vau companion jobs` and by voice: tell it more, stop it, or ask
+  how it's going. `vau companion timings` shows how soon each job's card was up and its worker took its first step.
+- **Dictation follows you**: move to another app or tab and it keeps listening, the words showing in a box under the menu
+  bar; when it stops they land in the field in front, else where you began, else on the clipboard and in your inbox. A
+  double tap is hands-free.
+- **Updates of Vaultite Main go in whole**: the new app is copied and checked beside the old one before it quits, swapped
+  in only once nothing opened the old one again, and a server still on the replaced version restarts onto the new one.
+- **The companion sees what was there as you pressed**: a toast or menu that's gone by the time you let go of ⌃⌥ still
+  reaches it (the screen's picture from the key-down comes too, when the screen changed while you spoke), and over
+  Vaultite it's told the app's toasts of the last minute ("Claude isn't running"), so it can answer about them.
+- **The companion checks before it says it's done**: asked over the screen to show its session, open a note or show a
+  pane, it does it (rather than telling you how), and only says it worked when the app says so: `vau command` now
+  answers once the command has run, with the toasts it showed ("Claude isn't running"). It knows a terminal pane can
+  be read and followed but not typed in.
+- **The Talk key's companion never waits on a permission check**: it runs its few safe commands (reading the vault,
+  opening things in your window, showing its own session) without asking, and anything else is refused at once, so it
+  tells you in a few words that it needs your OK instead of going quiet for seconds.
+- **Dictation knows Vaultite's words**: the recognizer (Soniox or this Mac's) is told to expect Vaultite, vau, Claude,
+  Codex, the companion's names and your newest notes' names, so "Vaultite" no longer comes out as "Voltite". The Talk
+  key's press log says which recognizer heard each press, and why when it wasn't Soniox.
+- **The companion's voice no longer cuts out after its first words on Bluetooth headphones**: AirPods switch back from
+  their call profile a moment after the microphone closes, and the answer went on playing to the old one, unheard. With
+  Bluetooth headphones as the output, dictation and the Talk key now hear with the Mac's built-in (or a wired)
+  microphone, so they keep their full sound; Dictation's setting Microphone picks another, one used anyway stays open
+  until the answer is said, a mic unplugged mid-press hands on to the next, and `vau companion status` says which it
+  hears with. The voice follows the output as it changes, saying again from the pause just before.
+- **Show the companion's session opens the one you talk to**: its Talk key's session (shown when it answered last or the
+  long one isn't running), which it can open itself when you ask, rather than a "isn't running" toast.
+- **The companion knows when you ask it over Vaultite**: holding ⌃⌥ over Vaultite's own window no longer tells it
+  you're in the app behind it; it gets the note, pane or line you point at.
+- **The Talk key never fails silently**: a press that hears nothing, loses its recognizer or can't reach Vaultite
+  shows "Didn't catch that" by the companion's cursor with a soft sound, its audio kept to hear again; pressing again
+  while its last words are still coming listens again rather than being swallowed; and a test copy of the app can no
+  longer take your Talk key or microphone. Each press is logged, so one that went nowhere can be traced.
+- **The companion talks back at once**: hold ⌃⌥ over the screen and speak, and on letting go a realtime voice
+  (OpenAI's, with your own key: `vau secret "OpenAI API key" | vau voice key --provider openai`) answers right away.
+  Small talk it answers itself; for anything on screen it says "Let me look" and the summoned model's answer, asked at
+  once, follows in the companion's own voice as soon as it's ready, its marks drawn as before: no slower than without
+  it, at about a sixth of a cent an ask. Press again while it speaks to cut in. Without the key, or if it fails, the
+  dictation and voice pipeline answers as before (setting Voice front; Realtime model and voice). An OpenAI account
+  with no credits, or a key it refuses, pauses it (one notice; companion status says why) and it tries again every ten
+  minutes, so presses don't keep trying it. A key limited to the Realtime API is taken (it's checked by a free
+  Realtime session ask, not by listing models). `vau companion status` says what its voice runs on here (who hears,
+  who speaks, in what order, realtime or not); its docs say what each piece costs, every one on your own key or plan.
+- **A spoken answer needs no box**: asked by voice, the companion answers with its cursor, its voice and its marks;
+  its box (its words and a reply field) shows only when you tap the Talk key, or for a typed ask. Waiting feels alive: let go and your trail draws into its cursor, which glows softly while it thinks, then
+  speaks or flies; soft short sounds as you summon it, let go and its answer comes (Sounds setting, on by default). A
+  box that does show no longer jumps as its words stream in.
+- **One companion per talk, and it talks until you stop it**: the Talk key (⌃⌥) brings one companion at your pointer,
+  in Vaultite's windows as in any app, never a second cursor or box beside it (nor its arrow pulsing in the status
+  bar); over Vaultite it still knows the note line, terminal row or button under the pointer and can point there. Its
+  voice stops only for the Talk key, Esc or a new ask: clicking, typing elsewhere or switching apps no longer cut it
+  off, and its cursor leaves once it's done speaking. The Talk key or Esc stops its thinking too, so the next ask is
+  answered at once, and the realtime voice's words stop with it. A held ⌃⌥ never dictates into a terminal. Dictation keys still
+  work alone.
+- **A video playing on in a background tab keeps its speaker**: when one of a page's videos paused while another went on
+  sounding (YouTube's next video or an ad, a preview beside it), its tab lost its speaker and the card for hidden tabs
+  never showed; now both come back within seconds.
+- **The companion on a phone is a co-editor, not a cursor**: no arrow follows you around. While it writes, points at a
+  line (lit a moment) or thinks on what you asked from the phone, a thin caret in its colour with its name shows where,
+  then fades; past the screen's edge, a chip says "Claude is writing" and scrolls there. Its words come in a card at
+  the bottom, by your thumb, with a box to reply; swipe it down to close. Its face in the note's top bar opens what it
+  said, with a dot for what you haven't seen.
+- **A phone's screenshot pasted into a terminal reaches the agent**: a HEIC photo, as iPhones paste them, is given to
+  the shell as a JPEG beside it, the same size (the original kept), so Claude Code and Codex can read it.
+- **Terminals kept and drawn by Ghostty's engine**: the terminal server and the pages keep each terminal's screen and
+  history with libghostty-vt instead of xterm.js, several times faster at reading output, reflowing and giving a tab
+  its screen back, at a fraction of the memory; a busy agent's output reaches the tab in fewer, larger pieces, and
+  keystrokes echo at once. Emoji sequences, flags and other graphemes draw as one character, in two columns.
+- **Files keeps its rows, however fast it scrolls**: with each panel in its own box, a long file tree scrolled far down
+  no longer shrinks to a row or two (or a lone "Show more") with empty room under it once a panel above it grows or
+  shrinks, nor stops short after Expand all; its rows are drawn in the frame it scrolls, and a panel's scrollbar is
+  no longer cut in half where the app draws its own (a Mac with a mouse, Windows, Linux).
+- **Dictate into terminals**: ⌘J or fn in a terminal (a shell, Claude Code) dims the words not settled at its cursor
+  and pastes each settled chunk there, on one line and never with Enter, so nothing runs until you press it. With
+  nowhere to dictate, the hint shows in the pill's place where you look, not as a toast in the corner.
+- **The companion answers out loud**: hold ⌃⌥ and ask by voice, over any app or in Vaultite, and its answer is
+  spoken by your pointer as it's written, starting with its first sentence (words that come with a drawing too); its cursor shows it talking. ElevenLabs' voice (Brian) with your ElevenLabs key
+  (`vau voice key`), else Soniox's (Adrian), else this Mac's, each taking over from the next word if one fails;
+  `vau voice sample` lets you hear one; what it draws comes as you hear its words, each mark while its sentence is said; dates, ranges and abbreviations are said as words; pressing the key again, Esc or moving on stops it. The companion's Voice setting: when you speak (the
+  default), always, or off.
+- **The companion moves with you on screen**: hold its Talk key and your pointer leaves a trail in its colour, fading as
+  it goes, so you can ring or underline what you mean (sent with your words); its cursor trails your pointer on a spring
+  through the exchange (across displays), its answer's box with it, holding still as you reach for it; when it points it flies
+  there on an arc and lands on the element, its marks drawn in with its cursor as the pen, in time with its words, and
+  it comes back once you move on (at once with reduced motion). The box's reply field takes one click, or a tap of the
+  Talk key, without leaving your app; the screen's picture it reads is no longer scaled, so it points where it means.
+  Asked about Vaultite itself, it looks in your notes first and offers to hand a wish off as a job.
+- **Web pages take every click again**: a page's corner under a pane's hidden handle (its bar out of sight) no longer
+  sends the page's clicks the long way round, where buttons like Allow took several tries; a click whose press came
+  while something was over the page is let go in it, though that went before the release.
+- **Settings opens on Appearance, About comes last**: General is now About (the version, app updates and errors), the
+  last of the app's own sections, so Appearance leads the list it opens on. File history's settings are in Files.
+- **Zoom follows what you're looking at**: ⌘+ ⌘- ⌘0 zoom the focused pane's content, not the whole app: a note's
+  text, a terminal's (a point at a time, as in Ghostty), a web page's site (kept per site, as before) or a canvas, with a
+  short line saying where it's at ("Terminal text 14 pt") and Reset; in a browser they do the same for a note or a
+  terminal. The old whole-window zoom is the interface size, kept as it was: View > Interface size (⌥⌘+ ⌥⌘- ⌥⌘0) or
+  Settings > Appearance, and what ⌘+ zooms where nothing else does. A pinch magnifies a web page, as in Safari, with
+  a toast or anything else of the app's over it too (where the keys held with a click or a scroll now reach the page).
+- **Closing several tabs offers them back**: Close others, Close all or closing a group shows a toast with Undo, naming
+  the keys that reopen them in the desktop app (⌘⇧T, Ctrl+Shift+T elsewhere); it goes once they're back. Phones' key
+  bars over the keyboard (terminal, web viewer) name Shift and Ctrl as non-Mac computers do.
+- **Terminals kept by Ghostty's engine**: the terminal server keeps each terminal's screen and history with
+  libghostty-vt instead of xterm.js, several times faster at reading output, reflowing and giving a tab its screen
+  back, at half the memory; a busy agent's output reaches the tab in fewer, larger pieces, and keystrokes echo at once.
+- **Sidebars show and hide smoothly, terminals don't blink**: a sidebar slides in and out with the panes as one, keeping
+  its shape (a slid-in one settles into place when pinned); a terminal beside it no longer flashes blank as it resizes,
+  and its program redraws for the new size at once. A sidebar dragged shut no longer leaves the pointer stuck resizing;
+  the resize line is slimmer, in the middle of the gap; Pinned's tiles glide as they rewrap; and a top bar item docked
+  in a sidebar (Review) can be hidden like any panel (`fileBarHidden`).
+- **Scrollbars like a Mac's**: where the system overlays them (a Mac with a trackpad, phones) they're its own, shown while
+  scrolling and following System Settings; where they'd always show (Windows, Linux, a Mac with a mouse), the app's own
+  rounded thumb shows only while a list scrolls or under the pointer, in room kept for it so nothing shifts.
+- **Plugins live in Settings**: on a computer, Plugins and Get plugins are sections of Settings beside its menu (no more
+  jumping to another page); a plugin's row opens its page there, with its switch and its settings on it, and a way
+  back. Terminal has its own section, Plugin updates moved to Plugins, each section says what it holds, and rows that
+  go somewhere show a chevron.
+- **Menus and sidebars stay over a page after full screen**: once a site left full screen, a peeking sidebar, the
+  palette, menus, the find bar and toasts no longer draw under it, and a sidebar shown beside a page no longer
+  slides in under it for a moment.
+- **Sidebar panels hold still as a tab group opens or folds**: with each panel in its own box, the panels under Tabs
+  no longer bounce a row up and down while the group's tabs grow in or fold away (or as a row folds off any list);
+  they stay put while Tabs is full, and otherwise move one way with it, without a jump at the start or end.
+- **Dictation in the cloud**: with a Soniox key (`vau secret "Soniox API key" | vau dictation key`) dictation streams
+  to Soniox, English and Portuguese and others switching on their own, the final words a moment after you stop; offline
+  or if it drops, this Mac's recognizer finishes.
+- **The companion draws its answers on the screen**: rings, arrows, numbered steps, ticks, a spotlight, words and a
+  scratch pad with charts, hand-drawn in its colour as it speaks, with buttons to copy, open or ask the next step; Clear
+  takes them down (so does your next ask), Keep saves the pad as a drawing in Drawings/.
+- **Pane tab bars, on their own**: the switch (was Pane titles) is each split pane's strip of its tabs, the same with
+  the tab bar on or in the sidebar; off, panes start with what they show, a tab dragged over one brings its strip back
+  to drop into, and the tab bar's cells say how many more tabs a pane has (+2, a click lists them). A terminal pane's
+  strip has its + too; right-clicking a split's cell in the tab bar is that pane's menu.
+- **Links from other apps open where you're signed in**: with Vaultite as the Mac's browser, a link with no site rule
+  opens in the container signed in to its site, or asks which account when several are (⌘Enter remembers it); an app's
+  sign-in that goes on to Google asks there. A tab moved to another container mid sign-in starts it again there, so
+  the sign-in no longer fails for a missing state.
+
+- **The companion, summoned**: hold ⌃⌥ in any app (or in Vaultite) and its cursor comes to your pointer, listening,
+  your words by it; drag meanwhile to draw on the screen. Let go and it answers there, its words in a box by the
+  pointer for the next ask, with what's under it, near it, your ink and a picture of the display; Esc or moving on
+  ends it. A tap opens the box to type in, a double tap listens hands-free. Inside Vaultite the ask is about what's
+  under the pointer (a line, a pane, the app's UI). Nothing rests on screen: no docked or trailing cursor, no dragging
+  it onto things (nor a follow started by that); unread answers are a badge on the menu bar icon. Dictation's key is
+  fn⌃ held; double Control is no key now. Its words never cover its name or what it points at.
+- **Summoned asks are quicker**: they go to a session of their own (Model for summoned asks, Sonnet), started with the
+  companion and readied as you press its Talk key, the session that watches your notes left to it. It answers in plain
+  words, spoken and shown from the first ones, pointing and marking as it talks, in a lean session (its own short
+  prompt, few tools, low effort, a fresh one every few asks that's told the talk so far), with the window's text cut
+  to what's by your pointer and gathered while your words are finished: about a second from letting go to its first
+  word, where it took four.
+- **Background jobs**: ask the companion for long work and it hands it to Opus (or Codex) and says so; the menu bar
+  lists its jobs (working, done, needs you), with a badge and a notification when one ends, and a click opens it in
+  Vaultite. `vau companion jobs` lists them; a follow-up goes on in the same session.
+- **Guides to your apps**: a note of `type: guide` in Guides/ (its `app` bundle ids or `site` domains) goes with every
+  summoned ask in that app or site; with none, the companion may offer to write one.
+- **Dark pages reach a styled site's other pages**: a site the vault styles only in part (Google Docs' editors) has
+  its sign-in, access and error pages darkened too, judged page by page as they look with the style; going from one
+  darkened site to another in a tab no longer shows a pale frame; site styles get `--vault-paper-filter` for canvases.
+- **Web pages round with their card**: with panes as cards, a page's corners follow its card's curve instead of poking
+  past it; with the page bar hidden, the gap above a card brings the bar too, and its right-click has the bar's switch.
+- **Panes as cards, one shape**: the tab bar sits on the window's chrome with the sidebars and the gaps, so the cards
+  are the only page-coloured surfaces; the status bar is a small chip inside the card it speaks for, inset from its
+  corner, which stays whole; the sidebar's foot lines up with it.
+- **A vault's icon is Vaultite's stone**: Open in the menu bar's menu, Open vault in the File menu and a vault among
+  the folders in Manage vaults show the gem, not a safe.
+- **A cleaner menu bar menu**: icons on its rows (a mic for Dictate anywhere, with its keys under it), and where the
+  companion's cursor waits in another app picked right there, each place drawn: by the pointer, at the screen's edge, or
+  only inside Vaultite (new: no cursor over other apps).
+- **The menu bar's stone has all its facets**: a line from each corner of its face, as in the app's icon, each cut
+  clean to the edge.
+- **Mission Control leaves out the companion's screen layer**: the see-through window its cursor is drawn in, its
+  conversation and a dragged card's ghost no longer show as Vaultite windows there.
+- **Drag the tab you're on to its own edge to split it off**: dropped on a side of its page (from the tab bar or the
+  Tabs panel), it goes on that side and the tab you were on before it comes in beside it, out of the list (a blank page
+  when there's no other tab). In a split, a pane's tab dragged to that pane's own edge splits off the same way, the pane
+  showing its next tab.
+- **The companion over the screen works as in the app**: click its cursor (or its dot at the screen's edge) for its
+  conversation, its last words and what you asked, with a box to type an ask or say one into; drop it on a window and it
+  stays on that spot (an email's row), not the window's top, moving with the window; its bubbles open below it where
+  there's no room above, never under the menu bar; drag its dot to the left or right edge, anywhere along it, and it
+  waits there from then on. The menu bar's icon is Vaultite's stone.
+- **The companion's cursor over the screen can go anywhere and come back**: dropped where nothing can be read, as the
+  menu bar, it stays there and looks at a picture of it instead of jumping back; double-click it, or right-click it for
+  Come back (and Quiet or Pair), to have it wait by your pointer or at the edge again.
+- **The companion's cursor is one cursor, in the app and over the screen**: both move on the same spring; coming back
+  from another app it shows where it's going as the screen's cursor lands there, and over the screen it hides while a
+  window in front covers what it points at.
+- **Asking about the desktop sees what you point at, and one cursor shows**: an fn ask or a cursor dropped where there's
+  no window (the desktop's icons) tells the companion what's under the pointer, with a picture of the screen around it,
+  and its cursor answers there; out on the screen, its cursor and bubble no longer show inside Vaultite too.
+- **Restart to update restarts with a video in a player**: the app no longer stays open, its Restart doing nothing
+  from then on, when a page in a player window closed as it quit; quitting never waits on a page more than a few seconds.
+- **Terminals hold still while a sidebar or split is dragged**: they keep their size till it's let go, then fit once,
+  where before they blinked and rewrapped their text all along the drag.
+- **A player always has its controls**: its traffic lights come with the pointer at its top whatever its page does,
+  and a player left with no page (a black window with no way to close it) closes itself, its page back in its tab.
+- **Tabs dragged between windows show where they go**: past a window's edge the tab's card keeps following the
+  pointer over the screen, and held over the main window it shows where it would land (a place among the tabs, a
+  split), as a drag inside it does; let go, it lands there.
+- **A window that's only its page, kept on top**: in a window of its own (Move current tab to new window), Hide window
+  bars (the palette, or the tab bar's menu) leaves only what it shows: no tab, page or status bar, and on a Mac the
+  traffic lights show, with a strip that drags it, only with the pointer at its top. Right-click the page or that strip,
+  or use the palette, to bring the bars back; the window keeps it. A tab moved back to the main window keeps its web
+  page live (a video goes on where it was), not loaded again. Keep window on top (the palette, Window menu, the strip's pin)
+  floats any window over other apps' and on every Space. A page's popup (a sign-in, a call's video popped out) is now a
+  window of its own at the size it asked, staying put as the window it came from moves or minimizes. One of the page's
+  own (its video popped out) opens bare and black like a player, titled by the page and keeping its video's shape, and
+  opens next time with its title bar and Keep on top as you left them for that site; a sign-in with another site keeps
+  its title bar, naming the site asking. Their right-click shows or hides the title bar and keeps them on top.
+- **The companion's cursor stays where you drop it, and its box shows your side too**: dropped on text it stays on that
+  spot (scrolling with it), dropped anywhere else it stays there, until it looks somewhere new; clicking it shows what
+  you asked with what it answered; a long bubble fits the window and scrolls with no bar, its buttons over its corner.
+- **The companion's cursor glides smoothly over other apps**: it moves on a spring at the screen's full frame rate,
+  bends toward a new place mid-move instead of starting over, follows a window as it's dragged or resized, and no
+  longer flickers between places.
+- **The companion's cursor glides smoothly over other apps, as one with the app's**: it moves on a spring at the
+  screen's full frame rate, bends toward a new place mid-move, follows a window as it's dragged or resized, no longer
+  flickers, and looks as in the app (its flag, mark and bubble). Going between another app and a note, or as you switch
+  in and out of Vaultite, it glides out of the window's cursor and back into it instead of jumping.
+- **A subdomain's own site style shows in Shields**: on docs.google.com the menu has "Style for docs.google.com" (its
+  own file, else its parent site's), and "Style this site…" makes the page's host's file, not one for all of Google.
+- **Copy from a browser tab watched live, and the keys a phone lacks**: Copy (or ⌘C) puts what's selected in the page
+  on the clipboard of the device you watch from, a login the app filled never in it; on a phone, while typing, a row
+  over the keyboard has esc, tab, ⇧tab, the arrows and Paste. A double click from another Mac now double-clicks there.
+- **A split's panes have tabs of their own again**: in a split, a new tab (⌘T, a link opened in a new tab, a tab
+  ⌥-clicked or dropped on a pane) opens in the focused pane, what it showed staying open behind it, and ⌘W closes just
+  that one. The Tabs panel lists each pane's tabs under the split's row (click, close, drag between panes or out to the
+  list), and with the tab bar on every pane of a split shows its tabs in a strip of its own, one tab too, with a + for
+  another there. `vau tabs` lists and moves them (plugin API 7: a pane's `stack`).
+- **A browser tab watched from your phone zooms**: pinch the picture in (sharper while zoomed), drag to move around it
+  and on past its edge to scroll the page, and Zoom to fit to go back; a trackpad's pinch does the same on a Mac. A double
+  tap double-clicks, a finger held still a moment presses and drags (to select text or move a slider), and trackpad mode
+  moves a pointer you click with a tap, for menus that open on hover and small targets.
+- **⌘W in a split closes only the focused pane**: the tab closes with its last pane. Close split (⌥⇧⌘W, or the
+  tab's menu) closes the whole split.
+- **A card shows sound playing in a hidden tab**: while a page plays in a tab out of sight (in the background, a
+  folded group or a hidden pane), a card in a corner names it, with Pause, Mute and Show tab; several share one card,
+  stacked with the mini player and the agents' card. Its X closes it till that page plays again; the Browser's settings
+  turn it off.
+- **Web pages follow the app's dark look**: while the app is dark, pages never flash white and come out dark from
+  their first frame. A site with a dark look of its own shows it; the rest are made dark in the colour scheme's colours
+  (or plain dark, a setting), pictures and video kept, canvas-drawn pages like Google Docs too. A site's own style wins
+  over it; the Shields menu turns it off for a site, and Dark pages in the palette for all.
+- **A tab playing in a folded group shows a speaker on the group**: in the tab bar and the sidebar, a click on it shows
+  the tab, pauses it or mutes it. A split's row in the sidebar shows which pane plays. Pages can be paused and played
+  again from the app: the tab's menu, the speaker's menu and the status bar's Playing have Pause and Play.
+- **A note's links can open in a chosen container**: a web link's menu in a note has Open link in container, and
+  Always open this note's links in sets the note's `container:`, which takes its links there before a site's rule.
+- **Every pane of a split shows its close and drag buttons on hover**: notes and Browser pages at the window's top
+  have the X and handle at their bar's end (a zoomed or floating one's unzoom or dock too), as terminals do, also when
+  the bar fades. In the sidebar's split rows the pane under the pointer lights up, each pane has its own X, its
+  right-click is that pane's menu (the tab's under Tab), and a pane dragged onto another there swaps them; the … at the
+  row's end opens the split tab's menu, and dragging it moves the whole split, as a tab's row does.
+- **Agents' runs replay as a visual timeline**: runs by day with pictures and activity, then a run's steps over its
+  time and as a filmstrip by page, repeats folded, pauses and failures shown; ← → and Space step and play it, and a
+  run of thousands of steps opens at once.
+- **Agents use the browser in fewer, smaller steps**: open and go answer the page's content once it has drawn (data it
+  fetches included), act takes a control by its name (or text the page shows), says what tabs it opened and which
+  controls changed, fill replaces what's there on a Mac, snapshots are about half the size (rows on one line), read
+  gives a page's main part and a Google doc as Markdown, paste puts formatted text into editors, download saves a file
+  with a tab's logins, and `vau docs browsing` says how. In evals (tools/browser-evals) agents finish the same tasks
+  in a third less time, with half the turns and 43% fewer tokens.
+- **Undo of a move to another workspace puts the tab back in its place**: in its spot in the bar and its tab group,
+  not at the end.
+- **A plugin setting changed twice quickly keeps the last change**: hiding a graph group and showing it again at once
+  no longer leaves it hidden, when a read from before the first change came back late.
+- **⌘A after a click in the sidebar selects nothing**: a click on an empty spot of a sidebar or a bar no longer leaves
+  ⌘A selecting the text of the page beside it.
+- **A tab moved to another container loads only its page there**: its earlier page no longer starts loading in the new
+  container on the way, which on Linux could leave an extension's redirect there (a site blocker's) undone.
+- **A click as a note opens stays where it went**: clicking a table's cell or a line while the note was still coming
+  back to its place no longer has the cursor jump back to where it was left a moment later.
+- **Faster first load on a phone**: the app's code comes in about a dozen files instead of over a hundred, the vault
+  arrives while it loads, and its files are compressed smaller; after an update the new version is fetched in the
+  background, so the next launch doesn't wait for it. On 4G through the tailnet the first screen draws in half the time.
+  The iPhone app's server list, shown at every launch, and the desktop app's Manage vaults window load a fifth of the
+  code they did.
+- **Splits and swipes on the phone**: a split tab's panes sit side by side, the next one coming in with the finger from
+  the first pixels; let go past halfway or flick and it settles in on a spring at the finger's speed, past the ends it
+  gives, a finger down mid-settle catches it (on the pane coming in too), and vertical scrolls stay scrolls. In the tab
+  list a split's card shows its panes (tap one to show it), its panes open as a page of cards (drag one onto another to
+  swap, swipe or X to close, + for a new pane), and tab menus have Open in split, Swap panes, Separate panes and Move to
+  new tab. Swiping between workspaces there settles the same way. The bottom bar swiped sideways goes to the tab either
+  side, as Safari's, and while either swipe goes the header's name and dots follow the finger. The name and dots sit at
+  the screen's centre whatever the buttons, the dots in the bar's middle until the name shows above them, and a swipe
+  settling no longer flashes the name in or moves them.
+- **Reopen closed tab brings back what closed, as it was**: what closed together comes back with one ⌘⇧T (Close
+  others, a tab group with its name and colour, a pop-out window, all the tabs), each tab in its place; a split's pane
+  goes back where it sat at its size, floating or zoomed as it was. Tabs a layout or another device takes away that
+  are open nowhere else are reopenable too. Each workspace reopens its own, Search tabs lists what closed together as
+  one row, and the phone's tab list has Recently closed in its menu.
+- **Sharing a folder, end to end**: Share sits on a folder's toolbar, in its menus and in the palette (Share folder…);
+  the link is copied as it's made, the tree marks shared folders, and each person's access is a menu (Can view,
+  comment, edit; 30 more days; Remove access), the same link kept. A guest lands on the folder's page, sees its images,
+  and edits again (their saves were refused since saves sent only the edit). Its HTML pages read the folder's files and
+  play live with the owner (`vau.shared()`: a reader watches), from the owner's other Macs too, and their notes are
+  typed in with the guests there from the moment the folder is shared; the owner's view of
+  such a page reads only inside the folder. Any machine shares: one not on the internet makes the link through the
+  vault's machine that is, and a machine with a vault of its own gets links at that machine's address, which passes
+  its guests on.
+- **Players open as a window you can share**: Open as player is a window with no title bar at the video's aspect,
+  where the last one was, its video edge to edge (letterboxed when resized to another shape, steady as it's resized);
+  its controls (the traffic lights, or Windows' and Linux's buttons) show with the pointer at its top, which drags it.
+  The site's full screen (its button, YouTube's F) and the window's are one, and Esc or either way out brings the
+  window back as it was, still a player; full screen at once is a setting (Players open full screen).
+- **A bookmark star in the Browser's address bar**, as Chrome's: outline, or filled for a bookmarked page. A click (or ⌘D)
+  bookmarks the page and opens a small card to rename it, pick its folder or remove it; the … menu says Edit bookmark… once it is.
+- **Cloud sessions, a page of their own**: the Cloud panel picks an account on its heading (or All accounts), with
+  which accounts show at all in the same menu. As a tab it's a list like a pull request list: Needs you, Working,
+  Ready for review and Recent, each session with its repository, branch, where it stands, its pull request (through
+  `gh`) and when it last moved; search it, narrow it to a repository, start a new one. From a row: archive (with
+  Undo), rename, open its changes on GitHub, or Continue in a terminal (`claude --teleport`, in a worktree beside your
+  checkout, in the Claude Code account signed in to it). The Inbox's news says what a session asked or did.
+- **Phone pages titled once**: a page with its own header (Sites, Extensions, Cloud sessions) no longer repeats its
+  title under the phone's.
+- **Web tabs come back as you left them**: after a relaunch the page on screen shows at once, as you last saw it, while
+  it loads, scrolled where it was with its Back and Forward; a web tab closed and reopened
+  (⌘⇧T) does the same, and tabs not loaded yet keep their titles.
+- **⌘-click and middle-click open behind, as links do**: on anything in the app (an Inbox row, the file tree, a link
+  in a note, a folder's page, backlinks), a new tab behind the one on screen (⌘⇧: in front), never a copy of the app
+  in a web tab or nothing at all; a folder middle-clicked opens its page.
+- **Inbox items settle where they're open**: an item open in a tab has Settle and Snooze on its tab (on hover, in the
+  tab bar and the Tabs panel) and in its file bar. Settled or snoozed, the tab reading it goes on to the next item, as
+  Mail does (none left: it closes, back to where it was opened), and its other tabs close; a session settled or
+  snoozed in its sheet goes on to the next one's. Rows' buttons are Settle,
+  Snooze, More everywhere, and a phone's swipe the same from the edge.
+- **Folders as Finder shows them**: a folder's page shows as a grid, a list, columns (each folder down to it side by
+  side, a preview of the file picked) or a gallery (the picked thing large over a strip, ← → through it); a list or
+  grid can be grouped by kind or date modified. Every file has a picture: a PDF's first page, a video's frame, a web
+  page, small copies of photos so a folder of them opens fast (made by the server, kept). Its toolbar (view, Sort and
+  group, More) is on the page, its count gone from under its name, and its tab's menu has the folder's own: New note,
+  Copy path, Reveal in file tree, Open in Finder, More folder actions. Its keys are Finder's: arrows move in every
+  view (a grid's both ways, columns' ← → out of folders and into them), ↵ or ⌘↓ opens, ⌘↑ goes up, Space shows it
+  beside, F2 renames, ⌥⌘1–4 change the view, a name typed goes to it; a view's button clicked leaves the arrows to the
+  files.
+- **Tidier tab menus**: Hide page bar sits with Show tabs on top, the tab bar and pane titles at the end of every menu
+  that has it; the Tabs panel's Show tabs on top is with Move to right sidebar; with a group to join, Add tab to group
+  has New group first, as in Chrome; Separate panes has an icon of its own; a new tab (⌘T) opens past a tab group,
+  never in it, whatever new tabs open.
+- **Pinned folders drag like tabs**: onto a pane's edge to split, onto the tab bar to place a tab, with the same
+  previews; so do several pinned pages, or files and folders selected together.
+- **Faster restarts, a quieter idle**: the server keeps what it read of the coding agents' transcripts, so a restart
+  reads on instead of a month of them again (about 25 s of CPU on a busy Mac, now under 2); comment threads in notes
+  that aren't open no longer wake every window every 1.5 s; typing in the quick switcher searches a big vault three
+  times faster.
+- **Dragging a tab holds steady**: in the Tabs panel and the tab bar, tabs make way once as a dragged tab passes and
+  no longer slide back while it's held, on a tab's middle too (that tab holds still, lights once the pointer rests,
+  then opens); the dragged tab stays a tab over its own place and the panel's heading instead of ballooning into a
+  card, a group's indent eases in and out, and let go in the panel it slides into its place.
+- **Only content selects, as in a native app**: tab titles, the sidebars and panels, bars, menus, the palette, rows
+  and cards no longer select their text when clicked, double-clicked, held or dragged across; nothing selects while
+  anything is dragged. Notes, rendered Markdown, code, the terminal, fields and error details still do.
+- **Sidebar rows hold still**: hovering a row (a tab, a pinned page, a session) no longer moves anything: its … and
+  Close fade in over the label's end, and a panel scrolling in its own box ends between two rows, not a sliver into
+  the next.
+- **The Browser asks what Chrome asks, rather than doing nothing**: a page with unsaved changes asks "Leave site?"
+  (before, the click went nowhere: claude.ai's artifact invitations), a site's own sign-in asks for a username and
+  password, prompt() asks, and Present in a call shares a screen or window through macOS's picker. A sign-in button
+  inside another site's frame ("Sign in with Google") opens its popup, as do popups a page opens blank and then sends
+  on, and blob: pages. A misspelled word's menu has its guesses and Look up; a no to opening another app isn't kept.
+- **Settings without Features**: the app's own plugins' settings are parts of the section they belong to (File
+  explorer, Search and Pinned in a new Files section; Templates and the phone's keys over the keyboard in Editor;
+  Review and Inbox in AI; File history, Errors and Terminal with updates in General), and Plugins, the last item,
+  opens the plugins you add. Hotkeys shows a keyboard of what each key does with the modifiers picked (and which are
+  free), groups commands by area, finds a command by pressing its keys, and asks before taking keys another command
+  has. All properties' settings list the properties that make good chips, one tap to add. Review has real settings
+  (folders not to review, its button in files' headers) and keeps what you reviewed off the vault. The keys over a
+  phone's keyboard are drawn as they show, to move, take off or add. Watches' folder is its kind's folder, like every
+  other kind's.
+- **Setup is now Plugins, and says things without a hover**: the sidebar's button, the page and the menu bar say
+  Plugins. Get keeps the categories beside it, as Your plugins does, and picking one shows only its plugins. Its layout
+  and pack cards put the kind beside the name, drop the Vaultite byline, and say in orange what a pack installs instead
+  of a red shield to hover. The layout picker (the welcome card, Settings > Appearance) says what the picked layout is
+  under the tiles, no tooltip.
+- **Pinned doesn't offer every day's recap**: its settings and Pinned pages menu list the pages to pin without the
+  daily recaps, one a day (pinning one from its menu still works).
+- **A plugin that fails can't half-switch a tab**: one plugin's error while tabs change is reported, and the address
+  and the panels' highlight still follow the tab on screen (an older Obsidian plugins left the Terminals panel stuck).
+- **A first run that asks, not assumes**: the desktop app's first window is one page, the vault (create one, or open a
+  folder: Obsidian vaults by name), with page dots instead of numbered steps. The vault then opens with a welcome card
+  over it: pick a layout and light or dark and see it behind the card; use the coding agents found on this Mac or not
+  (none found, Vaultite says it works fully without AI); only if you use them, Accessibility and Screen recording, each
+  one drag; then learn ⌘O by pressing it. Skip or Esc ends it at any page; Show welcome in the palette brings it back. A
+  new vault on the web gets the same card; on a phone it starts on Standard. Setup's welcome page is gone.
+- **Mac: Vaultite stays in the menu bar with no window open**: the companion goes on, and the dictation keys you pick
+  (fn, right Option, right Command, double Control) dictate in any app (a tap starts and the next stops, or hold it),
+  with a pill of bars that follow your voice there and in the window. With no text field, what you say asks the
+  companion about the window in front. Its cursor shows over the whole screen (waiting at the edge, or by the pointer),
+  and dropped on another app's window it looks at it and follows it. Password managers and money apps are private by
+  default (Screen's settings). Quit is in the menu bar.
+- **The companion follows any pane and points at the app**: drop its cursor on a terminal, a web page, a tab or a panel
+  to have it look and keep following (a terminal at a command's end, a page as it changes; a tab's or a group's row in the
+  sidebar: all its panes, the row showing an eye that stops it); it points at, highlights and
+  acts in your own web pages, and at the app's tabs and buttons. Watches (`vau watches add`, files in Watches/) keep an
+  eye on a terminal, a page or a note live or every few minutes, telling it or your inbox only when something changed.
+  Private now covers sites, containers and apps, starting with password managers and banks.
+- **Tabs hold panes**: a split is one tab (one row in the sidebar drawn as a small map of its split, panes side by side
+  or stacked as they are; one chip in the tab bar) and clicking another
+  tab switches it away whole; a file or link opens in the focused pane, and each pane keeps its own view (⌘E switches
+  only the focused one; Vim's `:q` and Ctrl+W Q close the focused pane, the last one its tab). ⌥-click a tab or drop it on a pane to take its
+  place, on an edge to split; drag a pane out to make it a tab, or hold it over a row to open that tab and drop it in.
+  Phones show a split tab as one card and swipe between its panes. Pop-outs keep their tabs in the workspace. `vau tabs`
+  lists tabs and their panes and splits, moves, swaps and focuses them; plugins follow `onTabsEvent` (plugin API 6:
+  `TabLayout` is `{tabs, groups, active, windows}`). Stack tabs is gone. Saved tabs move over on their own.
+- **The companion's cursor always shows what it's doing**: reading and thinking show their dots for as long as they last,
+  listening while you dictate a wave, with no hover (on a phone too). What it says while you speak shows as dots and pops
+  in at your pause, staying a moment before your next words take it away; a bubble never shows empty.
+- **Phones: tab groups in the Tabs panel open without a bounce**: their tabs grow straight to their size (they grew
+  a fifth past it, by the drawer's zoom, and snapped back); folding, new and closed tabs move true too.
+- **Phones: a tab group opens steadily**: it starts at its top, and All tabs comes back where it was left, with no bounce
+  as the list swaps (opened again, its tabs no longer sit out of sight).
+- **Layouts leave your look alone and remember your tweaks**: Standard, Zen and Browser no longer change your theme,
+  colours, fonts, animations or translucency (only a bundle about looks, like Glass, does). Switching away from a layout
+  you changed keeps your changes, and switching back brings them back; Reset applies it clean. Saving asks for a name
+  and suggests "My Zen" from the layout in use. "Back to Standard layout" in the palette (`vau bundle standard`) is the
+  way back from a layout that hides everything. Packs (Life OS, Agents) and looks apply over your layout, which stays the one in use.
+  A layout and back loses nothing: turning Workspaces on (Browser) keeps your tabs on screen, and off again brings back
+  this device's tabs exactly, tab groups, splits, sizes and focus; turning archiving on archives nothing at once.
+- **Use AI, one switch**: Settings > AI's Use AI (or `vau ai off`) takes out everything for AI, the companion, coding
+  agents' buttons, commands and keys, AI items in the status bar and AI plugins on the Plugins page, while ops, MCP and
+  vau still work; on again, each plugin is as it was. A bundle that needs agents turns it back on, and says so.
+- **Settings > AI lists your coding agents plainly**: the ones on this computer, each with its switch (its path on
+  hover), which is your companion, one line naming the others it works with, and Connect the Claude or ChatGPT app.
+
+- **Mac: allowing a permission is one drag**: Allow opens the right pane of System Settings with a small panel by it,
+  Vaultite's icon to drag into the list (Accessibility, Screen recording, Full disk access, Input monitoring); it goes
+  once the permission is on. Location asks macOS for real now and shows its state, as does Input monitoring; camera,
+  microphone and location open System Settings only after a no, and what macOS asks on first use has no button.
+- **Phones: a tab drags out of its group**: in a group's tabs, hold a lifted card on All tabs at the top (it lights up)
+  and all tabs come back with the card still held, to be put anywhere, onto a tab to make a group, or onto another group;
+  let go there at once and it just leaves the group.
+- **Phones: pulling a page down feels like Chrome's**: the first stretch moves only the page, the icons come in and spread,
+  then a ring fills; full, a disc lands on the picked one with its name (only then), slides to another as the finger goes
+  sideways, and bursts as it runs. A pull right after scrolling up to the top is still the reading, not a pull.
+- **Phones: a tab group is renamed from inside it**: tap its name, top right, to type a new one there; hold it for its menu.
+- **Phones: a pinned folder's tile shows it**: on a new tab or in the drawer, tapping it opens Files (the drawer's, or a
+  Files tab) at the folder, open and flashed, rather than nothing; Reveal in file tree scrolls the drawer to it too.
+- **A folder opens as a page**: Open in its menu, its pinned tile (a new tab's, the drawer's, the sidebar's), a folder in a note's
+  path bar, one dragged onto a pane or a tab bar, or `vau open <folder>` shows what it holds in a tab of its own, as
+  the sidebar's rows or as cards (a note's first lines, an image's picture): Show as, on the page itself and in Settings,
+  one setting for every folder. A
+  folder in it opens in the same tab and Back comes out, as in the Files app; its crumbs go up.
+- **Layouts are picked from drawn tiles in Settings, Appearance**: Standard, Zen, Browser and yours, each a small
+  drawing of its window in your colours. Every layout, pack and look is drawn the same way wherever it shows (Get's
+  cards, Details, the phone), crisp at any size and light or dark: a look in its scheme, glass with the desktop
+  showing through; no more screenshots. A click switches at once, with Undo; a changed one says so, and its menu has
+  Details, Reset, Save as new (named, "My Zen"), Share and Delete. Your setup, "In use · modified" and Modify are gone.
+- **Setup is Your plugins and Get**: Get shows the directory's plugins, layouts and packs together under one search,
+  with Import for a bundle someone sent; layouts aren't listed in Setup any more.
+- **Get shows skeleton cards while its layouts and packs load**, as many as last time, instead of a blank space.
+  Files tab) at the folder, open and flashed, rather than nothing.
+- **Lists and pages show skeletons while they load**: bundles, browser tabs, history, sites, agents' runs and their
+  steps, extensions, passkeys, terminals, vaults and folders, setup's agents and permissions draw shimmering rows or
+  cards, as many as last time, and a day plan, resolved comments and embeds say Loading…, instead of a blank or an
+  empty list until the data comes.
+- **Terminals held by the older terminal server say so**: `vau terminal` marks them with its pid (they end it once
+  they all have), `vau terminal get` gives a terminal's pid, and one it couldn't take over yet is tried again until it is.
+- **Delegation hears a terminal subagent without polling**: a Codex child's end is read once its terminal goes quiet,
+  and its answer is typed into its parent only when that isn't asking the user something (Enter again if it didn't take).
+- **`vau version` tells the desktop app's updates**: in the desktop app it says their mode (automatic, notify, off)
+  and a build waiting for a restart, rather than "off".
+- **Phones: a calmer sidebar**: its lists at 16px in 40px rows (a notch under a note's text, from 17px in 44px), no sidebar
+  buttons in the top bar of the iPhone app (swipe in from the edge; Sidebar buttons on phones brings them back), pinned
+  pages as tiles in the drawer too (Show as ▸ Tiles), and a new tab's pinned pages as the sidebar's tiles, each named when
+  held.
+- **Find floats, as in Chrome**: on a computer, ⌘F in a note or a Browser page opens a card at the pane's top right,
+  over the text, instead of a strip that pushed the note or the page down; replace grows it downward. Phones keep the
+  strip. Find cards are solid now, so the text under them no longer shows through.
+- **Dictation into the editor**: ⌘J in the Mac app dictates where the cursor is (a note, the Ask box, a chat), words
+  showing dimmed as you say them and settling at each pause; tap to start and stop, or hold while you speak. Apple's
+  on-device recognizer or Parakeet (the model Handy or Hex downloaded, heard again whole at each pause), replacements
+  ("at Claude" writes @claude), and the companion waits for your pauses.
+- **One palette at a time, and it has the keyboard**: ⌘P, ⌘O, a setting's picker (Animations…) or the Ask box opened
+  over another takes its place instead of opening under it, Esc then gives the keyboard back to where it was, a sheet
+  opening closes the palette, and the Hotkeys and Sidebars sheets take typing in their filter at once.
+- **Uninstalling on Windows takes `vau` with it**: the `vau` Set up Vaultite installed stayed behind, and typing it
+  failed with "The system cannot find the path specified".
+- **The playground names Windows' and Linux's keys**: its notes said only ⌘O, ⌘P and ⌘E; they say Ctrl+O, Ctrl+P
+  and Ctrl+E too.
+- **Keys two commands share always go to the same one**: ⌘⇧↩ in a split showing a note zooms the pane, as it did,
+  instead of sometimes starting Claude Code on the note (Dispatch's keys too): which loaded last decided. The app's own
+  come before a plugin's; Settings ▸ Hotkeys still marks the clash.
+- **A Browser page that fails at once stays under its warning**: a site with a bad certificate, refused or offline,
+  failing before its tab had placed the page, showed Chromium's blank error page over "Your connection isn't private".
+
+## 0.9.0 (2026-11-03)
+
+Terminals in a terminal server that keeps them through restarts and lets agents drive them, a companion that writes its
+answers into your note as it thinks, what's open kept by the server instead of the vault, slides and presenting, imports
+from Notion, Evernote, Bear and more, an app screen readers and the keyboard can use throughout, and big vaults that
+open, search and load much faster.
+
+- **An idle window wakes less**: live cards asking one address share one timer, and none runs while the window is
+  hidden (a window left alone woke ~27 times a minute, now ~15 shown and ~3 hidden).
+- **The companion answers as it writes**: its words stream into the note, its bubble and its comment cards as the model writes them (first words in about 2 s, from 4 to 5), Enter and a `?` send at once and a sentence's end after a breath, going on with your thought restarts its answer with all of it, its turn ends with its last action (no summary after), its cursor stays where it wrote, it waits while you type, its edit is one undo step of its own (also Undo the companion's last edit), and Esc stops it mid-answer (Codex and OpenCode in their terminals too). What you write reaches it as your own changes alone, a hunk each place, never with its words between them. `vau companion timings` has its think time for Claude Code sessions, and its first word.
+- **A long-used inbox loads with half the data**: archived inbox results come without their text (their files keep it),
+  which was half of a long-used inbox's first load (1 MB to 0.5 MB compressed here).
+- **A first Claude Code chat tab opens at once**: its code loads while the app is idle and draws without waiting,
+  in ~80 ms (was ~390).
+- **A sidebar shows from its rail at once**: its panels stay drawn while it's folded to the rail, so showing it again
+  takes ~40 ms (was ~120) instead of drawing every panel anew.
+- **The companion's tab is a timeline, not a chat**: what it did (said, commented, suggested with its accepted or rejected state, wrote, pointed at, terminals and tasks it started) under your asks and edits, grouped by note, newest first; a row goes to its place in the note, its state shows live at the top, a line asks it something, and its chat is a click away. Changed lines show as a diff with their `-` and `+`, in the chat too.
+- **The status bar splits along your panes**: split, the focused note's items sit right under its pane, and each other
+  note's word count under its own (fainter; click it to focus that pane). A chat's or terminal's foot is left alone, so
+  the bar no longer covers a chat's input. A narrow pane keeps at least its word count.
+- **Terminals live in a terminal server that keeps everything about them**: a server restart keeps each terminal's
+  screen, history, name, note and state, and the ones from before this update are taken over as they run. Agents and
+  scripts drive them as a multiplexer's: `vau terminal start` runs a command or an agent in the background and answers
+  its id, `capture` reads the screen and history (text, or vt and html with colors), `wait` waits for a terminal to end
+  (exiting with its code), an agent's turn to end or the output to go quiet, `key` presses keys by name, `get` tells
+  one's state, and `vau terminal attach` opens one in any terminal (⌃\ detaches). A terminal is named by its id, its
+  name or the end of its id, `@machine` for another machine's; `vau events --type terminal` follows them starting,
+  changing state and ending; `vau terminal send` says whether an agent took what it typed (or why not: a question
+  open, the text left in its input), and `--wait` waits for its turn; `capture --json` tells a grey suggested reply
+  from typed text; `start` and `open` take an agent's model, effort, mode and folder, and no open window isn't an error;
+  `vau terminal get` with no id is your own terminal, with what was sent into it lately; `--no-<switch>` works for any
+  op's switch. A tab of a herdr pane waits for herdr rather than starting a shell of its own. The tmux backend
+  is gone (attach does what it was for), `vau terminal screen` is `capture`, and a plugin's terminal backend
+  (`terminal:backend`) implements the new `Backend` (capture, keys, events, meta): one made for the old one isn't used.
+- **The tmux option for terminals is gone**: new terminals all run in Vaultite's terminal server, and shells started in tmux before this update keep running there unlisted (the app says so once): `tmux -L vaultite attach` reaches them.
+- **The companion is a person in the room**: two modes, quiet and pair (notice is pair now). In pair it answers what's
+  meant for it, @claude or not, and when it stays silent its seen tick says why. A line with @claude stays in the note.
+  Its bubbles take a reply, go once you write on, look different when they ask, leave an unread dot on its cursor and
+  go into the note with Put in note; what it wrote folds back into a bubble from its lines' menu or its cursor's.
+  Private notes (folders in its settings, or `companion: private`) never reach it.
+- **Snooze is a button on a session's row and sheet**: beside Settle on hover, in the Inbox panel, and by Pin in its
+  sheet, as results have it.
+- **An agent's question has every choice its picker has**, in the inbox and the chat tab: its options numbered, Type
+  something (your own answer, with a multi-select's picks too) and Chat about this, as in its terminal. Answering a session's question from
+  the inbox (a pick, or a reply to its one question) no longer fails with "it doesn't ask anything to pick from now".
+- **What's open stays out of the vault**: each device's tabs, workspaces' tabs and splits, where a video stopped, an
+  inbox hold and plugins' caches are kept by the server (its memory and its own disk), not as files in the vault, so a
+  tab moved no longer writes into iCloud and wakes every machine. Machines share them directly, live (with the Machines plugin on; without it each computer keeps its own): another device's
+  tabs show in a moment instead of whenever iCloud syncs, and stay listed while its machine is off. The old files are
+  taken in on the first start, then removed; what you set (a workspace's name and panels, bookmarks) stays in the vault.
+  `vau kept` lists what's kept.
+- **Enter sends an inbox reply**: Shift+Enter starts a new line, as in a chat; on a phone Enter stays a new line.
+- **Clicks reach a web page's corners**: a site whose header drags its own desktop app's window (ChatGPT's logo and
+  sidebar button) no longer drags Vaultite's instead of clicking, and nothing of the window drags over a page.
+- **Tab groups fold and close as in Chrome**: a group's count, line and tabs fold and open together, smoothly, and a
+  second click turns it round mid-way; closing a grouped tab shows another of its group, then the nearest tab not folded
+  away, never opening a folded group. The group's line runs crisp from its chip to its last tab, in the bar and the panel,
+  and stays whole while tabs move (dragged, closed, coming in), its end easing as a tab joins or leaves. Its chip lights
+  up under the pointer and takes the keyboard (the arrows, Enter, the menu key); tabs grouped or moved slide into place,
+  and an ungrouped group's chip and line fade away. A tab closed in the Tabs panel or tab search shrinks away once,
+  rather than coming back for a moment when its view (a terminal, a site) is asked first.
+  away, never opening a folded group. The group's line runs crisp from its chip to its last tab, in the bar and the panel.
+  Its chip lights up under the pointer and takes the keyboard (the arrows, Enter, the menu key); tabs grouped or moved
+  slide into place, and an ungrouped group's chip and line fade away.
+- **Sidebars open, close and resize at full frame rate**: the panes are laid out once at their new size and slide there,
+  rather than laid out again every frame, and a web page in a moving pane slides as a picture of itself, its page back
+  in place when it stops, instead of trailing a few steps behind. Dragging a sidebar's edge restyles only the sidebar (a
+  frame every 17 ms, was up to 50), and showing or hiding one no longer restyles the whole window or re-themes every
+  terminal, web page and diagram.
+- **A site's empty error page says so**: a page that answers an HTTP error with nothing in it (a firewall's 403) shows
+  why in words, naming the site, with Try again, rather than a white tab; an error page with content still shows. Each
+  page's load (status, server address, cache, Cloudflare ray) goes into a bug report's timeline.
+- **The file bar can stay out of sight**: Fade the file bar is now Never, While typing or Always; Always hides the
+  bar above files until the pointer goes up to it, leaving only the page to read (`fileBarFade` in appearance.json).
+- **Glass has transparency sliders**: Window transparency and Page transparency, under Style ▸ Glass, set how much of
+  the desktop shows through the sidebars and bars, and through pages, shown live as you drag (`translucency`,
+  `pageTranslucency`, 0 to 100).
+- **Big changes from the companion arrive as proposals**: an agent's rewrite shows in the note as tracked changes in its
+  colour (what goes struck through, what comes under it), with one card in the margin; none of it is in the file until
+  you take it. In a change, Tab takes it and Esc leaves it, ⌥] and ⌥[ step through them, and Accept all takes the rest.
+  What you take is the agent's in Review and History. In a table, its changes show cell by cell under it. While it
+  writes, a placeholder shows where the change will land.
+  Agents propose with `vau companion propose`, and an edit replacing more than 6 lines becomes one by itself.
+- **Obsidian plugins' Bases views draw in bases**: a view whose layout is a plugin's (TaskNotes' board and task list,
+  for one) shows its files as that plugin draws them, and the view's Layout menu offers them.
+- **Slides draw, point and pace**: while presenting, C draws on the slide and B opens a board to write on (kept per
+  slide), Q is a laser pointer, O shows every slide to jump to, and `timeForPresentation` fills a time bar, as in
+  Advanced Slides' chalkboard, pointer, overview and elapsed time bar.
+- **Agents read notes sooner after an edit in big vaults**: a note's links are found without making the vault's link
+  index again unless a file came, went or got new aliases (rendering a note after an edit at 24,000 notes: 55 ms to 10).
+- **An Obsidian vault's hotkeys carry over**: `.obsidian/hotkeys.json`'s keys for the commands Vaultite has too (the
+  palette, quick switcher, tabs, splits, list and heading commands...) apply, under `.vaultite/hotkeys.json`'s, and
+  Settings ▸ Hotkeys marks them Obsidian's keys.
+- **Big vaults load half the data**: the app no longer gets every note's links with the file list (at 24,000 notes,
+  6.8 MB instead of 12.3), and the Links panel asks the server for one note's links, which it keeps up by edit rather
+  than going through all of them after each change. Plugin API 5: `backlinks`, `mentions` and the file rows' `links`
+  are gone; GET /api/file/linked has a file's links and what links to it.
+- **A card added to a board's column**: each column of a base's board has a +, a new note with that column's value
+  (and what the view's filters ask for), opened in a tab beside it.
+- **Fill down in tables**: with cells of a note's table selected, ⌘D (Ctrl+D) fills them down from the top row, as in
+  a spreadsheet; one row selected takes the row above's.
+- **The Inbox panel's empty line reads like its neighbours**: "Nothing needs you." ends as Links' and Outline's do.
+- **Slides read annotations as Advanced Slides does**: one on the line under a callout or quote styles the whole
+  callout (its width, rotation), and one written inside `inline code` shows as written instead of styling the slide.
+- **Big tables move between cells at once**: in a note's table, moving to another cell draws again only the cell left,
+  not the whole table (an arrow in a 2,000-row table took 200 ms, now 26 ms).
+- **Other programs' pages get nothing of the desktop app's permissions**: only its vaults' own pages on this machine
+  may use the microphone, location or pasting without asking; a page another program serves on localhost may not.
+- **Add comment is offered only in a note**: the commands leave it out on a new tab, a page or a terminal, where it
+  could only say to open a note.
+- **The Links panel says whose links it shows on a tab that isn't a file**: a new tab or a terminal keeps the links
+  of the file you were on, now named above them.
+- **An empty vault's file list says so**: Files reads "No files yet." instead of an empty space under its heading.
+- **Database tables by keyboard**: a focused table has a cell cursor, as a spreadsheet: arrows, Home and End move
+  it (with Cmd or Ctrl, to the edges), Enter or F2 edits the cell (else opens its file), typing replaces its value,
+  Delete clears it, and Enter or Tab saves and moves down or right; Escape cancels back to the cell.
+- **Slides take a deck's size and scale**: frontmatter `width` and `height` shape slides with placed grids, and
+  `margin`, `minScale`, `maxScale` and `center` bound and place every slide, as in Advanced Slides.
+- **An empty inbox says what comes there**: on a dashboard, it says an agent's questions and reports show up in
+  it, and an empty calendar day reads as a calm sentence.
+- **Setup mentions connecting an AI**: the agents step says Claude, ChatGPT and other AI apps can use the vault too,
+  and where to connect one once it opens.
+- **The commands leave out other machines until you have one**: choosing which machine a terminal or an agent
+  opens on is offered once the vault runs on another machine too.
+- **The path bar keeps its buttons in a narrow pane**: squeezed, the folders and name above a note cut off before the
+  view button instead of running under it, and back and forward give way before it leaves the pane.
+- **Slides use templates**: a slide naming `template="[[note]]"` (or a deck's `defaultTemplate`) is drawn in
+  that note, its `::: name` blocks in the template's `<% name %>` places, as in Advanced Slides.
+- **Fold canvas groups**: a group's fold button tucks it into its bar, hiding its cards and their arrows until it's
+  unfolded; files from other canvas apps that fold groups open folded.
+- **Vim keys' ]] and [[ show the heading they go to**: in a note being read, it stopped under the path bar, hidden.
+  unfolded (a card dropped on it unfolds it, select all skips what it hides); files from other canvas apps that fold
+  groups open folded.
+- **Slides have a presenter view**: S (or its button) opens a window of its own with the slide, what comes next (the
+  next fragment or slide), the speaker notes, a timer you can pause and reset, and the clock; either window moves both.
+- **A note's title is its heading while you edit it**: a screen reader lists an editable title as the page's heading,
+  and a contact shown as a link changes from a Change button the keyboard reaches, not a button around the link.
+- **Reading on a phone, the caret lands on a heading's text**: scrolled to a heading, the caret went into its hidden
+  #s, where nothing could show it or act at it; Ask now opens on the heading read.
+- **A cut-off folder in the path bar shows its name**: hovering a folder squeezed to a letter above a note names the
+  whole folder in its tooltip, over Show in the file tree.
+- **Activity credits an edit to the call that made it**: an edit just after a refused call (an AI's keep or revert
+  of a review) is no longer taken for that call's, so Review names its real writer.
+- **A month of daily notes**: the Month panel (shown from the sidebar's right-click menu, or as a tab) is a calendar
+  with a dot under each day that has a daily note, more for longer ones, and today ringed (moving at midnight); a day
+  opens its note, or starts it.
+- **Slides move between slides**: transitions (fade, slide, convex, concave, zoom, at their speeds) and auto-animate,
+  as Advanced Slides draws them, instant when the system asks for less motion.
+- **Screen readers find their way around the desktop**: the workspace is one main landmark with each pane named
+  after its tab, and resize handles say where they sit; tabs used to each be a main landmark of their own.
+- **Table columns fit their text**: in notes, dashboards and the editor, a short cell ("In columns", `wide: true`, a
+  date) stays on one line instead of breaking beside a column of prose, which keeps room to read; a table too wide for
+  that scrolls sideways.
+- **Every row of a list has its line**: a database view's list (Recently changed on the Design page), Settings and other
+  lists drawn with hairlines no longer lose the line between every other row where rows are a fraction of a pixel tall.
+- **Slides draw Advanced Slides' layouts**: `<split>` columns (even, gap, left and right shares, wrap), `<grid>` boxes
+  placed by drag and drop on a fixed slide, and `::: block` boxes draw as there, nested, their Markdown as in a note;
+  a box's own font-size (an annotation's) reaches the text in it.
+- **Screen readers hear toasts and agents**: every toast is read (an error at once, with the key that reaches its
+  button), and an agent that finishes, waits for you or fails is said wherever its tab is, without reading out each
+  second it works or each word count in the status bar.
+- **Slide themes look like themselves**: a deck's `theme:` (black, night, serif, league, dracula and the rest of
+  reveal's and Advanced Slides') draws its fonts, heading case and tone in the app's colours, laid out as reveal.js
+  lays it out: a 960 × 700 slide scaled as a whole, its text and heading sizes, centred text, lists and images.
+- **Present a canvas**: Present in a canvas's toolbar shows its groups one at a time, in the order arrows between them
+  give (else top to bottom, left to right); the arrow keys step through them and Escape ends it.
+- **An idle server stops writing**: it no longer rewrites its schedule's last runs to disk every 30 s when no job ran,
+  nor looks for delegated tasks' answers every 3 s when none is at work, nor for answered permissions every 5 s when
+  none is asked.
+- **Back on a phone lands where the note was read**: following a link and coming back showed a part of a long note
+  further on (the editor's guessed heights moved it); and the sidebar's file tree has rows a finger tall (44px, not 41).
+- **A plugin turned off shows at once on pages open**: a dashboard whose blocks' plugin goes off (People, or People
+  map with it) says why instead of going blank, and blocks follow without a reload; "needs People, which is off"
+  where it said a plugin was off that's switched on.
+- **Resizing a terminal no longer floods it**: dragging a window or split redraws the terminal at each size, but its
+  program hears the new size once the drag settles, so an agent redraws once rather than dozens of times into its
+  history.
+- **Back to the end of a terminal**: scrolled up a terminal's history, a round button at its corner goes back to
+  the newest output, which keeps arriving below meanwhile.
+- **Day planner**: a block in your daily note draws its timed items (`- 09:00 - 10:30 Standup`, `- 14:00 Lunch`) as a
+  timeline of the day beside the day's calendar events (with the Calendar plugin on), overlapping ones side by side and
+  a line at the time it is now; a task ticks done right on the timeline, and Insert time block starts the next one in
+  the note; agents read it as the plan.
+- **Obsidian vaults are offered the Importer and Mind map**: a vault that used Obsidian's Importer or Mind Map plugin
+  gets these in their place when it opens (or keeps running the originals).
+- **Canvas shapes and dashed lines**: a card can be a pill, circle, diamond or parallelogram with a dashed, dotted or no
+  border, and an arrow dashed or dotted (Shape and Line style in the toolbar), for flowcharts; files from other canvas
+  apps that use them draw the same.
+- **AI apps on the internet stay off your network in the browser**: the desktop app's browser never opens this
+  machine, the local network or the tailnet for them, even through a redirect; your own agents still can.
+- **Links to other apps open with more care in the desktop app**: a note's link to a network share or to a Windows
+  scheme that runs something no longer offers to open, the question for any other app's link starts on Cancel, a
+  web page's frames can't hand those links on either, and a page's script can't press the Browser's back, find or
+  Glance for you.
+- **The inbox's shelves**: Pinned, Active (what waits on you first, then results and messages, the latest first) and
+  Working, with Snoozed and Settled folded below; on the Inbox page and the inbox block.
+- **Vault files in a terminal are links**: a note or file an agent or command prints (`Notes/Lisbon trip.md`, with
+  `./` or the vault's full path) is underlined on hover and opens in the app when clicked, ⌘-click in a new tab.
+- **Long tables draw faster**: a table of thousands of rows opens about a tenth sooner, no longer measuring every
+  cell's text letter by letter or unmarking cells that were never selected.
+- **Settings of a few values are pickers in the palette**: Theme…, Density…, Animations…, Indent…, Default editing
+  mode…, Properties in document…, Plugin updates…, Sort order… and the rest each open their values in the palette, in
+  its place with no fade between, the one in use checked and named at the row's end, the look shown as you move; Enter
+  keeps one (with Undo), Esc goes back, ⌘↵ opens it in Settings. The one-value commands (Use dark theme...) stay for the menu bar, hotkeys and `vau`.
+- **New in a base**: a base's bar has New, as in Obsidian: a note in the folder its filters ask for, with the
+  properties and tags they test for (`status == "reading"`, `file.hasTag("book")`), opened in a tab beside it.
+- **A tab bar is one Tab stop**: Tab goes into a pane's tabs at the one shown and out past them all, instead of
+  stopping at every tab; the arrows, Home and End move between tabs, and Enter shows one.
+- **Format note**: the Linter plugin tidies a note's Markdown by rules you choose in its settings (trailing spaces,
+  extra blank lines, space around headings, `##Title` made `## Title` and `>quote` `> quote`, one kind of bullet),
+  leaving frontmatter, code and math alone; an AI can format a note or a folder (`vau linter.format`).
+- **The inbox's verbs: pin, settle, snooze, wake**: Done is Settle (its folded list Settled) and Unsnooze is Wake, in
+  the app, the iPhone's and the watch's notifications, and in vau (`vau inbox settle`, `vau inbox wake`); `vau inbox
+  done` and `inbox.done` still work. With no phone paired, `vau inbox push` says nothing was sent.
+- **The pickers say "no matches" as Settings does**: ⌘P, ⌘O, the tab, folder and icon pickers, the other choosers,
+  Hotkeys and the phone's tab switcher write what was typed in curly quotes with no full stop ("No command matches
+  “foo”").
+- **Screen readers hear the palettes' headings**: ⌘O's list is named by its heading ("Recent files and pages"), and
+  the sections of ⌘O, ⌘P and the tab search ("In files", "Open tabs") are groups named by their headings.
+- **The keys hint draws keycaps**: while a key sequence is under way, its keys, what each next key does and how to
+  cancel or go back are keycaps as in the palettes, named as everywhere else (Esc and Backspace off a Mac).
+- **Screen readers follow the file tree**: the row the keyboard is on is the tree item, so a screen reader says whether
+  a folder is open, how deep a row is, where it is among its folder's rows and whether it's selected.
+- **Screen readers read the tab bar as tabs**: a pane's tab list holds only its tabs (New tab and the pane's handle sit
+  beside it), and Delete closes the tab the keyboard is on, as its X does.
+- **Mind map of a note**: the Mind map plugin draws a note's headings and the lists under them as a map in a tab
+  (Open mind map) or as a block in any page; click a branch to go there, fold the ones you don't need, or turn it into
+  a canvas beside the note to rearrange it freely.
+- **Reduce motion keeps everything still**: with the system's Reduce motion or animations off in Settings, the phone's
+  tab list, new tabs and Back no longer zoom or slide, a closed tab card no longer shrinks away, and scrolls to a tab,
+  heading or setting jump instead of gliding.
+- **Increase contrast is honored**: with the system's Increase contrast on, text, muted text and hairlines read at
+  4.5:1 or more in every colour scheme, and Windows' contrast themes keep a visible focus ring; muted text in Everforest,
+  Kanagawa, Nord, One and Solarized's weaker variants reads a little stronger everywhere.
+- **A note opened again while it's typed in together joins in**: its new tab's editor failed with an error and didn't
+  type with the others.
+- **The outline lights the heading it went to**: clicking a heading in the Outline scrolled to it but lit the one
+  above it, the path bar's height not counted.
+- **Find in a terminal**: ⌘F (Ctrl+Shift+F off a Mac, leaving Ctrl+F to the shell) opens a find bar over the
+  terminal that searches its whole scrollback, with match case, whole word and regular expressions, every match lit
+  and how many there are.
+- **A terminal's right-click menu**: right-clicking a terminal on a Mac or Linux opens the app's menu (Copy, Paste,
+  Select all, with their keys) instead of the browser's.
+- **Tables pasted keep their links and emphasis**: a table copied from a web page or a spreadsheet keeps its links,
+  bold, italics, strikethrough and code as Markdown, and its columns of numbers are aligned right.
+- **PowerShell terminals read programs' output as UTF-8**: on Windows, what a program prints that a PowerShell terminal
+  reads back (`$x = vau read ...`, an agent's commands) keeps its accents and other scripts, where "naïve" came back
+  as "na├»ve".
+- **A tab reached with the keyboard shows a rounded ring**: Tab onto a tab and its focus ring follows the tab's
+  rounded corners, as every other button's does, not a square box around it.
+- **Panes as cards**: an Appearance setting (and palette command) draws desktop panes as inset, rounded cards with a
+  little room around and between them; drag the gap to resize. Off by default.
+- **Activity can fill the left sidebar**: Show activity in the sidebar fades it into the live feed, newest first by
+  day, each row opening what it's about; its X or the command again fades your panels back, and each workspace
+  remembers which it shows.
+- **Search in a base**: a base's bar has Search, as in Obsidian: what's typed narrows the view to the files whose name
+  or shown values have every word (the count says how many), leaving the base as it is; Escape clears it.
+- **Duplicate a table row, delete several at once**: a row's menu has Duplicate row, and with rows or columns of a
+  note's table selected together, Delete deletes all of them ("Delete 3 rows").
+- **CSV tables edit in place**: double-click a cell of a .csv to change it (Enter goes down, Tab across, Escape
+  cancels) and Add row adds a record; only that field is rewritten, its quotes and separator kept.
+- **Formulas made in a base's menu**: Properties has Add formula, as in Obsidian: a name and an expression, checked
+  for mistakes before it's written, shown as a new column; a formula's pencil edits or deletes it.
+- **The focused item's menu opens from the palette**: Open the menu of what has the keyboard (Shift+F10, found by
+  typing "context menu") did nothing when run from the palette; it now opens beside what has the keyboard, at an
+  editor's caret. Text fields and terminals keep Shift+F10 for themselves.
+- **Screen readers hear each page's title and each row's count**: a page without a heading of its own (Settings,
+  Files, Search...) has one for screen readers, and sidebar rows are named by all they show ("Writing 12", not
+  "Writing").
+- **An idle window sleeps**: a note left open, shown or behind other windows, no longer wakes the app every 1.5 s to
+  place agents' cursors and comments there are none of, nor every 3 s to keep carets for people who aren't there
+  (about 90 wakeups a minute down to under 10).
+- **The palettes' key hints are keycaps**: the line of keys along the bottom of ⌘P, ⌘O and the other pickers draws
+  each key as a keycap, as the shortcuts on their rows do, instead of bold text with esc in its own style.
+- **Long notes open and edit faster**: a note of tens of thousands of lines no longer works out all its tables,
+  callouts and other drawn blocks again each time the background reading of it gets further, and Enter or Backspace
+  in one takes about a quarter less time.
+- **An idle server sleeps**: with nothing asked of it but an open window's quick checks, the server no longer wakes
+  50 times a second to time its own event loop (that timing runs only while it works), cutting its idle CPU by half.
+- **⌃C stops a flood of output at once**: a terminal's program waits while the page catches up with what it
+  printed, so ⌃C during `yes` or a huge `cat` answers in about 0.1 s instead of the tab dropping and reconnecting.
+- **Suggestions show in a flyout's editor**: typing [[ in the rail's Daily note flyout listed notes nowhere (the list
+  was drawn off screen); it shows under the cursor now.
+- **Pictures on a base's cards**: a cards view with `image: note.cover` shows each file's picture (a [[picture]], an
+  address or a #colour) atop its card, as in Obsidian, sized by `cardSize`, `imageFit` and `imageAspectRatio`.
+- **Saving sends only what changed**: each save of a note sends only the edit, not the whole note twice, and gets
+  back only what the server changed (a 2 KB note's save went from 6 KB to under 0.5 KB; a long note's from twice its
+  size).
+- **Vault plugins' shared modules load in a code project**: a module one vault plugin exports to another no longer
+  loads as CommonJS (losing its exports) when a package.json above it says `"type": "commonjs"`.
+- **A closing terminal fades with what it showed**: closing its pane, or dragging it or its tab as a card, shows its
+  last screen instead of an empty one.
+- **No stray focus ring at launch on Windows**: a vault window opened with its vault menu ringed, as if tabbed to.
+- **Slides export as HTML**: Export slides as HTML (the palette, a note's menu) saves the deck as one file that
+  presents itself in any browser, with its images, fragments, speaker notes (S), theme and colour scheme, as drawn in
+  the app.
+- **Shortcuts name Enter and Esc on Windows and Linux**: tooltips and the palette read Ctrl+Enter and Esc, not a Mac's
+  ↵ and esc, and find's buttons no longer show ⇧↵ there.
+- **Tables jump like a spreadsheet**: in a note's table, ⌘ or Ctrl and an arrow goes to the end of the filled cells
+  (⇧ selects to there), and with cells selected Home and End go to the row's ends, ⌘ Home and ⌘ End the table's.
+- **Read-only connections leave notes alone**: an app connected with read-only access can no longer leave Companion
+  comments or suggestions in your notes, or take them back.
+- **Terminals copy and paste the Windows way**: on Windows, Ctrl+C copies the selection (with nothing selected it
+  still stops the program), Ctrl+V pastes, and a right-click copies the selection or else pastes, as in Windows
+  Terminal; Ctrl+V used to reach the shell as ^V, so cmd, Git Bash and WSL pasted nothing.
+- **Phones move table rows and columns by dragging**: a table's grips, held then dragged, move its row or column
+  without pulling the page down, and are 44px targets; a database view's column heading, held then dragged, moves it.
+- **Table columns resize**: drag a column's edge in a table's header to set the widths, kept in the separator's
+  dashes as Pandoc reads them (so plain Markdown) and drawn wherever the table is (a dashboard, a callout); Escape
+  while dragging puts them back, and a double-click on the edge or Fit columns to text in a column's menu fits the
+  columns to their text again.
+- **A confirm dialog's button is readable from the start**: on a desktop, the button a question opens focused (Run,
+  Delete) lost its colour while focused, leaving its white label on a pale button until the pointer went over it.
+- **What you typed is marked in the accent colour**: the letters ⌘O, ⌘P and the pickers matched are drawn in the
+  scheme's accent, not in red, which the app keeps for errors.
+- **A quieter clear button in ⌘O and ⌘P**: on a desktop the x that empties the field is a small grey circle, as in a
+  Mac's search fields, instead of a large dark disc; it's as easy to hit, and phones keep theirs.
+- **Desktop links stay in the vault**: on Windows, a file link or vaultite://open address whose path climbs out of
+  the vault opens nothing, and an extension's offscreen page loads only its own files.
+- **Only the app's own pages reach its API from a browser**: an image, script or frame on another site's page, or in an
+  interactive page, gets nothing; links opened in a tab and command-line clients work as before.
+- **The desktop app ignores Node's debugging settings**: NODE_OPTIONS and the --inspect flags no longer change how the
+  built app or its servers run.
+- **Reply to a session from its inbox row**: Reply on a session's row (R, or a phone's swipe) unfolds its last answer
+  and the reply box under it, without opening its sheet; Escape folds it, the draft kept.
+- **Review lists every AI edit on Linux**: an edit or new file the coarse file clock dated a tick before its call
+  began was sometimes credited to the call before it, or left off the list; it's the AI's now.
+- **A row of choices is one Tab stop**: Theme, Colour scheme, Density and every other set of choices take one Tab,
+  landing on the one picked; the arrow keys move among them and Space or Enter picks, as on a Mac.
+- **Focus you can see in every scheme**: the ring around what has the keyboard, and around a file tree or list row
+  reached with the arrows, stands out at least 3:1 from what's behind it; Ayu, Everforest, Nord, Solarized and Tokyo
+  Night light had rings too faint to find.
+- **Skip to content**: on a computer, the first Tab shows Skip to content, which goes past the sidebar into the
+  page you're on, as F6 does.
+- **Screen readers stay quiet while you type**: the status bar no longer reads out its word and character counts
+  at every keystroke; it's still there to read on its own.
+- **The inbox by keyboard**: on its rows, J and K move, E settles one and goes on to the next, B snoozes, P pins,
+  Shift+I and Shift+U read and unread; G I opens the inbox. In a session's sheet J and K go to the next and previous
+  session, E settles it, P pins, R replies. Each is a command, rebindable in Hotkeys.
+- **Code blocks without a language sit evenly**: no empty label line over their code; the copy button shows beside
+  the first line, in notes and on dashboards.
+- **A file's problems read as sentences**: the note over a file that can't be fully read shows its values as code,
+  not Markdown's backticks, and lists the allowed ones in words ("isn't one of `done`, `parked` or `seed`").
+- **Coloured text is easier to read**: a card's coloured title and values (People's "Reach out" and "16 d overdue"),
+  coloured headings and links in notes and dashboards, and red, green and orange status text (errors, a diff's + and −,
+  "Connected", "Couldn't start"), and code's colours in notes, code files and notebooks reach 4.5:1 contrast on their card
+  or code block (WCAG AA) in every scheme, light or dark, drawn in a deeper shade
+  of the same colour (a lighter one in dark schemes); fills and icons keep theirs.
+- **Grey text is easier to read in light schemes**: the sidebar's headings, the status bar, the path over a file and
+  every other secondary label reach 4.5:1 contrast on the sidebar (WCAG AA) in Gruvbox, Classic, Catppuccin, Flexoki,
+  One, Paper and Rosé Pine.
+- **A narrow pane's path keeps its folders readable**: squeezed by a split or a sidebar, a folder in the bar over a
+  file shows its first letter and an ellipsis ("N… / Lisbon trip"), not a clipped sliver of a letter.
+- **Settings' rows keep one height**: a switch with a way back to its default (Editor's, among others) is no taller
+  than one without, so each section's rows line up at the same rhythm.
+- **Styles in a note's HTML stay inside the note**: a style written with CSS escapes or comments is dropped, so it
+  can't cover the app.
+- **HTML pages ask before opening outside links**: a page in the vault asks the first time it opens each site
+  while it's open, reloads included, and reads only files in the vault.
+- **Hidden files ask first, however their path is written**: a connected app writing a hidden file (.claude/, .git/)
+  waits for your yes even with a line break around the path, and a bare name never finds a hidden file; names with
+  line breaks or other control characters are refused.
+- **A link to a day makes that day's daily note**: clicking [[2026-11-05]] when it isn't there yet makes it in the
+  daily notes' folder from their template, not an empty note beside the open one; a template's {{time}} is the time
+  it's made (it was always 12:00), and a date that doesn't exist (2026-02-30) is refused, not read as another day.
+- **vau on Windows for a user whose name isn't plain ASCII**: the `vau` Set up Vaultite installs, and the one in the
+  app's terminals, failed in cmd and PowerShell with "The system cannot find the path specified" when the Windows
+  account's folder had a letter like ã or ö in it (C:\Users\João); it runs there now.
+- **Slides take a deck's stylesheets**: `css:` files and a `theme:` that's a CSS file (Advanced Slides' own
+  `css/…` themes too) or an address style the presentation, and only it; an edited one shows at once.
+- **Pin in the inbox**: Pin (a row's menu, a session's sheet, several selected, `vau inbox pin`) keeps a thread or a
+  result on top under Pinned whatever it waits on, until it's settled or unpinned (Undo pins it again).
+- **Audio covers are always shown as images**: a cover whose tag names a type that isn't an image is served as a
+  JPEG.
+- **Only the owner runs commands in the app's window**: palette commands and terminal tabs sent to the window (`vau
+  command`, `vau open view:terminal/...`) answer only this machine's owner, as terminals do.
+- **The desktop app opens its window sooner**: its main process loads a third of the code it did at launch, from a
+  cache, and each vault's server starts from the cache too, so a vault's page starts about 230 ms sooner. The
+  server's cache is kept with the app's data, so a launch after a restart is no slower.
+- **Plugins know where a drawn callout, table or HTML block is in its note**: `onMarkdownDrawn` hands them its
+  lines, so Obsidian plugins' reading-view post-processors find their section there too.
+- **Import from Notion, Evernote, Google Keep, Bear, Roam, HTML pages and CSV**: the Importer plugin turns Notion's Markdown & CSV
+  export into notes (ids off the names, links as wikilinks, database rows' properties as frontmatter), Evernote's .enex
+  into notes with their tags, dates, to-dos, tables and attachments, Keep's Takeout into notes with checklists as tasks
+  and labels as tags, Bear's backup into notes with its highlights, tags and pictures, and any app's HTML pages (one,
+  or a zip) into notes with links and images kept, Roam's JSON into notes of nested lists with tasks and daily pages by
+  date, and a CSV table into a note per row with its columns as properties (a repeated column numbered, codes like
+  02139 kept as written);
+  importing again adds only what's new.
+- **The graph keeps up in big vaults**: after an edit only the changed note's links are worked out again (about 3x
+  less work on the server at 50,000 notes).
+- **vau tells a mistyped command from a failed one**: a missing or bad argument now exits 2, like an unknown command,
+  and a command that fails exits 1; `vau --help` says so.
+- **Database views' Group and Results menus**: a base's bar groups its rows by a property (in either direction, or
+  Manual: groups dragged into order, hidden, shown or added, as Obsidian's `groupOrder`; a kanban's `groups` key is now
+  that), a click on a group's heading folds it, and its count opens Results: a limit, the results copied as a Markdown
+  table or CSV, or saved as a CSV beside it.
+- **vau errors name flags only where they mean them**: a word in an error that happens to be a parameter's name
+  stays a word ("no entry for" no longer reads "no --entry for"); a parameter the server names is its flag or <arg>.
+- **The app starts with less to download**: it asks only for the actions a file's menu offers, not the whole
+  operations catalog (52 KB less on each start over the network).
+- **iPhone on its side keeps clear of the notch**: the sidebars, their toggles and the status bar leave room for the
+  notch and the home indicator in landscape.
+- **vau suggests the command a typo meant**: `vau serch` asks "Did you mean search?" and `vau bundle shwo` names
+  `vau bundle show`, nearest first, instead of every command sharing the first three letters.
+- **Slides' speaker notes name the next slide plainly**: the Next line under the notes no longer shows `_` or an
+  HTML comment from the slide's Markdown; previews and search snippets drop `_italic_` marks too.
+- **Vaultite Main updates without slowing the Mac**: it builds a new version at most once an hour, in the background
+  (efficiency cores, disk throttled), in folders Spotlight skips; automatic updates restart only once you've been away
+  from the computer for 10 minutes, and a ready update goes in when you quit the app.
+- **Plugins and bundles install on Windows**: installing from the plugin directory (Obsidian plugins, Glass...) failed
+  in the Windows app with EPERM; it fetches only the plugin's own folder now, cleans up after itself, and says when
+  git is missing.
+- **Default view and editing mode, for every device**: Settings > Editor has Default view for new tabs (editing or
+  reading) and Default editing mode (live preview or source mode), as in Obsidian, whose own settings are followed
+  when these are unset. A new note opens in its tab's editing mode, not always live preview; a tab no longer takes
+  the view last picked in another.
+- **A delegated task's changed files on Windows**: the files a Codex turn changed, under the home folder or on a
+  drive, are listed as Windows paths.
+- **HTML pages can share live state**: `vau.shared()` gives a page a JSON map that's the same, live, in every view of
+  it on any device, and who has it open; a page made for two (a game, a drill) plays across the user's devices.
+- **Browser tabs come back after quitting**: quitting the desktop app closed every web page tab, as if each page had
+  closed itself; they're kept now, as a browser's are.
+- **What floats over a web page takes only its own clicks**: with the mini player, a peeking sidebar or a floating pane
+  over a page, the rest of the page can be clicked, scrolled and dragged in again, with its own cursor; only a menu,
+  a dialog or a drag still takes every click there.
+- **Settings show what a setting changes**: hover a row (or reach its control with the keyboard) and a card beside it
+  shows small pictures of the window in your colours, Off and On side by side with the current one ringed (a choice of
+  three: the option under the pointer); behaviours like Fade the file bar while typing or Dim inactive panes play a
+  short loop. The card sits at the row's switch (or the option under the pointer), level with it beside the column or
+  over its row, and glides from row to row as the pointer goes down them; heading for the card across other rows keeps
+  it. Clicking a picture sets it; Esc closes it. On a touch screen, the ⓘ beside a setting's name shows them
+  under its row. Plugins' settings rows can have them too (`SettingRow`'s `preview`).
+- **Machines record their health**: each server samples its machine once a minute (load, memory pressure, swap, the
+  busiest processes), kept a week on that machine; `vau machines health --since 6h` says what has been hogging it and
+  since when, and a process stuck at high CPU or memory staying critical for 10 minutes reaches the inbox.
+- **The Browser's page bar can hide**: right-click it (or its … menu, the pane's top, the palette) for Hide page bar,
+  and the page fills its tab; the bar slides over it while the pointer is at the page's top or on the strip above the
+  pane, on a click there, while you type in the address (⌘L) and on a new tab. With the tab bar off and the sidebars on
+  hover, a page fills the window.
+- **The companion starts again in the desktop app**: its Claude sessions' keeper failed to start there (a package it
+  needs wasn't shipped), so an @ to it went unanswered; a check now catches a package the built app wouldn't ship.
+- **Menus from a button open where there's room**: one with no room under its button (the vault's, at the sidebar's
+  foot) opens above it instead of over it.
+- **The Sites panel's + opens a new tab** in the container it shows (New container is in its picker and its …); Touch
+  ID and agent access sit as icons beside the picker instead of a line that read as a site.
+- **Container tabs carry their colour**: every web page tab in a container has a line in its colour along its top in
+  the tab bar (a tab group's runs under), whether it's the active one or not. Tint the active tab, which only washed
+  the active one, is gone from Appearance.
+- **Long titles fade out** at their end in tabs and sidebar rows, instead of ending in an ellipsis.
+- **Sidebar panels move like things you hold**: dragged by its heading, a panel lifts whole (a picture of it at its
+  size, shadowed) while the others close up and make room at its height, in either sidebar; let go, it settles into its
+  place, and Escape flies it home. Folding one closes it under its heading as the panels below follow, its chevron
+  turning; the other sidebar's toggle lights up as a place to drop it.
+- **Sidebars open and fold with a spring**: what's in one keeps its width and is uncovered by its edge instead of
+  squeezing, the panes and the status bar move in step, and a terminal takes its new size once, when they stop.
+- **Panes from the keyboard**: ⌘D splits right and ⇧⌘D down, in a note too (Delete paragraph moves to ⇧⌘⌫, today's
+  daily note to ⌥⌘D; ⌘D still bookmarks a web page and duplicates a file tree row). On a Mac, ⌃⌘ and the arrows focus
+  the pane that way (past the last one, the sidebar), ⌃⌘] and ⌃⌘[ the next and previous pane, ⌃⇧⌘ and the arrows swap
+  the pane with its neighbour, ⌃⌥⌘ and the arrows move its divider, and ⌃⌘= evens every split out. On Windows and
+  Linux, Alt+Shift and the arrows focus the pane that way, Alt+Shift+] and [ the next and previous one, and Alt+Shift+=
+  evens the splits out (Ctrl+Alt and the arrows are the desktop's). Split left, Split
+  up, Split along the longer side and Focus last pane are in the palette, and the pane commands in Window ▸ Panes.
+  Vim's ⌃W J and K (and Space W J and K) move between panes above and below again.
+- **Dim inactive panes**, on by default: a switch in Appearance (`dimPanes`): with the window split, the panes you're
+  not in fade a little, cross-fading as the focus moves.
+- **Animations**: a setting (Appearance, `animation` in appearance.json, the palette) for how things move: natural
+  (springy, the default), snappy or off; one set of timings for every animation.
+- **Panes move, zoom and float**: splitting, closing, moving, evening out and resizing panes spring them to their new
+  places (a new split pops in at its place, a closed pane shrinks away as its neighbours take its room). Zoom pane
+  (⌘⇧↩) fills the workspace with the focused pane for now, its accent unzoom button putting it back. Float pane (⌥⌘↩)
+  lifts a pane into a card over the others, moved by its bar and resized by its edges, kept over a reload; the same key,
+  its accent dock button or its handle dragged onto a pane docks it where it sits (unmoved, where it came from).
+- **Dragging tabs and panes**: a pane dragged by its handle lifts out as a small card of itself (its tabs and what
+  it shows) while it recedes where it was; let go, it lands in its new place from the card, or springs back if dropped
+  nowhere. A tab lifts out of its bar as itself, leaving its slot open where it would land; pulled off it, it's a card
+  with a picture of its page, its old slot faded with a return arrow, and dropped on a pane's edge its new pane lands
+  from the card. A pane's drop zone springs between its middle and halves, outlining where the pane goes. Tabs closed
+  in any way shrink away, new ones grow in, all with the animation setting's timings.
+- **Setup, beside a menu**: where the pane is wide, Your bundles, Get bundles, Your plugins (with its categories, a
+  jump to each) and Get plugins are a menu as Settings', in place of two rows of tabs. Plugins show their icons on
+  coloured tiles, their gear on hover; Your bundles opens on the bundle you're on (and what you changed since), and a
+  bundle's card held under the mouse shows its picture bigger.
+- **Phone polish**: dragging the bar up lifts the page as one rounded card (no more text from above the screen showing
+  over the header), following the finger more closely; a tab opened from the tab list comes in as sharp as the page;
+  pulling a page down past its top fills a ring round the action and runs it only once full (a longer pull, and a flick
+  through it does nothing); strips that scroll sideways (the editing keys, tabs, chips) and sidebars fade at an edge
+  while there's more past it; a pasted picture shows at once, without waiting for the server to notice the file.
+- **Settings, regrouped**: it opens on Appearance (no General; version and updates are under Updates), its menu
+  shows each section's icon on a coloured tile, Features is folded until opened and holds plugins' pages such as Apple
+  Health, Appearance and Editor are in titled groups, and theme, density and new tabs are chosen by their picture.
+  Beside the theme, Style picks Solid or Glass (the translucent window), Glass unfolding its own options; every colour
+  scheme is a picture in one row that scrolls sideways, with Show all for the grid.
+- **Change fonts and the terminal cursor from the palette, previewed as you move**: Text font…, Interface font… and
+  Monospace font… show the whole app in the selected font until Enter keeps it (Esc goes back), as Colour scheme…
+  does. Terminals now use the monospace font too, and Terminal settings have the cursor's shape
+  (block, bar or underline, "Terminal cursor…" in the palette, shown on the terminal as you move) and Blink the terminal
+  cursor. Show pinned pages as… and the graph's Colour by… preview the same way.
+- **Name your tabs**: Rename tab… in the palette (and a tab's right-click) turns the palette into a field holding its
+  name. A file is renamed, a terminal's session gets a name every device and agent sees (`vau terminal rename`), and a
+  web page or view keeps the name on its tab; an empty name brings back the automatic one. Rename tab group… and Add
+  current tab to group… (pick a group, or type a new one's name) work the same way.
+- **Search tabs (⌘⇧A)**, as in Chrome: the window's tabs in every pane, the last one you were on first (so ⌘⇧A, Enter
+  flips back), each drawn as its tab with its group, pane or site; type to find one by name, address or group, and the
+  ones closed lately and archived are listed after it, to reopen. ⌘⌫ closes the selected tab without leaving the list.
+  Also in the Tabs panel's and the tab bar's menus.
+- **Delegation**: a coding agent hands a task to another as its subagent (`vau delegate codex "Review this diff"`, MCP's
+  `delegate`): Claude Code as a chat in the app, Codex or OpenCode in a terminal, waiting for its answer (with the files
+  it changed) or carrying on while its result comes back as a message. Each subagent is its own inbox thread, "from"
+  the session that started it (shown in its sheet and chat tab, with that session's subagents); it never gets more
+  permissions than its parent, its permission asks come to you, and Cancel stops it and everything it started.
+- **Comments look and work as in Google Docs**: a comment's text is highlighted (more while its card is open or
+  hovered, and clicking it opens the card); cards show who and when, Resolve and a menu (Copy text, Delete for your
+  own), fold to their first words and how many replies, and open into the whole thread with a Reply box, stepping
+  toward the text. Selecting text shows an Add comment button in the margin beside it.
+- **Ask the companion in a comment**: @claude in any comment asks it there, and Claude answers in that thread; replies
+  there reach it without its name. Ask (Mod+Shift+K) opens a comment that starts with @claude on the selection, writing
+  nothing in your note.
+- **Sessions here**: a file's top bar says which coding agent sessions changed it lately ("2 sessions"), as an artifact
+  does in claude.ai; click for each one's title and when, and pick one to show its terminal, or resume it if it ended.
+  Also "Sessions that changed this file" in the palette and `vau sessions <file>`.
+- **The container menu names who's signed in while you type**: typing gmail.com names each container's Google account
+  (gmail.com, youtu.be and twitter.com count as Google's, YouTube's and X's logins), and a menu opened before the
+  logins were listed fills them in as they answer, rather than showing none.
+- **The status bar has two corners, as in Vim**: bottom left what's about you (Vim's mode, the companion), bottom right
+  the file's items; drag one between them. Vim's mode stays there as you click around, dimmed while the keyboard is
+  elsewhere, so nothing beside it shifts. The companion's cursor rests in its arrow there, gliding out to where it
+  works and back, instead of floating over the page's corner.
+- **Translucent pages**: with a translucent window, notes, terminals, canvases, the graph and the app's own pages can
+  show the desktop too, more lightly than the sidebars so they still read; web pages, PDFs, images and video stay
+  solid. A switch under Translucent window in Appearance, and the Full glass bundle.
+- **Claude Code in a chat tab**: "New Claude Code chat" (and "Open Claude Code in an account or on a machine…") runs a
+  session in the app rather than a terminal, through the Agent SDK on your own Claude Code login: answers stream in as
+  Markdown, tool calls fold, permissions, questions and plans are answered right in it (and from the inbox and your
+  phone), with Stop and model, effort and permission-mode pickers (the mode first, in a word on a phone). Sessions start
+  in auto mode unless your Claude Code settings' defaultMode says otherwise, and a resumed one keeps its mode. It keeps working while the app or server restarts (a
+  turn cut off by a reboot goes on by itself), another machine's sessions open the same way, its edits show in Activity,
+  every session's tab is its chat (one started in a terminal carries on there once that ends), Open in terminal resumes it
+  in Claude Code, and the inbox's replies and voice notes go straight into chat sessions. `vau chat` drives them.
+- **Claude companions run in the app's chat, not a terminal**: the companion on Claude Code, @opus, @opus-review and
+  the other Claude names are chat sessions now. What you do reaches them the moment it happens (asks that come while
+  one is busy go together as it finishes), they answer with their own tools instead of shell commands, their cursor
+  shows them reading or thinking while they really are, and they keep going through a server restart. Show its session
+  opens its chat (not a terminal, where it would lose its tools); Codex and OpenCode companions stay in terminals.
+- **Agents' sessions stay in the inbox until they're dealt with**: each session is one thread that needs you (it asks,
+  answered, reported or failed), then shows its agent working once you reply, and leaves only when you mark it done or
+  it finishes with nothing more for you; opening or reading it no longer makes it disappear. A report is its session's
+  thread, not a second row; done ones are under Done on the Inbox page, and the badge counts only what needs you.
+- **Agents browsing no longer slide a hidden sidebar in**: their clicks in their own tabs, out of sight, read as the
+  pointer at the window's left edge.
+- **The traffic lights slide with a hidden sidebar**: as it slides in or out they ride in its top row instead of
+  popping in once it has arrived, and on macOS 26 they sit centred on that row.
+- **A hidden sidebar slides over a web page as it does over a note**: in and out, both sides, instead of sliding under
+  the page and popping in at the end. It covers what floats over the page too (comment cards in the margin, agents'
+  cursors, a page's find bar), which showed through it.
+- **Clicks reach what the app draws over a web page again**: an agent's page opened as a tab could come back over the
+  app (a sidebar slid in, a menu), taking clicks meant for it; right sidebar tooltips show to its left.
+- **Notes stay put when the phone's keyboard comes up**: the line you tap stays where your finger put it (or moves just
+  enough to clear the keyboard and the editing keys), a table cell or field low on the screen comes into sight, and
+  leaving a field for the text no longer jumps the page. While reading, Ask, Comment and the editing commands act on
+  the lines you're reading, not where the caret was last; Ask from reading opens editing right there.
+- **A full player for audiobooks and podcasts**: a sound's tab (and a tap on the mini player) shows its cover, a
+  scrubber, big skips and the chapters inside .m4b and .mp3 files (with the lock screen naming the chapter), plus
+  bookmarks with notes, a sleep timer (minutes or the end of the chapter) and a short rewind after a pause.
+- **Audio and video play on through a bad connection and a reload**: in the iPhone app sound plays in the app itself,
+  not the page, so a reload or iOS ending the page never stops it; it buffers minutes ahead, starts again after a
+  dropped connection, keeps the lock screen, the sleep timer and where you stopped with the page asleep, and waits for a
+  voice note. Elsewhere a stream that drops or sticks starts again where it was, and a reload plays on from there.
+- **The Browser's keys act on the page, as Chrome's**: Back and Forward (every key, the mouse's buttons) walk
+  the page's history before the tab's, one step a press even right after the page moved, and right-clicking or holding the bar's Back lists its places; ⌘F finds in the
+  page, ⌘+ ⌘- ⌘0 zoom its site (kept per site), ⌘R, ⇧⌘R and ⌥⌘I reload it or open its DevTools (never the app's), Esc
+  stops a load, ⇧⌘[ ⇧⌘] switch tabs, the … menu prints, and ⌘W on a pinned tab unloads it back to where it was pinned.
+- **The Browser's address bar works like a browser's**: what you type stays when you click away, the container chip
+  shows where it will open (⌥↓ changes it), ⌘T goes to the site it completes, `nas:5000` and `.local` names open, ⌘L
+  works from anywhere, and the search engine is a choice in Settings.
+- **Links open tabs as in Chrome**: ⌘-click, a middle click or a page's "Open link in new tab" opens it behind, in order
+  after the page; ⌘⇧-click and target=_blank in front, and closing it goes back (closing one opened behind goes on to the
+  next); closing a page never closes the tabs it opened; sign-in and editor pages opened by a site keep talking to it, agents' clicks never open your tabs, pop-ups need a click, and ⌘⇧T brings a page back with
+  its history, archived ones and after a relaunch too.
+- **The Browser's rough edges, smoothed as in Chrome**: pages that don't load say why in plain words (and load again once
+  you're back online), untrusted certificates warn before you go on, a crashing page says so with Reload, loading tabs
+  spin, View page source and Duplicate tab are in the menus, a tab moved to a new window keeps its page, and the Tabs
+  panel ends with your archived tabs (never one holding text you typed).
+- **Excalidraw's fonts no longer throw an error**: a vault plugin's chunk that a package also runs as a worker (Excalidraw's
+  font subsetting) no longer pulls in the plugin's own code, which failed there; vault plugins are bundled again once.
+- **A working agent no longer keeps the Mac busy**: its tab's dot breathes a few times as it starts, then holds still;
+  breathing for as long as it worked made macOS redraw the window 60 times a second (a third of WindowServer's CPU).
+- **The desktop app opened by an agent is the Dock's**: started from an agent's session or a Vaultite terminal (`open -a`,
+  a deploy), it no longer takes that session's account for the default one, nor its variables into new terminals.
+- **Many notes written at once**: an agent writing hundreds of notes together no longer gets some refused as "iCloud is
+  still downloading" on a busy machine (a slow read of a file on disk isn't iCloud's).
+- **Windows reads its processes in milliseconds**: what finds your agents and their terminals (usage pages, the
+  inbox's sessions) asks one PowerShell kept running, rather than starting one each time (20 s on an Arm machine).
+- **Edits show sooner in big vaults**: after a note changes, the app's update is worked out without sorting or
+  re-reading every file again (a third less time at 49,000 notes).
+- **Big vaults start faster**: the server keeps what it read at its last start on this machine and reads again
+  only the files changed since (a third faster at 49,000 notes).
+- **File history keeps up in big vaults**: after an edit it looks at the files that changed, not at every file
+  again (a third of the time at 24,000 notes), and a start reads one index of what it follows, not a file for each
+  (0.6 s to 0.15 s at 49,000 notes).
+- **Renaming a much-linked note is faster in big vaults**: a rename indexes only what moved instead of walking the
+  whole vault, and finds the links to rewrite without indexing every file's links (49,000 notes: 0.9-1.4 s to 0.4 s).
+- **The first load after a start is quicker in big vaults**: notes without blocks or links aren't scanned for them
+  (a quarter less time listing the files at 49,000 notes).
+- **Search is twice as fast in big vaults**: a query no longer works out every note's name and fields again, nor
+  lowercases every note to find a plain word (49,000 notes: 110 ms to 56 ms).
+- **The first answers after a start come sooner**: the server watches the vault before reading it, so the app's
+  first requests don't walk the whole vault again (0.3-0.5 s less at 49,000 notes).
+- **Loading the app in a big vault takes less**: the whole state the app loads is kept ready as bytes, half the
+  memory, and sent again without converting it (49,000 notes: 300 ms to 150 ms, 60 MB less).
+- **Big vaults open faster**: reading a vault no longer slows down quadratically past about 16,000 notes (a third
+  faster at 27,000).
+- **Slack in Sites**: the Sites tab names who you're signed in to Slack as (your email in your last workspace).
+- **Security fixes**: who may reach a plugin's owner-only parts (`allowRemote`, `allowUsers`) is this machine's alone,
+  never a vault file's, for every plugin, its settings' switch included (each machine keeps what the vault had, once);
+  Vaultite Connect without owner tools refuses its owner paths however they're written; Machines lists only tailnet
+  addresses, only the owner asks another machine through this one, and its pages never run on this app; a plugin that's
+  off answers no request; an installed plugin updates on its own only from where this machine allowed it, and only
+  Vaultite's own address counts as official; a vault plugin's commands and modules run only as allowed, and one naming
+  a hidden script is refused; a Claude Code account's folder is never one in the vault; an inbox reply is typed only
+  into its agent, never a shell; a link to what would run (a document that links to a script too) or to another
+  computer's files never opens; a site's yes to open another app is for that one kind of link; an app on the internet
+  writing any hidden file (an agent's `.claude/`) waits for your yes; a page that read the vault asks before a link
+  takes it out, naming the site; the desktop app's windows grant only what the app needs, and another machine's asks
+  before it hears, sees or locates you; a zip too big unpacked, or with names Windows reads as other files, is refused,
+  and a plugin's linked pages are never copied into the vault.
+- **Agents browse out of your way**: a page an agent opens no longer joins your tabs. A card in the window's corner
+  (dragged to any corner, like the mini player) shows it live, the agent's pointer moving to what it clicks; Open as tab
+  brings the same page into your tabs, and the agent chip in its bar sends it back. An agent asking you opens its page
+  as a tab with a card at its foot and a large Done, instead of a thin bar; the bar's agent status no longer moves the
+  page as it comes and goes, and an ask in front of you no longer also toasts.
+- **Hold the inbox**: `vau inbox hold 30m --label "Practice guitar"` (or 07:30, off) keeps toasts and the Mac's and the
+  phone's notifications quiet on every machine, with a muted bell in the status bar; when it ends, one line says what
+  came meanwhile. Plugins add their own items to the agenda (`agenda:items`), like a focus block.
+- **A link's own menu**: right-clicking a link in a note (reading or editing), a table, a callout or a timeline offers
+  Open link or Open in new tab (and to the right), Copy link, Copy link text, Copy email address for a mailto:, the
+  file's actions for a [[link]], and Edit link and Remove link while editing. Drawn Markdown's selected text has Copy.
+- **Another machine's browser, live**: an agent's ask in the always-on Mac's browser opens that tab from the Inbox on
+  any Mac or phone, to sign in, solve the check and press Done there; Show browser tabs lists every machine's tabs.
+- **Unsent replies stay drafts until sent**: a reply typed in an inbox session or a report and not sent shows Draft,
+  not sent on its row (kept in the list after it's read) and on its box, and leaving the box says so, with Back to it. A
+  reply on its way stays saved until the server has it: the app closed or updated mid-send finds it again, not lost.
+- **Move a login to another container**: in the Sites tab, drag a signed-in site onto another container's card to move
+  it there (hold ⌥ to copy it), or right-click it for Move to and Copy to; Undo takes it back. Moving asks first when
+  it would replace another account there or let agents use it, and a site that keeps its login outside cookies stays
+  where it was. Deleting a container signed in somewhere offers to move its logins first. A container's sites reorder
+  by dragging, always-open ones first until you do.
+- **Your other Macs' logins in Sites**: the Sites tab lists who's signed in where in each other Mac's browser (Machines),
+  under On M1 and the like, and copies a login there: drag a site onto one of its cards, or Copy to. The login is sealed
+  for that Mac's app on the way, so the servers passing it on never read a cookie. On a Linux with no keyring, its key
+  is held only till the app quits.
+- **Names pick the agent**: @opus in a note starts a companion on Opus, @opus-review another; @haiku, @fable, @sonnet
+  likewise, @codex Codex on GPT-6.1 Sol at medium (@sol, @astra, @luna its other models), @opencode OpenCode, which
+  now runs the model it's given (`opencode/deepseek-v4.1-flash-free`) and shows its permission asks by its cursor. An
+  ask to one not running starts it, no picker needed; Start @name says what it runs, and its chooser picks the agent
+  too, with that agent's models. The names are a setting (Companion > Names), and Codex companions now run the model
+  and effort they're given.
+- **Set up Vaultite asks about your agents and your Mac**: after the vault, it finds the coding agents on the
+  computer (Claude Code, Codex, OpenClaw, Hermes, Gemini, OpenCode; the install command of the others to copy), lets
+  you pick the companion's, and turns on what you tick: Claude Code's computer use for the vault, Codex's, OpenClaw and
+  Hermes connected to the vault. Then Accessibility and Screen recording, each opening its pane of System Settings with
+  a hint of the switch, ticking as soon as it's on, and a Relaunch that comes back to the same step. Settings >
+  Permissions opens it again (Set up agents).
+- **Companion modes in its menus**: right-click an agent's cursor or its face at the top of a note for Quiet, Notice
+  and Pair side by side, with a line on what each sees (the status bar's menu has Off too). Its cursor no longer slides
+  away as you click it: it rests just past the end of what it looks at, whatever has the focus, and holds still while
+  hovered, open or dragged. An @ask no longer fills under its name before it goes: Enter sends it, a pause quietly.
+- **Type in a note together**: with a note open in more than one window (your phone and your Mac, or a guest of a
+  shared folder), what each types shows in the others as it's typed, each one's caret and selection named and coloured,
+  their faces at the top. The note is saved a person at a time, so each one's lines stay theirs; alone, it saves as ever.
+  A shared folder's notes opened on another of your Macs are typed in on the sharing one, live with its guests, without
+  waiting for iCloud.
+- **Share a folder**: a folder's menu has Share…, for one person at a time (`vau share create`): a link of their own,
+  to open the folder in their browser over the vault's public address and read it, comment (margin threads, as
+  themselves) or edit its notes, until it expires or you remove it. Nothing else of the vault reaches them, no agent
+  works for them, and what they write is marked theirs (`vau blame`). You can start a comment on a line too (Add
+  comment, in the editor's menu): a thread between people, which no agent is told of. What the folder draws they see
+  too: its HTML pages, sandboxed with nothing to reach; its Kanban boards (theirs to change if they edit), Excalidraw
+  drawings and Dataview queries, over the folder alone. What they write is checked at once whatever it holds (a note
+  too long or nested too deep to check is refused), and removing their link cuts off their open pages at once.
+- **Renaming never moves**: a "/" in a file's or folder's new name (its title, the path bar, the file tree) is refused
+  like the other characters a name can't have, as in Obsidian; moving is dragging or Move to. Creating from a path
+  (Folder/Note in the switcher, a [[Folder/Note]] link) still makes the folders.
+- A link to another app in a note (zotero://, shortcuts://, tel:) asks before it opens that app, as browsers do.
+- **Discord stays signed in** in the browser: a page's window is its tab's (the app's sidebars looked like DevTools
+  open, so Discord kept its sign-in only in memory), and closing a tab or quitting the app lets its page finish first,
+  as a browser does.
+- **Tabs move between windows as a browser's**: a tab dragged out of the window and let go clear of it goes on in a
+  new window there. With the tabs in the sidebar, a new window (which has no sidebar) shows its tabs on top, so they
+  can be switched, right-clicked and moved back; and right-clicking the top of a pane has the menu of the tab it shows
+  (close, split, move to a new window, the file's actions), then the pane's.
+- **New tab ends the Tabs panel**, as in a browser's vertical tabs: a row after the last tab (its + gone from the
+  heading) opens a new tab at the end of the list, in its place, and so does a double-click under the list. The tab
+  bar's + now opens its tab at the end too, where the + is, as in Chrome; ⌘T still opens one beside the tab you're on.
+- **⌘O and ⌘P keep what you typed**: pressing one for the other carries the text over; closed without picking, the
+  next one opened in the following two minutes shows it, selected, so typing starts afresh.
+- **The Ask box keeps what you typed**: clicking off it or Esc no longer loses the question; it's there the next time
+  it opens, until it's asked.
+- **One rule for what shows when tabs go**: closing selected tabs, and tabs moved or closed in another workspace
+  (`vau workspace`), show the tab nearest the one on screen (after it, else before it), as closing one tab does. A vault
+  plugin's backend can read a workspace's tabs and panes with `@vaultite/core/layout.ts`.
+- **Tab groups on phones are the computer's**: the tab list shows each tab group as a card (tap it for its tabs);
+  holding a tab over another groups the two, over a group's card adds it, over + in an open group takes it out. A
+  computer's split shows on a phone as one list of tabs, no longer as groups.
+- **Tab groups named by what they show**: a plugin's views name a new group of their tabs (`groupName` in the plugin
+  API), as the Browser names one of a site's pages; a site under a country's domain (bbc.co.uk) is named after itself
+  now, not "Co".
+- **Plugins follow moves and answer their ops**: `onMove` hears a file or folder renamed, moved or trashed in the app,
+  and `answers` answers what a plugin's ops ask the user's window (`ctx.ui({action: "<plugin id>:<name>"})`).
+- A status bar item dragged out of its tray onto the bar's first item lands first, no longer second.
+- A bundle that turns Workspaces on (Browser) sets the panels and pins of the workspace the window goes to, no longer
+  leaving that workspace's own (Files still showing) over the bundle's.
+- The web demo keeps a change made just before its page reloads or closes (a plugin turned on, a setting), no longer
+  losing it.
+- On a phone, a tap on a menu just opened by holding (More ▸ on a tab card) lands, no longer lost when the hold's
+  lift sent no click (Android).
+- A dashboard with nothing side by side (one block between text, as Focus) reads centred at a note's width, its card
+  as wide as the text, no longer pushed to the left of a wide, half-empty column. A callout, code block or folded
+  section in a dashboard's text has its gap above, no longer touching a table.
+- **Dashboards open faster**: a block's options are read once, not four times per redraw; switching to a dashboard's
+  tab on a phone spends about 340 ms less reading YAML.
+- **Phone drawers at phone sizes**: the drawers' pinned files, panels and headings are 17px with 44px rows (they were
+  15.6px and 34px), as every other list of the sidebar's on a phone.
+- **Search and the palettes at phone sizes**: on a phone their results are 17px with 44px rows (they were 15px and
+  37px), and the field's clear button takes a finger-sized tap.
+- **Task checkboxes are easier to tap on a phone**: a note's checkbox takes a tap twice its width and the line's height
+  around it, without reaching the tasks above or below.
+- **Dashboard lists read at phone sizes**: on a phone a list row's title is 17px and its line under it 15px (they were
+  15px and 13px), as are a stat's label and note, so lists match the text around them.
+- **Keys over the phone's keyboard take a whole-row tap**: the editing and terminal keys answer a tap anywhere in the
+  row's height, not only on the key's face.
+- **A blank tab's Connect your AI cards line up**: they sit within the page's margins, in line with its headings and
+  pinned tiles, no longer reaching almost to a phone's edges.
+- **A person's page at phone sizes**: where they live and their tags read at 15px on a phone, and a tap-to-change
+  field (a person's context, where they live) takes a taller tap.
+- **Properties fit a finger on a phone**: their rows, toggle and Add property are 44px, list values 15px with a
+  finger-sized remove button, and the field to add one no longer shrinks to a sliver.
+- **Settings at phone sizes**: on a phone the search fields over lists (Settings, plugins, hotkeys) are 44px with 17px
+  text, Appearance's picture choices are labelled at 15px, and Show all and a field's clear button take a finger's tap.
+- **The Inbox at phone sizes**: on a phone its rows' titles are 17px and the lines under them and its intro 15px (they
+  were 15px and 13px), as the dashboards' lists.
+- **No invisible buttons on touch screens**: a property's remove button and an unlinked mention's Link show on a phone,
+  where there's no hover to bring them out (they were there, unseen, under the finger).
+- **iPhone on its side, the rest of the way**: toasts and corner cards keep clear of the notch and home indicator, and
+  the palettes drop their keyboard hints on a phone held sideways, for more results.
+- **Phone tabs switch back at once**: the last four file tabs stay drawn, hidden, so going back to one shows it as it
+  was left instead of drawing its page again (a dashboard's about a third sooner, with half the main-thread work).
+
+## 0.8.0 (2026-10-24)
+
+Vaultite for Windows, a Browser bundle with spaces, tab groups like Chrome's and tabs that archive themselves,
+the quick switcher as the browser's command bar, and a much lighter app: big vaults keep up with edits, typing and
+scrolling redraw a fraction of what they did.
+
+- **Vaultite for Windows**: an installer for x64 and Arm (no administrator needed: it installs for you, in the Start
+  menu), and Vaultite Nightly's beside it; each updates itself from the release feed. The window is a Windows one, its
+  controls over the page's top-right corner in the page's colours, its menus on Alt; .md files and vaultite:// links
+  open in it. Set up puts vau on your PATH for PowerShell, cmd and Git Bash; `vau wsl install` puts it in WSL's
+  distros, where it reaches the app on Windows; `vau service` runs the server at login as a scheduled task, with no
+  window; files open in their app and show in Explorer. `vau service status` says whether the service runs.
+- **Terminals on Windows**: PowerShell by default, or Windows PowerShell, Command Prompt, Git Bash or a WSL distro
+  (Terminal settings, Shell), each with `vau` on its path; shells outlive the server there too, and Claude Code and
+  Codex start from any of them, their state shown as on a Mac.
+- **A Browser bundle**: built in beside Standard and Zen, the app as a web browser first: your favourite pages as
+  tiles over vertical tabs, ⌘T an address bar that finds anything, spaces, tabs archived after 12 hours and the notes
+  about the page you're on. Life OS moved to Get bundles, beside Agents (a setup made with it stays as it is), and a
+  bundle from there leaves with its pages and snippets when you switch, as the built-in ones do.
+- **Workspaces are spaces**: each can have an icon and a colour, shown in the sidebar's switcher (the sidebars take a
+  little of the colour), and a Browser container its web pages open in; a two-finger swipe over a sidebar goes to the
+  next or previous one.
+- **Tab groups look and move like Chrome's**: solid chips in the group's colour, its tabs set in by its line in the
+  sidebar; folding shrinks the tabs into the chip, opening grows them back, and new or closed tabs in the Tabs panel
+  slide in and out. Its … or a right-click opens its editor: the name, typed live, and its colours, one click each.
+- **Tabs archive themselves**: with Tabs' Archive tabs (after 12 hours to 30 days), unpinned tabs you haven't looked at
+  close into Archived tabs, to reopen where they were or find in the quick switcher; never pinned ones, ones on screen,
+  terminals or unsaved edits.
+- **The quick switcher is the browser's command bar**: it finds your open web tabs (picking one goes to it), bookmarks and
+  history, and opens what you type as an address or searches the web for it. New tabs can open the switcher as a launcher
+  or a web page (Settings > Appearance > New tabs open, `vau newtab opens`).
+- **Translucent window**: in the Mac and Windows 11 apps, the desktop can show through the sidebars, the tab bar and the
+  status bar, blurred and in your colour scheme, while pages stay solid (Settings, Appearance; solid with Reduce
+  transparency).
+- **Big vaults keep up with edits**: in a 24,000-note vault the app loads a quarter of the data it did (the lines
+  links sit on come only for the Links panel, which keeps their room while they come); after an edit the server does a
+  sixth of the work to refresh it and a fifteenth for an open local graph (the graph updates only the edited files'
+  links), and an open graph view is sent only what changed. It starts sooner too: lists in properties as Obsidian
+  writes them, and nested ones read before, no longer go through the YAML library; renaming a note many others link to
+  takes a third of the time, a search half; the first click after a pause no longer waits while it looks the vault
+  over, nor, on Linux, does an agent's every read.
+- **Lighter typing and scrolling**: a keystroke in a note redraws a third of what it did (its title, properties and
+  header items stay as they are), and as little with an agent's cursor and comments in it, and the status bar no longer
+  makes the page lay itself out again for it; the quick switcher redraws less per letter; scrolling a long note or a big
+  folder in the file tree restyles a sixth of what it did each step; switching tabs redraws an eighth less.
+- **An idle server stays idle late in the day**: the day's recap, made again every few minutes after a change (or
+  while Activity waits to be allowed to write it), reads only the work that's new since the last one, where it read
+  again every version of every file changed that day; a server's CPU while nothing happens no longer grows with how
+  busy the day has been.
+- **Snooze in the inbox**: a result or an agent's event can be put off (a phone's swipe, the clock button, a right-click:
+  in an hour, this evening, tomorrow, next week or a time you pick) and comes back on top when it's due, with a toast and
+  a phone notification; the Inbox page lists what's snoozed, to bring back early. `vau inbox snooze`.
+- **Dragging moves only what you drag**: where scrollbars take room (Linux, Windows, a Mac set to show them), Pinned's
+  tiles no longer lose a column and jump when something dragged in makes their panel scroll, the tab strip no longer
+  shows a scrollbar under its tabs, and a panel's scrollbar no longer comes and goes mid-drag; a sheet's scrollbar sits
+  in its margin, its content lined up with its close button. A move redraws only what it changes, where it redrew the
+  page under it.
+- **Escape cancels a drag everywhere, and lists scroll near their edges**: a canvas card mid-move goes back, a sidebar,
+  split or column being resized returns to its size; Pinned, the Tabs panel, a new tab's sections, Sites and a table
+  wider than its note scroll along while something is held near their edge, and a wheel or trackpad scrolling under a
+  still pointer moves the drop with it. A dashboard card held between two cells lands there, as a board's card between
+  two columns lights the nearer; a status bar item dragged along no longer shifts the items past the line, and a file
+  held at the top of the Files panel no longer goes to Pinned above it. Letting go after Escape no longer opens what was
+  dragged. From the keyboard: Move tab left and right (⌃⇧PgUp and PgDn in the desktop app), and Pinned's menu moves a
+  page up or down.
+- **Phone tabs move like Chrome's**: the tab list opens, and a card grows into its page, on the frame you lift your
+  finger; the picture stays inside its card all the way, Done tapped while the list opens turns it back, and the other
+  cards close up after one you close from where they were. A new tab's card shows its page instead of a plus.
+- **The status bar keeps its items while you drag one back**: an item dragged out of its tray over the bar no longer
+  makes the bar leave out every other item, so it can go among them.
+- **The quick switcher lists every match**: scrolling down a long list of matches no longer stops partway, short of
+  the rest and of the row that searches every file.
+- **Every dialog an agent waits on shows**: a Claude Code session waiting on any of its dialogs (a one-time question,
+  a usage limit, not only a permission) is marked as needing you in Terminals and the inbox, no longer as working, and
+  its choices show there to pick from, as its questions do.
+- **Links on web pages**: on a Browser tab the Links panel lists the notes about the page and those linking it, and
+  other pages of its site your notes link; "Note on this page" (its … menu, or the panel) opens or makes its note.
+- **Close pane**: a pane's menu (right-click its bar, its strip or its title), the palette, ⌥⇧⌘W and an X by its handle
+  close it, pinned tabs too; Reopen closed tab (⇧⌘T) brings it back whole, where it was. ⌘W on a pinned tab says why it stays.
+- **The sidebar header's items hide**: right-click the left sidebar's header, Header ▸ ticks which show (the Inbox
+  button, Workspaces' numbers), on every device; `sidebarHeader` in appearance.json.
+- **Back, Forward and Reload open a new tab**: a middle-click or ⌘-click on them in the Browser opens that page in a
+  tab of its own beside this one (Reload's a copy of it), this page staying where it is, as in other browsers.
+- **Every colour tells apart in every scheme**: Gruvbox (the default) and seven other schemes drew two of the ten
+  colours alike (red and pink, blue and indigo, purple and pink...), so two tab groups, workspaces or labels could look
+  the same; each now has a colour of its own.
+- **Search reads as text**: the search tab's matching lines and the quick switcher's previews show a note as it reads,
+  without link brackets, task boxes, callout types or TeX.
+- **Keys named as each computer names them**: plugins' descriptions and settings say Ctrl, Alt and Shift on Linux and
+  Windows (Find, Ctrl+F) instead of a Mac's ⌘ and ⌥.
+- **A new tab opened while the app loads stays**: on a device's first visit, a new tab asked for before the vault
+  arrived was replaced by the first pinned page.
+- **Two web pages side by side stay still**: the keyboard no longer bounces between them many times a second, the
+  focused pane flickering in the tab list and the app busy, after it moved from one to the other quickly.
+- **Agents' lines are no longer drawn by default**: Provenance still keeps which lines agents wrote (for `vau blame`,
+  the recap and a right-click's "Written by"), but the bar by them is now a choice, in its setting Agents' lines.
+- **Replies that don't land say so**: a reply to an agent that it never starts on comes back with an error, your
+  words put back in the box (or a notification on the phone), instead of being marked sent and lost.
+- **A reply never picks an agent's dialog**: one typed while the agent shows something over its prompt (an offer of
+  Claude Code's, a menu) gets no Enter, so it can't choose that dialog's first option; it comes back with an error.
+- **Agents' questions in the inbox**: a question Claude Code asks shows whole in the inbox and its notifications, each
+  option with its description, no longer one cut line or "Asks permission"; tap an option to answer it, or reply with
+  its number, its name or your own words. A plan to approve shows the plan.
+- **Agents log in with your passwords, never seeing them**: give the browser a KeePass file for agents (KeeShare's export
+  of an Agents group) on the computer it runs on, and `vau browser login` fills a site's username, password and one-time
+  code from it. Its password is kept in the Mac's Keychain or Linux's keyring (on a Linux with none, only till the app
+  quits). Entries not tagged agent-free wait for your yes, given on a Mac with a passkey on your phone, and nothing an
+  agent reads of the page shows what was filled.
+- **Agents can't say yes for you**: an agent's permission prompt in a terminal, and one the server waits on (an app's
+  tool through MCP), are approved or denied only in the app or on your phone, never by an agent or vau.
+- **Agents' tabs in sight**: the pane agents' browser tabs open in no longer shrinks a little with each tab till it's
+  gone, a pane squeezed too thin comes back at an even share, and Open web page always opens a new tab.
+- **No more rules ping-pong**: two machines on different versions sharing a vault no longer rewrite `.vaultite/AGENTS.md`
+  back and forth; each writes it only when its own rules change.
+- **Agents' tabs stay**: short of memory, the browser no longer discards a tab an agent opened or one waiting on you,
+  so its number and its ask last.
+- **Security pass**: a page reaching the app under another site's name (DNS rebinding) can't read plugins' pages,
+  requests through Tailscale Funnel are refused, an HTML artifact can't take what it read to another site, files from
+  the artifacts' CDN cache never run as pages, other sites can't frame the app, and opening a script or an app kept in
+  the vault shows it in Finder instead of running it. A `vaultite://command` link (in a note or from another app) asks
+  before running a command that does more than open something, and Vaultite Connect without owner tools can't turn
+  plugins on or edit the agents' rules.
+- The desktop app is on Electron 44.9.3, which no longer trusts eMudhra's compromised intermediate certificates.
+- **Copy the sign-in code**: the page an AI app opens to connect to your vault has a copy button beside its code, to
+  paste into Connections.
+- **One server per vault on a machine**: a second server for a vault this machine already serves won't start, and the
+  desktop app on a Mac whose always-on service serves the vault attaches its window and browser to that server rather
+  than starting its own. Agents' tabs outlast the server restarting. Other machines' agents use an always-on machine's
+  browser; a laptop's app answers only its own agents.
+- **Updates wait for agents**: the desktop app restarts into an update only once its browser is idle (no agent call
+  under way, no page waiting on you, no agent at work in the last 10 minutes); its server's update waits only for agents
+  at work, since the app's tabs and asks outlast the server restarting.
+- **A server that updates itself**: `vau service install --updates main` has a service install follow a branch, taking
+  each commit CI passed on (fast-forward only, a clean checkout, never while agents use the browser), building it and
+  restarting when its own code changed; a failure keeps the version before and shows in `vau errors`. `vau version`
+  says what runs and what the updates are doing.
+- **Browser tabs from your phone**: in the web app (another Mac, a phone), Show browser tabs lists the desktop app's web
+  pages, whose each is (an agent's and its task, or yours), its container, paused or waiting for you. Open one to watch it
+  live and tap, type and scroll in it, stop or resume its agents, see what they did there, and say Done to what an agent
+  asked (signing in, a check): the Inbox item a browser ask makes opens it.
+- **Sites, tidied**: each container is a card in its colour and leads with who you're signed in as, now on Google
+  (YouTube and its country sites in the same row, other Google accounts beside it), X, Reddit, GitHub, GitLab, Hacker
+  News, Instagram, Facebook, LinkedIn, Cloudflare, Cursor, Apple, Perplexity and Wikipedia too, WhatsApp as its open
+  page last showed, with their pictures; a site whose login cookie is there shows signed in even when it
+  won't say who, and keeps the name it last gave. Each site is asked only every few hours per login, again when you
+  sign in to another account. The rest fold behind "N more sites", latest visited first, and a filter finds a site or account.
+  Drag a container by its name (or Move up and down in its menu) to reorder it everywhere it's listed. The address bar's container menu says who you'd be in
+  each container. A page's own icon (Google Maps) no longer replaces its site's on every other tab.
+- **Answered at once**: what you do shows straight away instead of after the server replies. Forgetting a device,
+  signing out of a site, disconnecting an app, removing history, errors, extensions or reviewed files fold their rows
+  away; switches and names change as you set them; slow actions (Restore, Start it, Keep) say they're working and take
+  no second press. A machine's menu and "Choose where…" open at once. What fails comes back and says why.
+- ⌘A selects only what you're in, never the whole window: a menu's filter is a real field (⌘A, ⌥⌫, paste and
+  dictation work in it), a field being renamed keeps ⌘A for its text, a note in reading view selects its text, and the
+  sidebars and bars select nothing.
+- Vaultite Main updates again on a Mac whose shell aliases `rm` to ask first; it kept the old version, saying the new
+  one didn't build.
+- A companion's comments and suggestions show as cards in the note's margin by default; the Conversations panel with a
+  dot by each line is the setting Comments: In the sidebar.
+- An app a LaunchAgent keeps running stays under it after updating itself, so a crash still restarts it.
+- Vaultite Main on Linux updates itself again: since 2026-10-20 it built each update and never offered it (run
+  `npm run app:install` once to get the fix). Its update toast names the app
+  that's ready (Vaultite Main, Vaultite Nightly), not always Vaultite.
+- Linux: an agent's terminal tab is named after the agent (Codex, not your prompt's "user@host: folder") until it
+  names itself.
+- Linux: Review has the text from just before an AI's change made right after a write of yours, instead of sometimes
+  saying no earlier version is kept.
+- Passkeys work in the browser: a site asking for one shows a QR code that your phone scans, and the phone's passkey (an
+  iPhone's iCloud Keychain, an Android's) signs you in or is saved there. Bluetooth needs to be on, on both.
+- **Your devices, live**: the Tabs panel marks which of your other devices are open now, and on those a tab can be
+  moved here or closed there (or all of them). Browsers are named by what they are and where ("Brave on Studio", not
+  "Chrome on Mac"), a device can be renamed, and automated browsers no longer show up. Devices, in Machines and the
+  palette, lists every app and browser.
+- Clicking a web page's field always types there: a click while a toast is over the page, or in a window that's behind,
+  no longer leaves the keyboard in a note.
+- Opening a web page no longer flashes white while the site answers: it shows the app's background until the site first
+  draws (pages that set no colour of their own are still white).
+- The view button picks any view, source mode too: right-click it, or hold it on phones. The views' menus show each
+  view's icon, with the check at the row's end.
+
+## 0.7.0 (2026-10-22)
+
+The web viewer becomes a browser (Shields, containers, Chrome extensions, agents using it), tab groups and vertical
+tabs, bundles you can pick apart, try and browse, Obsidian's Advanced Slides and reading-view plugins, and a faster app.
+
+- Chrome extensions run in web pages: add them from the Chrome Web Store (Add to Vaultite on an extension's page, or a
+  link in Extensions), a folder, or Brave and Chrome on the Mac; pinned ones' buttons are in the page's bar, every one in
+  its … menu.
+- Managed extensions: ones the Mac's owner names in a file from the terminal are always on in every page and container,
+  with no switch or Remove in the app, like Chrome's force-installed ones (a site blocker can't be turned off on a whim;
+  its blocked page and its asks for time work as in Chrome).
+- Extensions that watch or change pages' requests (chrome.webRequest) work with Shields on: password managers fill
+  sites' sign-in prompts (KeePassXC-Browser), and Zotero Connector sees what a page loads.
+- An extension added from Brave or Chrome comes with its settings there (options, sign-in, license), and one already
+  added gets them from its … menu, Settings from Brave: DeArrow's license and SponsorBlock's settings carry over.
+- Web pages open in containers, as in Firefox and Brave: Personal, Work or your own, each signed in on its own, so one
+  site can have several accounts side by side. The page's bar shows the tab's container and moves it to another, and a
+  site can always open in one.
+- A container can lock with Touch ID, like Brave's app lock: its pages stay hidden until unlocked, and lock again when
+  the Mac locks, sleeps or sits idle 15 minutes (Lock containers locks them now).
+- Web pages in the Mac app block ads, trackers and YouTube's video ads (Shields, with uBlock Origin's default lists): a
+  page's Shields button counts what was blocked and turns them off for its site. Nothing of it loads until a web page
+  opens.
+- Block an element (the Shields menu, the palette, or right-click a part of the page to start on it): point at part of a page, widen or narrow the pick with ↑ and ↓,
+  see it hidden before you save, and edit its selector. Rules are `youtube.com##selector` lines in the Browser's list
+  (`.vaultite/plugins/web-viewer/blocked-elements.md`; a Blocked elements note moves there once) that pages follow as it
+  changes; the Shields menu lists a site's rules (click one to show it again) and hides
+  YouTube's Shorts, recommendations or comments in one click. Agents add rules with `vau browser block`.
+- Web pages keep a history on this Mac: the address bar completes a site as you type and suggests your history,
+  bookmarks and open tabs, a new web tab starts at the address, ⌘Y opens History, and Import from Brave (or Chrome)
+  brings a profile's history in and its bookmarks into a Bookmarks note.
+- Make Vaultite the default browser (a command): links from other apps open in a web tab.
+- The Web viewer is the Browser now, and Open in the browser is Open in another browser.
+- A web page's bar is calmer: its container and Shields sit inside the address, one Save button saves the page to the
+  vault (plugins' ways to save, like Save video, in its menu), and Bookmark, Block an element, Open in another browser,
+  extensions and plugins' other actions are in its … menu. As a pane narrows, the address gives way first.
+- The Web pages panel is Sites: the sites signed in to in this workspace's logins (Default without workspaces) or a
+  container's, picked on its heading, with Sign out and Clear trackers; the Browser's settings list every container's.
+- Browser: each tab owns its page, so closing a tab always ends it (a slow page's sound no longer plays on with no tab),
+  two tabs of one address are two pages, ⌘⇧T opens one page, and the address shows while it loads; a tab's speaker mutes
+  it with a click, and the status bar names the pages playing sound.
+- Browser: switching between web tabs no longer flashes see-through for a frame. A tab's container menu is only for
+  choosing one (Open in, Always open here, New container, Manage containers); containers are added and changed in
+  Sites (the panel's + and the picked one's options, the Sites tab with every container and its options), which also
+  pins the sites each always opens. Menus mixing icons and checks put the check at the end, so no row starts indented.
+- Browser: menus, the palette, popovers, tooltips and toasts draw over a live page; it no longer freezes into a picture
+  or blinks as one opens, and a toast over a page lets clicks through to it.
+- Browser: "Open as player" (a page's … menu, ⌥⌘P) moves a tab's page, still playing, into a window of its own, its
+  video filling it full screen on its own Space, to watch or share in a call; Esc brings it back. A video's own full
+  screen now fills the window, and Picture in picture floats a page's video.
+- Browser, Block element: what you pick is marked in red but stays on the page until you press Block; Preview (P) hides
+  it for a look. Shields' button no longer goes missing on a page opened as the app starts, and is just the shield: the count is in its menu.
+- A web page playing sound shows a speaker on its tab; Mute tab is in its menu and its bar.
+- A web tab playing a video keeps its speaker, and the status bar its "playing", through quiet scenes, till the video
+  pauses; the speaker sits beside the site's icon instead of replacing it. A background video in a quiet scene is no
+  longer let go when memory runs short.
+- Browser site styles: a site's own CSS (`.vaultite/plugins/web-viewer/sites/youtube.com.css`) in the vault's look, its
+  colours and fonts as `--vault-*` variables that follow light, dark and the colour scheme; it applies as you save, wins
+  over the site's own without !important, and the Shields menu turns it off or opens it beside the page ("Style this
+  site…"). Agents write one with `vau browser style`.
+- Tint the active tab (Settings > Appearance, off by default): a web page's tab takes its container's colour, lightly.
+  The container's line under the address is straight.
+- Agents use the desktop app's browser as you would (`vau browser open`, `snapshot`, `act`, `read`):
+  their tab opens beside yours, the bar says what they're doing with Pause, and Show what agents did in the
+  browser replays each run step by step. Each container says whether agents can't use it, read it, or act in it;
+  only the new Agents container lets them act until you say otherwise.
+- Browser agents over MCP: `browser_open`, `browser_snapshot`, `browser_act` and the rest are MCP tools, and a server
+  without the desktop app (the always-on one) passes them to a Mac whose app has the vault open, or says none has.
+  Agents' tabs are grouped as <agent>/<task> and marked theirs, they close their own, upload vault files, hear where a
+  download went, search a page (`--find`), get a picture of a background tab, run an expression in a world of its own,
+  and ask you to sign in with a Done in the tab's bar (and the Inbox). A tab an agent moved on in the background no
+  longer goes back to its first page when shown.
+- Agents in the browser: `act` answers what changed on the page once it settles (`--diff`) and fills a whole form at
+  once (`--fields`), refs last while their element does, `browser run` does a whole flow in one call (a script in a
+  sandbox, 30 s), and `browser pdf` saves a page into the vault. "Show agents in the browser" shows the tabs agents work
+  in now, live, with Show tab and Pause, then past runs searched by agent, task or the summary given on open.
+- Agents never take your focus: a terminal an agent opens, resumes or dispatches goes in a tab behind yours, with a
+  quiet toast ("Claude Code started a session") and Show. `vau terminal open claude --prompt "..."` starts it on its task.
+- Agents' lines: what agents write in a note is marked theirs by line, kept beside the note (never in its text) and
+  found again as you edit: a thin bar in the writer's colour by each line, hover (or a held finger's menu) for who,
+  model, effort and when; a line you edit after an agent shows as both. Provenance's setting Agents' lines: a bar,
+  tinted (the text stays washed in their colour), or off. `vau blame <note>` lists them, and the day's recap counts
+  lines by agent. The companion is told an ask's whole paragraph and the three above it, uncut.
+- Agents' tabs show their state: the agent's logo stays, with a dot on its corner breathing while it works, yellow when
+  it waits on you, blue when its Inbox row has an answer to read, red if it failed, on the tab bar, the
+  Tabs panel, the phone's tabs and Terminals, which lists the ones that need you first, in bold (the status bar counts
+  the same). Closing an agent's tab leaves it running there; End session ends it (asking only while it works), and a
+  session dispatched from a note opens beside that note's tab, in its tab group.
+- Ask an agent in the background: a small box (the palette's look) takes a question, and Enter starts it in a new
+  Claude Code session with no tab, where the workspace's new sessions go (the agent, account and machine are picked
+  under the field, remembered per workspace); a toast says what was asked, with Open. `vau terminal ask` does the same.
+- Terminals read OSC 7501 (program status): Claude Code says itself when it's working, waiting on you (for a permission,
+  an answer or a login, and why) or done, instead of hooks and screen reading, and so does Codex from 0.163 (its turn's
+  answer reaching the Inbox under its session's name); agents that don't speak it (older Codex, or any agent in tmux)
+  keep those, and Codex's permission prompts show as waiting with Approve and Deny.
+- Inbox: each agent session is one row, there only when it needs you (it asks, wants an approval, or its turn ended
+  with a question or an answer to read, judged from its last message by a small fast model), bold until you open it;
+  its sheet shows the answer drawn and a reply that goes back into the session. A turn done with nothing for you goes in
+  quietly, and only what needs you toasts and notifies (rate limited). No more "Claude Code finished" per turn. A
+  session you end yourself (End session) leaves its row read.
+- Agents: a question an agent asks before it's ready (Claude Code's "Do you trust this folder?" on a first run) waits on
+  you like a permission: its terminal shows waiting, the Inbox and phone have Approve and Deny, and its first prompt
+  runs once you approve. The Inbox has Approve and Deny for any agent's permission, which stays unread until answered,
+  and a companion's cursor shows its question right there with them.
+- Terminal: `vau terminal run <file>` (terminal.run) hands a note to a coding agent or a shell command, here or on
+  another machine, reporting to the inbox: what Dispatch's buttons and scheduled notes now start agents with.
+- Cloud sessions: Claude Code on the web's sessions have a sidebar panel of their own, out of Terminals. Every claude.ai
+  account the Browser is signed in to shows (each workspace's logins, each container, each organization), under its
+  name, any of them hidden from the panel's eye; a session opens in the logins it belongs to. Asked once before
+  anything is read. Start a new one with +, or send a note as a new session's prompt. Working and waiting sessions show
+  as such again (claude.ai's list had stopped saying).
+- Another machine's sessions reach this app again after a laptop sleeps or changes network, and their permissions are
+  approved, denied and replied to from here, the phone (Reply on the notification) and the watch; only the machine the
+  session runs on sends the phone's push.
+- Tab groups, as in a browser: right-click tabs for Add tab to new group, and a group is a coloured chip before its tabs
+  (in the Tabs panel, the same pill with a line down its tabs; a section on a phone) that folds to its name; drag the
+  chip to move the whole group, and rename, recolour, ungroup or close it from its menu. Agents group tabs with
+  `vau tabs group`. Dragging tabs, the others make way and the tab shows where it lands, the group's line under it if
+  it joins: held over a group's last tab it joins its end, just past it it leaves in place, and dropped on a folded
+  group it goes in, the group staying folded.
+- Vertical tabs in one switch: Show tabs in the sidebar (the palette, or right-click the tab bar) puts the Tabs panel at
+  the top of the left sidebar and hides the tab bar; Show tabs on top puts them back.
+- Every list you reorder by dragging makes way as the tabs do, instead of showing a line: pinned pages (list and
+  tiles), sidebar panels, the Sidebars sheet, a blank tab's sections and buttons, the status bar and its tray, and the
+  header's items. Something dragged in from elsewhere opens a gap where it would land; a pin dragged out to unpin
+  leaves the rest closed up.
+- Reordering Pinned and Tabs: dropping just under the last row puts it at the end (Pinned no longer unpins it), and
+  dropping a pinned page over its own place leaves it there instead of sending it to the bottom.
+- With the tab bar off, nothing shows above a pane unless Pane titles is on (now off by default); a note's bar or the
+  Browser's address bar is then the window's title row, beside the sidebar's, making room for the toggles and the Mac's
+  traffic lights instead of an empty band above it; its empty part drags the window and has the tab bar's menu.
+- Mac app: with the tab bar and pane titles off, the sidebar toggles beside a folded sidebar can be clicked again.
+- Tabs panel: right-click its heading (or a device) to hide other devices' tabs and list only this device's; Tabs
+  settings have it too.
+- Status bar: every item can be hidden, moved and tucked under More, the file's too (view, word and character counts,
+  Vim's mode, chips, origin, tokens): right-click the bar, or "Show in status bar" / "Hide from status bar" and "Show
+  all status bar items" in the palette. With nothing shown, the bar is a faint corner whose right-click brings them
+  back; saved setups keep the file's items they showed.
+- Status bar: what doesn't fit goes (characters, then items to the tray, then words), never onto a second line; last
+  launch's widths hold only while the app loads, so no empty room is left where a longer song title was.
+- Status bar: after the window or a sidebar is resized it no longer reaches under the left sidebar or keeps empty room
+  at its end (it held the width it had at the last launch).
+- Mac app: the traffic lights come in once a hidden sidebar has slid in, not a frame at a time from their default place,
+  and stay hidden with it after full screen, a focus change or a new window.
+- Mac: a sidebar without its rail (Zen) slides in carrying the window's traffic lights and its toggle, set in its top
+  row as beside the pinned sidebar, instead of the lights hanging over its corner; the lights sit centred on that row
+  in either density.
+- Zen: the page dims softly behind a sidebar slid in, the file bar fades while you type, Files waits folded, and
+  "Show in the file tree" (a breadcrumb, Reveal) slides the hidden sidebar in instead of pinning it open. A hidden
+  sidebar slides in from its edge over a browser tab or an embedded page (a PDF, an app's card) too.
+- Settings: the sidebars' switches (rails, dimming, scrolling, dividers) are in Appearance, Sidebars, above the panels.
+- Applying a bundle with the app open draws it as a reload would: the status bar no longer keeps the last setup's width.
+- Setup: one page for Bundles and Plugins, as its two tabs, behind a Setup button beside Settings at the sidebar's foot
+  (Your setup atop Settings goes there too); Open Setup, Open Plugins and Choose a bundle… open it from the palette.
+- Bundles: Standard after Zen (or any of the app's bundles after another) is that bundle's setup again: each says every
+  part of the look and every setting any of them sets, instead of leaving Zen's tab bar, rails and tiles behind.
+- Bundles: a saved bundle says the whole look and the settings the app's bundles set, so applying it after any other
+  gives back the setup it was saved from.
+- Bundles: each change in a bundle's preview has a tick: untick some to apply or try it without them, or save it as
+  "<Name> (mine)" (`vau bundle apply --skip`, `vau bundle fork`); restore still puts the rest back.
+- Bundles: Try one from its preview: a bar at the foot of every window says Trying <Name>, with Keep and Revert, until
+  you pick one, even after a restart (`vau bundle apply --trial`, `vau bundle keep`).
+- Bundles: the bundle in use says In use · modified on its card once your setup changes (hover for what differs); its
+  preview offers Save changes (over yours, or as "<Name> (mine)" for the app's) and Revert.
+- Bundles: Browse, on the Bundles tab, lists bundles shared on GitHub (the topic vaultite-bundle, or listed in
+  Vaultite/plugins), searchable, saying which you have and which has an update; each is pinned at a commit, and
+  importing one gets exactly that commit (`vau bundle browse`).
+- The Agents bundle is back as a community bundle in the directory: coding agents in terminals beside your pages, their
+  sessions and limits, a feed of what they did, your machines and the server.
+- Bundles: updating one you have (Check for updates… on its card, or Update available in Browse) says what's new
+  (files, plugins re-pinned) and replaces yours only when you say so; it's never applied.
+- Bundles: plugins a bundle installs are pinned to the commit and files recorded when it was saved (the app's too): a
+  moved tag can't change what's installed, and files that differ are refused, nothing installed.
+- Bundles: a bundle can bring a guide, a note on how its setup works, opened after applying it; Life OS and Zen have
+  one.
+- Bundles: the app's own bundles show a real picture of the app they make, in light or dark as the app is.
+- Bundles: a bundle that installs plugins says so with a small mark on its card's title row (hover it for which), so
+  every card is one height.
+- Bundles: the tab is laid out as Plugins is: Your bundles (built in, then yours) and Get bundles (the directory, with
+  Import… for one it doesn't list), with the search beside them; with none of yours yet, one empty state offers Save
+  current setup and Import…, and after yours a tile saves another.
+- Bundles carry the editor's settings (editor.json): Zen hides notes' properties, and the others show them again.
+- Slides present Obsidian Advanced Slides decks: `note:` speaker notes come off the slide and show beside it (S, or
+  the notes button), `--` vertical slides, fragments (`<!-- element class="fragment" -->`, `+` lists) stepped through,
+  slide backgrounds (`<!-- slide bg="..." -->`, with text in a tone that reads on them), and the deck's `<style>` kept to
+  the presentation; the frontmatter's separators, `bg`, `theme` and `showNotes` count.
+- Reading view runs plugins over a note's blocks (`reading` in the plugin API): Obsidian plugins' Markdown
+  post-processors now reach a note being read, so Simple Embeds turns a YouTube link into a player there, Banners draws
+  its banner and Supercharged Links marks links; blocks no plugin changed draw as before.
+- Renaming or moving a note updates Markdown links that name it alone (`[a](Note.md)`, Obsidian's shortest path), not
+  only relative ones and wikilinks.
+- An Obsidian vault keeps its look: its base theme (light, dark or system), its theme from `.obsidian/themes/`, the CSS
+  snippets it has on from `.obsidian/snippets/` and its fonts apply until you set them in Vaultite. Nothing is written
+  to `.obsidian/`.
+- Vault plugins load in a vault that is also a code project (a `package.json` saying `"type": "commonjs"` at its top).
+- Notes: click a note's icon beside its title to change it, or the icon of a row you're renaming in the file tree.
+- Archive: folders can be archived whole, from their menu or `vau archive <folder>`, into `.archive/` in the folder
+  above; Archive now sits right above Delete in file and folder menus.
+- Faster everywhere: the server no longer walks the whole vault before each of the app's requests while nothing
+  changed on disk, and a save, or a note an agent edits, re-reads only that file (on a 3,000-file vault, 6 to 20 times
+  less work per request, and an edit on disk 0.1 ms instead of 64).
+- Lighter over the network: an open app asks the server about 6 times less (a change on disk no longer has every window
+  read every setting and live card again), the phone back from sleep reads only what changed meanwhile, its first load
+  comes a quarter smaller, and agents' hooks and `vau` commands answer without waiting on the vault.
+- Big vaults (tens of thousands of notes): the first load no longer reads every note again for token counts, a rename
+  reads only the notes that link to it, and each request's sync no longer asks every file its kind. Typing and opening
+  notes stay fast with a folder of thousands of files open in the file tree (it draws only the rows in sight, and a save
+  no longer redraws it), and the first search no longer reads every JSON file first: plain `.json` data is left out of
+  search, as in Obsidian (canvases, drawings, tables and code are still searched).
+- Browser: switching to a web tab shows its page about three times sooner (25 ms instead of 80), a new tab's page
+  loads in a renderer started ahead, as Chrome does (a third sooner), the app no longer spends a steady few percent of
+  CPU checking whether a menu or toast covers the page, and each request costs Shields less.
+- Terminals: a burst of output (a long listing, a busy agent) reaches the screen 5-10x sooner in a few large pieces
+  instead of thousands of tiny ones, the terminal list (`vau terminal`, the Terminals panel) answers without starting
+  tmux or `ps` again when it just did, and typing no longer lays out the page on every key.
+- An open window that sits idle costs less: a settled graph no longer redraws every frame (its GPU and page work drop to
+  nearly nothing), a hidden window stops the server checking every terminal every 2 s, and the app no longer re-lists
+  its commands for the menu bar or re-places comment cards every second and a half while nothing needs them.
+- The command palette opens drawing a page of rows, more as you scroll: about a quarter of the work it did on a
+  vault with many plugins (every command's row).
+- Typing in a long note (over 32 KB) no longer counts its words and tokens on every key: the status bar updates
+  them when typing pauses.
+- Vault plugins' code is kept by the browser: a reload no longer waits for every plugin's bundle again (about half
+  a second on a vault with twenty of them).
+- Claude Code's usage is counted with less than half the work: right after the server starts (a deploy, the desktop app
+  opening) it no longer stalls the app while it reads weeks of transcripts.
+- `vau profile` samples the running server's CPU for some seconds (no restart) and lists where its time went; the
+  profile is kept for Chrome's DevTools.
+- Plugins: a plugin's row tapped just after installing it opens its own sheet once its code has loaded, not the
+  directory's sheet with Install.
+- Start @name's model and effort chooser stays open while the note changes from outside away from it (an agent's
+  edit, the file changed on disk); typing on or moving off it still closes it.
+- Mac app: Settings, Permissions shows what macOS lets Vaultite do (the vault folder for the app and its terminals,
+  microphone, accessibility, screen recording, folders...), whether the app's signature keeps them across updates, and
+  a way to allow each; `vau permissions` tells agents the same. A terminal macOS keeps from the vault says so.
+- Plugins: a `webPageActions` item with `kind: "save"` goes in a web page's Save menu, any other in its … menu.
+- Connecting Claude or another AI app from Safari works: its sign-in page went on waiting after you typed the code.
+- Connections: an AI app let in by its code that's slow to finish says where it waits (its sign-in page not gone back
+  yet, or the app not finishing), and one that never connects stays a while saying why, instead of a shimmer that
+  vanishes; the server's log and Errors note it too.
+- Phones: holding something for its menu (a tab, a recent file, a property, a block in a note) no longer selects its
+  text or what's around it.
+- Vault plugins: one whose files are put back as they were (its broken edit undone) starts again at once, instead of
+  saying it couldn't start until the page was reloaded.
+
+## 0.6.3 (2026-10-20)
+
+A quieter first run with the Zen bundle, and steadier editing and Review.
+
+- The Zen bundle replaces Agents: sidebars without rails that slide in from the window's edge, no tab bar, panes
+  floating on the window. New in Appearance: Sidebar rails, and Pane titles for a tab bar that's off.
+- Pinned pages can show as tiles: a grid of their icons at the top of the sidebar, named on hover (Pinned settings >
+  Show pinned pages as).
+- New plugin Glance (Navigation, off until turned on): ⌥-click a link, a file in the sidebar or a search result to see
+  it in a wide sheet over the page, live and editable, then Open in tab, Open to the side, or close it.
+- Phones: a page pulled down offers New note, Open a file (straight down) and Close tab; choose its three commands in
+  Settings > Appearance on the phone.
+- An agent that isn't installed (Claude Code, Codex...) says so in a toast instead of the companion staying on
+  starting; its terminal's tip says not installed.
+- New vaults: Start here tries the companion first (@claude in the note), and the Buttons panel is in the left sidebar.
+- Applying Standard sets up what a new vault has: it no longer adds the pages of plugins already on (Activity, People,
+  Agents...); a bundle writes the pages of the plugins it turns on.
+- Bundles: the card of the bundle your setup matches says In use (a new vault's Standard), in place of the last one
+  applied.
+- Settings and Get plugins are quieter: fewer explanation lines under rows, and each plugin in Get plugins is one line
+  of description, its version and date beside its name.
+- Inbox: a result marked done is first under Done, and the agent's event about it is read and opens it in the archive.
+- In the desktop app, a web page in a pane the status bar reaches over stays live: it stops above the bar instead of
+  freezing as a picture of itself.
+- Typing in a note no longer redraws the status bar's items: a keystroke draws less than half of what it did.
+- Back to a page lands exactly where it was scrolled: its blocks come back at the height they had, not rounded up, so
+  the page no longer settles a few pixels as they load.
+- Switching to editing puts the cursor on a line still wholly in sight once the page settles, so the first key no
+  longer scrolls to a line that ended up half hidden.
+- A file written through the API just as something else changed is still told to open windows and plugins: Review
+  no longer misses an AI's edit made right after another change.
+- A file saved just before another write is no longer put down to that write in Activity, so Review still has the
+  text from just before an AI's change instead of saying no earlier version is kept.
+
+## 0.6.2 (2026-10-20)
+
+Apple Health in the iPhone app, and Health starting again in the Mac app.
+
+- Health and other plugins built on Logs start in the Mac app again (it ships no .tsx, which its check wanted).
+- Right-click the Properties header to show every note's properties, hide them or show them as text while editing;
+  the palette has the same, so hidden properties come back from anywhere. Settings calls the third choice As text.
+- The iPhone app reads Apple Health for a plugin that asks (Apple Health's Settings page): its whole history once, then
+  what's new as the Watch syncs, in the background, with the Activity rings (`phoneHealth` in the plugin API).
+
+## 0.6.1 (2026-10-20)
+
+A first run that feels finished: the Mac app installs like one, errors say what happened in plain words, and the palette and font picker open faster.
+
+- The command palette, the quick switcher and the font picker open sooner and keep up with the pointer and the arrow
+  keys: the font picker no longer loads every font before it shows.
+- The app built from source (`npm run app:build`, `app:install`) is Vaultite Main, an app of its own: a release
+  installs beside it instead of over it.
+- The Mac app's icon has the shape and margin of a Mac app's, and its disk image opens to a laid-out window (Vaultite,
+  an arrow, Applications) named just Vaultite.
+- Opened from its disk image, the Mac app offers to move itself to Applications, then reopens from there and ejects the
+  disk image.
+- Set up Vaultite says less: New vault and Open folder without a line under them, and Start with example notes.
+- The plugin directory ends with its list, without a note under it (installing one still says it runs code).
+- In the plugins list, "needs" shows only when what a plugin needs is off, as small as its byline.
+- Companion is on by default: its session starts only when you first @ it or ask it something.
+- A new vault's example notes are Start here, How this vault works (a tour of what a note holds) and the Claude page,
+  not every plugin's page.
+- A vault plugin using the app's CodeMirror starts in a new vault: Obsidian plugins no longer fail with "Class
+  extends value undefined".
+- Errors say what failed in plain words, never a program's text: a plugin that can't start says so with Turn off, and
+  the exact error waits behind Details (Copy details, the Errors page).
+
+## 0.6.0 (2026-10-19)
+
+Conflicts show in place, menus filter as you type, sidebars are yours to arrange, and vaults in iCloud Drive stay readable.
+
+- What you type is kept on the device a moment after you stop, not only as it saves: a window closed right after
+  typing, with the server out of reach, offers those edits back the next time instead of losing them.
+- Review leaves out the dates the app keeps in a note (its `updated`, moved by any edit): an AI's change shows and
+  counts only its own lines.
+- A vault plugin that changed after you allowed it says it's paused, once, in the inbox as waiting on you, naming the
+  jobs that won't run until you allow it again; `vau schedule list` shows them as paused.
+- The Agents bundle turns on Muse, and the web demo shows its page with sample data.
+- **Menus filter as you type**: type while any menu is open and only the matching rows stay, those in its submenus
+  too (Panels ▸ More ▸ a panel), the best one ready for Enter; a long list (More) says so at the top. The Panels menu
+  shows each panel's icon beside its check.
+- **Customize sidebars**: a sheet with both sidebars side by side and the hidden panels below, to drag panels between
+  them or move one from its menu, with a filter and Restore defaults. Open it from Panels ▸ Customize sidebars…,
+  Settings > Appearance > Sidebars, or the palette.
+- **Today's note in the sidebar**: a Daily note panel (the sidebar's right-click menu, Panels) edits the day's note in
+  place beside whatever is open, as a scratchpad; its heading steps to other days and back to today, and a day without
+  a note is started from the template only when you ask. With the sidebar folded, its icon in the rail opens it
+  beside the rail to type in at once. It also opens as a tab, to keep in a split.
+- **A day's plan on a dashboard**: ```` ```block-day ```` draws a daily note, or one section of it (`section: Plan`), to
+  check off and edit in place; it steps to tomorrow and back, opens the note, and starts a missing one from the
+  template. "Open tomorrow's daily note" joins today's in the palette.
+- **Vaults in iCloud Drive stay readable**: a note or setting iCloud moved to the cloud to save space (Optimize Mac
+  Storage), or that another device just changed, is brought down and read instead of showing as missing or empty, and
+  the server keeps the vault folder downloaded on its Mac (Finder's Keep Downloaded, which turns it off again). The
+  server no longer stalls at start on a file iCloud is slow to give while it updates the vault's notes.
+- A dashboard card of a ```tasks, ```dataview or ```base fence goes full width or under the one before without its
+  query being erased: it's written after the fence's language (```tasks wide), and bases' `wide: true` moves there once.
+- **Note dates**: a note made in the app, by you or an agent, gets `created` and `updated` in its properties (your local
+  time, shown as dates), and `updated` moves when its text is edited in the app, in the same save. Notes you already
+  have are left as they are; the property names are its settings, and it can be turned off.
+- **Conflicts shown in place**: when a note changes elsewhere in the lines you're typing, both versions appear right
+  there, named ("Claude Code edited line 6 while you typed"), each with Keep, plus Keep both; the rest merges, both
+  sides are kept in File history, and each choice can be undone. A save whose answer was lost (a phone going to sleep)
+  no longer conflicts with itself, and starting a companion on a note no longer reads as an AI changing it.
+- **Pick a model before starting @name**: the Start @name row's chip (Sonnet · medium) opens its model and effort
+  choices with a tap or click, on a phone too, now up to extra high and max; the row itself still starts at once. A
+  stopped agent's Start runs it as it ran before.
+- A companion whose session was stopped or ended no longer leaves its cursor behind, following you from note to note:
+  it goes until its session runs again.
+- A file's header row stays one tidy row on phones: Review is a short chip (who changed it in its tip), the folder
+  keeps its name and nothing runs off the edge.
+- **Times in your local time**: notes' and inbox items' `created` and `updated` are written in your time, not UTC
+  (existing ones are converted once), so an evening's item no longer reads as tomorrow.
+- **Approvals wait for you**: an app's request for your yes stays in the Inbox until you answer, however long, and
+  survives a restart.
+- `vau plugins check` names a schedule's op parameter it doesn't take, instead of the job failing when it's due.
+- Report screenshots are named for their day and report, so two agents' `after.png` no longer collide.
+- A person's profile card stays first when a timeline or a fact is added to a profile that had only the card.
+- **Move the mini player**: drag it to any corner of the window, like picture in picture; it stays there, keeps clear
+  of the right sidebar and the pane's back and forward, and its video no longer shows controls it can't use.
+- Electron 44.9 and patch updates.
+- **Links to archived files keep working**: a link to a file's old place (a recap, a report written before it was
+  archived) still opens it, and the file's next move rewrites it; recaps link files where they are now.
+- Fixes: a save both sides made alike no longer stalls unsaved; a plugin's page no longer crashes while it updates;
+  a menu filter with no match keeps taking keys; an iCloud copy of a daily note that can't merge no longer blocks the
+  day; undoing a Keep no longer drops what you typed since.
+- Moving or archiving a drawing (`.excalidraw`) or any file with a long extension no longer doubles it.
+- **One copy name**: imported attachments and trashed files that share a name get " 1", " 2"..., as new files do.
+- **Sample folders** (Settings > Files): folders of examples, not your data. Their notes are no one's people, books or
+  logs, and tasks, Dataview and database views made outside them leave them out.
+- **No more duplicate daily notes**: a day's note iCloud is still bringing from another Mac isn't made a second time,
+  and iCloud's copy of one ("2026-10-08 2") with nothing of its own merges into it and is archived when it's opened.
+- **Companion cursor menu**: right-click an agent's cursor (or … in its box) to show its session, switch the mode,
+  start a fresh session or stop it. A session that ends, however it ends, takes its cursor with it.
+- **Faster diagrams**: Mermaid diagrams are drawn by Pele, a fraction of the download and time; they follow light,
+  dark and the colour scheme as they change, fit narrow panes and zoom when they don't fit.
+- **Birthdays** in People: a person's `birthday` (YYYY-MM-DD, or MM-DD) shows on their profile with their age, and the
+  `people-birthdays` block lists the next ones, red under a week away and orange under a month.
+- **Closing tabs one after another**, as browsers do: tabs closed with the mouse keep their width, so the next
+  tab's X comes under the pointer; they fill the bar again once the pointer leaves it.
+- **More default hotkeys**, as Google Docs and Finder have them: ⌘⇧X strikethrough, ⌘⇧H highlight, ⌘⇧C code, ⌘⌥1–6
+  headings (⌘⌥0 none), ⌘⇧7 / 8 / 9 numbered, bullet and task lists, ⌘⇧V paste as plain text, ⌥↑ / ⌥↓ move a line;
+  ⌘[ / ⌘] back and forward, ⌘⌥W close other tabs, ⌘, Settings (in the browser too), ⌘⇧D today's daily note, `?` the
+  hotkeys; on a file tree row F2 renames, ⌘D duplicates and ⌘⌫ deletes; on a canvas ⇧1 / ⇧2 / ⇧0 fit, fit the
+  selection and 100% (rebindable now). A note's keys (⌘D, ⌘B...) no longer change it while the keyboard is elsewhere.
+- Agents' faces overlap as in a shared doc and fit the Conversations panel, the rest behind +N.
+- Plugins' commands find `node` and `vau` when the server runs under launchd.
+- Plugins installed by an older version no longer read as edited when an update is offered.
+- A single plugin waiting for your yes gets its own Review button on Plugins.
+- Applying a bundle turns off the CSS snippets another bundle brought (Life OS's serif titles); your own stay on.
+
+## 0.5.0 (2026-10-17)
+
+A companion agent writes beside you, AI apps draw the vault as cards, and the app is simpler to set up.
+
+- **Companion**: an always-on Claude Code or Codex agent with its own cursor in your notes and drawings; write `@claude`
+  in any line and it answers (starting if it isn't running), comments, suggests changes or types with you.
+- **The vault in claude.ai and ChatGPT**: their chats draw live cards for notes, tasks and boards, and Claude's
+  artifacts and ChatGPT's Intelligent UI saved to the vault run as they did there.
+- **Review AI changes**: what AI apps and agents changed, file by file, with Keep and Revert.
+- **Simpler to set up**: most of the app is always on, Settings works like System Settings, three bundles you can share
+  as a link, and Vaultite's own plugins (Books, Today, Health, Muse, the coding agents...) install from its directory.
+- **Editing as in Obsidian**: tables cell by cell, Bases that save what you change, coloured highlights, graph filters
+  and shortcodes.
+- **Watch and listen anywhere**: a player that keeps going across the app and your devices, a Queue, Podcasts, and
+  offline media on the iPhone.
+
+### Changes
+
+- **Companion** (a new plugin, off until turned on): an always-on Claude Code or Codex session with its own cursor.
+  `@claude` anywhere in a line (or ⌘⇧K) asks it, sent at Enter or when you pause; it answers in a bubble, comments on a
+  line, suggests changes you take with Tab, or types with you (modes: quiet, notice, pair). Its comments and
+  suggestions are threads in the Conversations panel (margin cards instead is a setting), kept beside the note so they
+  survive a restart and reach your other devices. Its edits are its own in Activity, Review and version history, and a
+  long session hands over to a fresh one with a summary and its open threads.
+- ==Highlights== and %%comments%% run over a paragraph's soft line breaks, as Obsidian's do; a mark on a selection over
+  several blocks wraps each block. A companion's cursor for a file scrolled out of the file list stays at the list's edge.
+- More companions join by name (`vau companion start --as Ada`, or Start @name in the @ picker, with a model and
+  effort), each in its own colour; `@ada` asks only that one. Hover a cursor for what it's doing, click it for its last
+  words, drag it onto text to say "look at this"; a note's top bar shows who's here. In an Excalidraw drawing each is a
+  collaborator that draws with you (`vau companion draw`). `vau companion timings` shows how fast each answered.
+- **MCP Apps**: claude.ai and ChatGPT draw cards for the vault's tools: a note read shows the note with Open in
+  Vaultite, a task list ticks in place, a Kanban board moves its cards. The same cards draw in a note with a
+  `block-mcp-app`.
+- **Artifacts and live answers**: artifacts made in Claude run as saved `.html` files (their saved data, asking Claude,
+  saving themselves and downloads work as on claude.ai); ChatGPT's Intelligent UI saved to a note is a ```genui fence
+  drawn live with the app's controls, its script sandboxed and the values you pick kept in the note.
+- **Review AI changes**: what AI apps and coding agents changed that you haven't looked at, file by file like a pull
+  request, with Keep and Revert (both undoable); a count in the status bar and "Claude changed this · Review" in a
+  changed file's header lead there.
+- Connections lists each AI app once, and a connected one opens its own page: what it read and changed lately, read
+  only or read and write (enforced by the server), its name and Disconnect. "Another app" sets up any MCP client.
+- **Agent blocks are one set**: `agent-limits`, `agent-sessions`, `agent-usage`, `agent-projects`, `agent-models` and
+  `agent-project` take `agent:` in place of each agent's own copies (`claude-usage`, `codex-sessions`...).
+- Machines browse an agent machine's files, cloud agents' too through a read-only file agent (enrollment codes,
+  revocable access): Markdown with its properties, JSON as a tree, transcripts as a conversation.
+- Activity keeps the calls an agent, the CLI or a script got wrong, and why (`vau activity --action failed`), and says
+  what a plugin's operation did (`did`); `vau` names the command a stray word belongs to (`vau errors 3f9a` → `vau
+  errors show 3f9a`).
+
+- **Fewer plugins to manage**: 41 of the app's parts (files, search, the graph, the inbox, slides, canvas, terminal and
+  more) are always on and no longer listed; the coding agents are one row, Coding agents, with a switch for each;
+  Activity, Token count and Workspaces are off until turned on (a vault that had them on keeps them), as are random
+  note, unique note and note composer; Vim is Settings, Editor, Vim keys.
+- **Moved to Vaultite's plugins**: Books, Today, Health, Learning, Projects, Lessons, Podcasts, App windows, Dock icon,
+  Page tabs, Muse, Dispatch and the coding agents but Claude Code and Codex (Cursor, Grok Bot, OpenCode, OpenClaw,
+  Hermes). A vault that had one on installs it once with its settings, asking once to allow them; Life OS and Agents
+  install theirs. New there: Muse's dashboard (its runs, what it learned, its dreams and feed), and Grok Bot apart from
+  Cursor.
+- **Daily notes are their own plugin**, on from the start as in Obsidian (`vau daily`, the op `daily-note.open`, was
+  `today.daily`); Today keeps routines, ticked in the daily notes (`routine.check`; `POST /api/checks` is gone).
+- **Plugins page**: one Filter menu (status, source, category, with counts and chips), plugins that are on first, and a
+  search that also lists the directory's plugins you don't have. Get plugins has the same menu (sorted by Top, New or
+  Updated), its rows open a sheet with the plugin's readme and Install, and Vaultite's own carry a verified mark.
+  Installing turns a plugin on (one not Vaultite's asks first); a vault plugin's sheet has Uninstall. Plugin updates
+  moved to Settings > General.
+- An update that says it does more beyond the vault waits for you to allow it; another machine runs an update only from
+  the source it allowed. Who may reach your terminal and MCP is this Mac's, set only by its owner, and a plugin whose
+  required plugin is off is off too.
+- **Settings works like System Settings**: a list of sections beside the page (a sheet on a phone), the search atop the
+  list and its results in its place, Your setup heading it; Plugins and AI apps are sections like the others.
+- **Every on/off setting is a switch everywhere**, named as Settings names it: the palette (Enter flips it), menus and
+  the menu bar with a check, Settings' search. What isn't a setting says what it does (Show / Hide left sidebar, Pin /
+  Unpin tab); "Turn on" is only for plugins.
+- **Three bundles**: Standard, Life OS and Agents, on a Bundles page of its own (Your setup, "Choose a bundle…"). Share
+  one as a file, a prompt for an agent or a link (`vaultite.com/b/<owner>/<name>` runs it live in the web demo, and Open
+  in Vaultite opens it in the Mac and iPhone apps). Import shows what it would change first and takes JSON, a file or a
+  GitHub repository. Bundles carry the new tab and the plugins you installed, and can bring their own fonts: Life OS
+  titles its notes and pages in Instrument Serif (a CSS snippet sets `--font-heading` and loads a font beside it).
+- **Plugin API 4**: a plugin offers modules to plugins that require it (manifest `exports`, imported as
+  `@plugins/<id>/<module>`, was `@plugins/core/<id>/...`); coding agent plugins get `@vaultite/core/agents.ts`; a vault
+  plugin may join a Plugins page group (`group`), keep settings files of its own (`<name>.json`), say it works only in
+  the desktop app (`desktopApp`) and write under a page's title in `/api/render` (`page-head`).
+- Quitting the app stops what vault plugins run first, and the first start after an update no longer bundles every
+  vault plugin again.
+
+- **Plugins' pages are your files**: turning a plugin on writes its pages once into your pages folder (Dashboards/ by
+  default), pinned, and never touches them again; the read-only copies in `.vaultite/pages` are gone (`vau dashboard
+  restore` writes back one you deleted). The Design page is `vau docs design`.
+- **The file is the page**: no subtitles (`vau dashboard new` drops `--subtitle`) and no kind above the title; a
+  dashboard's title is a note's, editable, with the file's `icon` before it. People and People map, Activity, Days and
+  Performance, Agents and each agent's page are pages of their own.
+- **A kind's blocks are written**: a new person, project, book or log gets its blocks' fences atop its file, and only
+  what a file has a fence of is drawn. Links find a file by its name and `aliases`, no longer by `title:` or `name:`.
+  `vau migrate --apply` updates older files; `vau blocks tidy` is gone.
+- **A dashboard edits as it reads**: ⌘E keeps its grid, with the text between blocks typed in place. Each card's bar
+  drags it, sets its width, edits its options or removes it; Add a block puts one in. A dashboard of only text reads in
+  a note's column, and a block's Edit source shows its Markdown where the block was.
+- **Tables edited cell by cell**, as in Obsidian: Tab, Enter and the arrows move between cells; grips select, sort,
+  move and delete a row or column; cells copy to and paste from a spreadsheet. Tables are a ruled grid everywhere.
+- **Bases save what you change**, as Obsidian does: sort, rename, summarize, hide, move and resize columns, and the
+  Sort, Filter and Properties menus, written to the `.base` or the fence. Database views are only Obsidian's now
+  (```` ```base ```` fences, `.base` files); `block-query` is gone.
+- **Graph view settings, as Obsidian's**: a search that filters the graph (`type:person`, `tag:#work`, also in search),
+  tags and attachments as dots, colour groups, links coloured by property, arrows, and sliders for sizes and forces.
+- **Shortcodes** (a new plugin, on from the start): type `:` and a name for an emoji or one of the app's icons
+  (`:fire:`, or `:LiCalendar:` as Obsidian's Iconize writes them).
+- Highlights take Obsidian's six colours (`==🟢text==`), picked after `==`, from a swatch or Format ▸ Highlight.
+- ```chart fences draw bar, line, area, pie and scatter charts, and code outside the editor is coloured like the
+  editor's.
+- Checkboxes tick in callouts, `<details>`, embeds and dashboards, and are rounded squares. Find (⌘F, Vim's /) lights
+  matches in tables, callouts and folded details and works on dashboards. A callout you're editing shows its `[!type]`
+  as typed, and Clear formatting takes out the marks live preview hides.
+
+- **Pin anything**: web pages (with their icon and title), plugin pages, folders (opening in place), images, PDFs and
+  Claude Code conversations (resumed once ended); `vau pin <address>`.
+- A file's menu is the same wherever it's right-clicked or held (a tab, an embed, a canvas card, a recent file), with
+  plugins' items in each; a tab's menu is shorter, its file's actions in a submenu. Sidebar rows and panel headings have
+  a … for their menu, and a row's menu shows only that row's actions. A file's top bar items drag along the bar or into
+  a sidebar.
+- The palette, the quick switcher and the pickers find words in any order, and Enter right after typing takes the first
+  match.
+- **Themes reach everything**: Change colour scheme previews the whole app as you move; terminals, the graph, maps,
+  diagrams, HTML pages and Claude Code follow it. A new tab can show a dashboard of your own (`vau newtab page`).
+- The file tree reveals the open file (off in Settings, Files). The status bar stops short of the left sidebar, with a
+  tray its items drag into. Toasts stay at 3 lines (4 on phones), and rows' buttons line up down a list.
+- Loading shimmers only once it takes a moment, lists draw skeleton rows, and the sidebars and status bar hold still
+  while the app loads. Notes start loading when the pointer rests on a link, and typing is lighter. `vau perf` shows
+  what you waited for, part by part.
+- **Quick Look for Markdown** in Finder, even with the app closed. Vaultite can be the default Markdown app, and
+  `vaultite://command/<id>` and `vaultite://open/<path>` run a command or open a file from Shortcuts, Raycast or a link.
+- **Pinch to resize text** is a setting, off by default (Settings > Appearance).
+- **Watch and listen anywhere**: audio and video keep playing as you move around, in a mini player and on the lock
+  screen, and pick up where you stopped on any device, with skips, speed, captions, picture in picture and a transcript
+  that follows along. **Queue** gathers what the inbox holds to watch, listen to and read; **Podcasts** puts each new
+  episode in the inbox. On the iPhone, media downloads to play offline and e-books turn pages on a tap.
+- On the watch, a voice note says Got it at once, can pause or be discarded and stops on silence; one handed to an agent
+  says "Sent to Claude".
+- The web demo builds Vaultite's own plugins in, imports bundles from GitHub, shows the Agents bundle's made-up
+  sessions, and loads with an ad blocker on.
+
+- Terminals: links open in the Web viewer (⌘-click: the browser); exiting the shell left after an agent closes its tab;
+  `vau terminal send` arrives whole, without a stray `201~`; on a Mac the keeper lets go of ended shells'
+  pseudo-terminals (a keeper running for days used them all up), and ending a terminal ends an agent sitting on the
+  hangup.
+- Vim on Linux and Windows: in normal mode the app's Ctrl shortcuts (palette, quick switcher, reading) win over Vim's,
+  as in Obsidian; Vim keeps its own (Ctrl+W, D, U, F, B, V, R, A, X).
+- Fixes: swiping through slides on a touch screen no longer takes the browser back a page; web pages in a pop-out window
+  stay there; a tooltip over a web page shows above it; Errors and Activity keep updating after you come back; an edit
+  in a JSON view stays on its field; allowed Activity writes the recaps it was refused.
+
+## 0.4.0 (2026-10-10)
+
+Every AI app connects, from a new vault's first minute.
+
+- **Connections from the start**: a new vault offers Claude, ChatGPT, Muse and Grok Bot; Grok Bot connects too.
+- **Plugins update on their own**, and Claude's plan limits are read live.
+- **Fixes from a new user's first hour**: suggestions land after the link, recent files are yours, terminals run the
+  app's own vau, and the playground has one name.
+
+- **Recent files are yours**: a blank tab's Recently changed and Recently opened, the quick switcher and Open Recent
+  leave out the plugins' built-in pages (Agents, Errors, a bundle's dashboards); a copy of one in your vault still shows.
+- **The playground, by one name**: the vault menu, the Help menu and the made-up vault itself call it the playground,
+  and Manage vaults offers it too.
+- **Terminals run the app's own vau**: it comes first on PATH once your shell's startup files have run, so another
+  vau installed elsewhere (Homebrew's, an older one) no longer runs instead.
+- **Suggestions land after the link**: picking a `[[link`, `![[embed`, `[[Note#heading` or slash menu item with Enter,
+  Tab or a click puts the cursor after it (past the `]]`, so typing on no longer goes inside the link), and Escape
+  closes the list for good while you keep typing there (Ctrl-Space brings it back).
+- **A new vault has Connections**: Minimal keeps the MCP plugin on, so Settings > Setup and a blank tab offer Claude,
+  ChatGPT, Muse and Grok Bot from the start (nothing is on the internet until you sign in to Vaultite Cloud).
+- **Grok Bot connects**: desktop apps sign in through their own localhost address, and a connection takes the name of
+  the app whose sheet you typed its code in (Grok Bot signs in as Cursor).
+
+- **Claude's plan limits, asked live**: each account's are asked of Claude Code as /usage does (every two minutes, or
+  now with the refresh button), no open session needed; a status line no longer shows one account's limits as another's.
+- **Plugins update on their own**: Vaultite's installed plugins update by themselves every hour (Plugins page: Vaultite's,
+  all or none; each plugin's page can say otherwise), one notification says what's new, and every machine that allowed a
+  plugin runs the new version once it matches its source. Each plugin's page lists its updates with what each brought,
+  and can roll back the last one; the day's recap lists them too (`vau plugin history`, `vau plugin rollback`).
+
+## 0.3.0 (2026-10-10)
+
+Your AI apps up front, and your Mac's Vaultite from anywhere.
+
+- **Connections**: Claude, ChatGPT, Muse and Grok Bot on one page, from Settings or a blank tab, each set up in one sheet.
+- **From anywhere**: the phone and any browser reach your Mac's Vaultite at your vaultite.app address while it's on.
+- **Plugins**: their pages built in, a yes before they write on their own, and installs from a zip.
+
+- **Connections leads with your AI apps**: Claude, ChatGPT, Muse and Grok Bot as cards that say whether each is
+  connected, each opening its steps in a sheet (signing in to Vaultite Cloud first when there's no address yet), with
+  the account and addresses last. It's first in Settings > Setup and on a blank tab until an app is connected; what an
+  app writes is named as it signed in.
+- **Open your Mac's Vaultite from anywhere**: signed in to Vaultite Cloud, the phone and any browser reach the whole app
+  at `https://<handle>.vaultite.app` while the Mac is on, after signing in with the Vaultite account; terminals and
+  coding agents stay off there unless turned on in Connections.
+- **Every sidebar panel opens in a tab**: Buttons now has a tab (drag its heading onto a pane, or Open in a tab), and
+  `npm run check` flags a plugin's panel that has none (a warning for vault plugins).
+- **Terminal rows have a menu**: right-click (or hold) a session in the Terminals panel or tab to copy its agent's
+  session ID or its terminal ID, open the agent's conversation, or end it; `vau terminal list` shows the session ID too.
+- **A plugin from a zip**: `vau plugin install "https://…/x.zip#sha256=<hex>"` installs a plugin downloaded from an
+  https address, checked against its hash, for plugins that aren't in a repository.
+- **A busy day in a calendar stays small**: a query's month shows a day's first three files and "N more" to open the
+  rest. The sandbox's files were edited over the weeks before, not all just now, and one made before (desktop, the
+  web demo's saved copy) is made again.
+- **Web demo opens on a bundle**: `?bundle=<id>` starts it on that bundle, and the page around it (vaultite.com's
+  picker) switches bundles live; what needs a machine stays off whichever is applied.
+- **Lines between sidebar panels**: Settings > Appearance (or the palette's Toggle lines between sidebar panels) draws
+  a line between the sidebars' panels; off by default.
+- **Properties start folded**: in reading and editing, a note's Properties are one line until you open them; a file
+  whose Properties you open keeps them open on that device.
+- **Plugins' pages are built in**: they live in `.vaultite/pages`, update with their plugin, and never land among your
+  files; Copy to my vault (the page's bar, its menu) makes one yours to change, its pins and links following. A vault
+  with unchanged copies from before is asked once whether to use the built-in ones. A new vault's Start here note and
+  its AGENTS.md and CLAUDE.md lines come only when you tick "Start with example pages".
+- **Plugins ask before writing on their own**: what a plugin writes outside `.vaultite/` by itself (Activity's day
+  recaps, Agent files' pointer lines) needs your yes once ("Activity wants to write a recap of each day into
+  Recaps/"), kept in its settings under Writes on its own; anything else is refused and logged. What you or your agents
+  ask for never asks.
+
+## 0.2.0 (2026-10-09)
+
+The first public release: the source on GitHub, signed and notarized Mac builds, Linux's AppImage and .deb, and a
+nightly. Plugin API 3.
+
+- **Agents**: Claude Code and others in the app's terminals, their state and usage at a glance; a note dispatched to
+  an agent on any of your machines.
+- **From another Markdown app**: an Obsidian vault opens as it is, with its settings, themes and many of its plugins.
+- **Apps**: an iPhone app, the desktop app on Linux, day recaps, lessons, and Vaultite Nightly beside Vaultite.
+- **Files**: no size limits, and the app writes only what you changed.
+
+### Agents
+- **Agents see everything, a page at a time**: read, render, query, search and list take `offset` and `limit`, and
+  every cut answer says so and gives the next offset (a long query cell ends in "…"). `edit_file` (`vau edit`) changes
+  just the text it names; writing a page back whole is refused, so a long file's end can't be dropped.
+- **Coding agents' usage over any range**: a usage block's `days` goes past 30, as far back as the tool's data.
+- **Writing plugins from ChatGPT or claude.ai**: an app on the internet writes a vault plugin's code without asking each
+  time; it runs only once you allow it, and that request says what it discloses and which files changed.
+- **Secrets from any device**: `vau secret "<what>"` asks for a password or a key file in a hidden field on whatever
+  device you're on (the phone too, through another machine), and hands it only to the command it's piped into.
+- **Shorter dispatch in a file's menu**: with one action it reads "Dispatch" (and where it runs), like the menu's other
+  verbs; several still name theirs.
+- **Context ring on 1M sessions**: a Claude Code session with a 1M context no longer shows red near 200k when its status
+  line writes to `~/.claude` under another account.
+- **A default place per workspace**: pick the machine and account new terminals, agents (Open Claude Code, ⌘J) and
+  dispatches open at there (right-click the dispatch button, Default in <workspace>, or "Choose where new terminals and
+  agents open"); the button shows where, and a machine that's away gives way to this one. ⌃` opens a terminal here.
+  ⌘⇧↩ works again with a single account.
+- **No double dispatch**: while a note's session runs, its dispatch button wears a dot and dispatching it again opens
+  that session; "Dispatch again" starts another.
+- **Terminals panel**: a session from another workspace shows that workspace's name before its context ring, so every
+  ring lines up at the row's edge.
+- **Claude Code on the web in the Terminals panel**: the desktop app lists your claude.ai/code sessions under Cloud
+  (working, waiting on you or idle, and since when; a click opens one in a web tab), read with the Web viewer's
+  claude.ai login once you've opened claude.ai in it since the app started, never on launch alone (every 5 seconds
+  while one works or waits, else 15; the tab needn't stay open). A session finishing or needing you is in the Inbox
+  again.
+- **Terminals show their agent's state**, as Claude Code's agent view does: an agent's icon keeps its colour while it
+  works, turns yellow with a dot while it waits on you, and grey once idle; the Terminals panel lists the waiting ones
+  first, then working, idle and plain shells, and holds still while the pointer is over it. Another machine's terminal
+  has its name on its icon ("Studio"); "detached" is in its tooltip, not on its row. The tooltip shows in the open
+  sidebar too, with the account it runs in when its agent has several.
+- **Agent meters** (a plugin, off until turned on): a Claude Code terminal's context used, as a ring that fills up, a
+  percent or tokens beside its name, and its prompt cache's time left while idle: its icon keeps its colour only as far
+  as the cache lasts, draining from the top, or an inner ring.
+- **Dispatch in the background**: dispatching a note no longer opens the agent's terminal; a toast offers "Open
+  session" (option-click the button to watch it), and its report comes to your inbox. `open` on an action changes it.
+- **A report is a thread**: replying to an agent's report and its next report stay in the same file, back in your
+  inbox, so a whole exchange reads as one conversation. Its `updated` property says when its latest report came, and the
+  inbox sorts by it. Each dispatch action has an "Open its terminal" switch in its settings.
+- **`vau open` a web address**: `vau open https://...` (and a notification's button) opens it in a web tab, not a
+  missing file.
+- **Dispatch to another machine or account**: a note goes to Claude Code on another of your Machines (your laptop,
+  from the phone) or in another of its accounts: right-click or hold the header button (each account on each machine,
+  the button's own checked), the file menu's submenu, the palette's "Dispatch to Claude Code (Personal) on ...", or
+  `vau dispatch <file> --machine <id> --account <id>`. The button names the account it uses. Its terminal opens in your window, and replying to its report resumes it there.
+  Only machines with this vault are offered (each says its vault's id); one with a vault of its own is refused.
+- **Reports you read at a glance**: an agent's report says in its title what kind of work it was and where it stands
+  ("Feature done · ...", "Fix needs you · ...", "Research stuck · ..."), and every result an agent leaves in the
+  inbox (`vau inbox report`, `inbox_add`) starts with a short plain-language "In short" box, which is also what the
+  push says.
+- **Quieter inbox**: an agent's turn ending ("Claude Code finished") no longer toasts or pushes, since it may still be
+  working; its report says when the work is done. Waiting for you and permission asks still notify; the Inbox's
+  setting "Agents' finished turns" brings them back.
+- **A file's actions**: operations say which kind of file they act on (a person's timeline, a book's progress, ticking a
+  routine), so they show in that file's menus, in the palette (⌘. lists everything a plugin can do with the open file,
+  asking for what's missing), in `vau actions <file>` and MCP's `actions`; vault plugins' ops can say it too (`action`).
+- **Agents ask you to pick**: `vau choose` (MCP's `choose`) shows a list in your window's palette, searchable like the
+  quick switcher, on the Mac, in a browser or on the phone, and gives the agent what you picked; lines piped in work
+  like dmenu (`ls Notes | vau choose --prompt "Which one?"`), with `--other` for something typed that isn't listed.
+- **Reports you answer from the inbox**: an agent handed a task to do alone (a voice note's front door) sees it through
+  and ends with `vau inbox report`, a result with what it did, its open questions and screenshots. Its reply box sends
+  your answer back into that session (its terminal, or the session resumed), keeps it in the report with when and its lines, and marks it done:
+  it shows at once as sending, and the report stays open (into the archive). A report's header says when it came. A reply sent from another machine's app
+  goes through the app on the machine the session runs on; Open session opens it there. What you type in the box is
+  kept on the device until it's sent, so a failed send or a redrawn report doesn't lose it. A voice note reaches its agent whole (it starts
+  with it, rather than having it typed in as it opens; its file's path set apart from what was said). The agent names the note for what it's about and archives it when it's
+  done (`vau inbox done`, which also names a result anew), and a reply that resumes an ended session is its first message.
+  A dispatched agent is told to end with a report too, and its terminal ends (tab and all) when the turn that reported
+  does, so nothing is left to close by hand. A reply resumes the session while its prompt cache lasts (Claude Code: an
+  hour or five minutes after its last response, read from its transcript); later it starts a new session told to read
+  the report, rather than send the whole old conversation again. The reply box says which, and offers the other.
+- **Operations are the API**: everything an agent, script or plugin can do is one operation, served as
+  `POST /api/ops/<id>`, `vau <id>`, MCP and the docs (`vau ops`, `vau docs api`).
+- **Agent skills**: `skills/` has two, the vault's rules and how to write a vault plugin, for any agent and for a vault
+  without the app: `npx skills add Vaultite/vaultite`, or in Claude Code `/plugin marketplace add Vaultite/vaultite`.
+- **MCP server**: `vau mcp` (stdio) or `POST /api/mcp`. It has tools to search, read, render, query, write notes and
+  logs, clip, remember a fact, open a file, see today, the calendar and routines, tick a routine, edit a file, follow
+  links and history; `ops`/`call` run any operation, and `events_wait` waits for an event.
+- **Your vault in Claude, ChatGPT, Grok Bot and Muse**: MCP on a public address (behind a tunnel) that claude.ai adds as a
+  custom connector, ChatGPT as a custom MCP server plugin, and Grok Bot and Muse when asked in a chat. Connections has
+  Set up Claude, ChatGPT, Grok Bot and Muse, each a sheet of a few short steps with the address one click away and the
+  field for the code that signing in shows (the app then shows under Connected, shimmering, till it finishes signing
+  in), where you also disconnect an app.
+- **Photos from ChatGPT and Claude go in the vault**: `upload_file` (`vau upload`) saves a photo or file into
+  Attachments/ and embeds it in a note or log. ChatGPT hands over the chat's photo; claude.ai's code sandbox PUTs it to
+  a one-time link (allow your vault's address in its network settings). Inbox notes an AI app sends are labelled AI, and a log another AI corrects by its id stays one log.
+- `vau command` and `ui.command` say when the command couldn't run in your window (it needs a note open there) instead
+  of answering "Sent"; `vau commands` lists the window's palette commands and which can run now.
+- **`vau` alone in a terminal is a prompt**: Tab completes commands, flags and values (choices, the vault's paths, command
+  ids), with history. On any command `--copy` also puts the output on the clipboard, `--count` and `--paths` print how
+  many a list holds or its files one a line, and `-` as a value reads stdin (a note's body is read when piped in).
+  Errors exit non-zero on stderr, and `vau ... | head` or a stdin left open no longer breaks or hangs it.
+- **Dev tools for agents testing the app**: `vau dev screenshot|dom|console|eval` look at your open window (a
+  screenshot in the desktop app, its HTML, its console, JS run in it); only you on the Mac, never an app on the internet.
+- ChatGPT and Claude can hand a note to Claude Code on your Mac (`dispatch.run`), each time after your yes on the phone.
+  They get every tool, `ops` and `call` too, except terminals and the screen; what can run code on your Mac (a plugin
+  turned on, settings, bundles, a palette command) waits for your Approve on the phone or in the Inbox.
+- **Vaultite Cloud**: sign in at cloud.vaultite.com/connect, type its code in Connections (or `vau cloud sign-in <code>`),
+  and your vault's MCP server answers at `https://<you>.vaultite.app/mcp`, with no tunnel of your own: this Mac keeps
+  the connection.
+- **Events**: `vau events`, `GET /api/events/stream` and `events.wait` report file changes, writes, inbox events and
+  plugins' own events, so one agent can wait for another.
+- **Inbox**: when an agent finishes or needs you, you get a toast, a Mac notification and a badge. Results to read
+  later go in `Inbox/` (`vau notify`, `vau inbox`); Done moves one into `Inbox/.archive/`, out of the way. It shows only what needs
+  you: read events leave the panel and the block, and fold under Read on the Inbox page (the setting Show read events
+  brings back the last day's, greyed). Sessions on
+  claude.ai/code and notifications from web pages arrive here too. One inbox on all your machines: every app (the Mac
+  app with its own server, the iPhone, a browser) shows each machine's events (Machines), live, and reading or
+  dismissing one anywhere does it on the machine that keeps it.
+- **Which app**: an agent in a terminal knows whether you opened it in the Mac app, the iPhone app or a browser
+  (`VAULTITE_CLIENT`: `desktop`, `iphone` or `web`).
+- **The vault's rules are `.vaultite/AGENTS.md`**, short: the app's rules, a line from each plugin that's on, and your
+  own rules under their heading at the end, which the app keeps when it rewrites the rest; formats are read on demand
+  with `vau docs <topic>`. The Agent files plugin writes it: turned off, the app stops and takes its part out. The app
+  no longer writes the vault's AGENTS.md or CLAUDE.md; Agent files can add a one-line pointer to them, and vaults set
+  up by older versions are moved over once.
+- What every agent is told up front comes from the plugins that are on (a line each in their manifest), the same in
+  the rules, MCP's instructions (`vau mcp.instructions`) and a terminal agent's context: no fixed list naming folders
+  or files that may not be there.
+- The prompt a voice note hands the front-door agent is an Inbox setting (Voice note prompt).
+- **`vau` drives the app**: `vau terminal open|resume|screen|send|end|tidy`, `vau workspace close`, `vau panels`,
+  `vau pin`, `vau context`.
+- **Coding agents**: Codex, OpenCode and Cursor plugins sit beside Claude Code, with plan limits, live sessions, usage
+  by project and model, and conversations. Claude Code supports several accounts (one can be private). Everything is on
+  one Agents page. New herdr plugin.
+- **OpenClaw**: a plugin for OpenClaw, the personal AI agent: its sessions running now, usage by day, folder and model,
+  each conversation, its agents' memory and its scheduled jobs, read from its own files on the machine the server runs
+  on; `vau openclaw connect` gives it the vault's tools.
+- **Hermes**: a plugin for Nous Research's Hermes Agent, in its main home and each profile: live sessions, usage by
+  project and model, conversations, its memory and scheduled jobs; `vau hermes connect` gives it the vault's tools.
+- **Provenance**: an `origin: human | reviewed | mixed | ai` label on any file, shown in its header. Notes made by
+  agents are labelled `ai`; yours stay unlabelled (no label is yours, and the header shows none) unless you turn on Label
+  your notes. Images, videos, PDFs and other files get the same label and menu, kept in a list so your
+  photos are never rewritten (`vau origin`, `vau origin set`); files agents upload are labelled `ai` there, their
+  bytes as they came, and images from ChatGPT or Gemini that carry the IPTC "made by AI" mark show as `ai`.
+- **Dispatch**: the Claude button in a note's header (or ⌘⇧↩, "Dispatch to Claude Code") starts Claude Code in a new
+  terminal, told to read the note and do what it asks; from the phone too. Add your own actions: another agent or
+  prompt, or a shell command (`vau dispatch`).
+- **Token limits**: every Markdown file has one, and the files agents load at startup (CLAUDE.md, AGENTS.md, ME.md,
+  skills) a stricter one. The status bar's token count turns amber near it and red over it, the file tree marks what's
+  over, the Agent context panel lists them and what each CLAUDE.md loads with its imports, and `vau size` tells agents.
+  A file's own `max_tokens` wins. It only warns.
+- **Where a block's data comes from**: right-click a block to see the files, settings and live sources it reads
+  (`GET /api/blocks/sources`; `nth` picks one of two alike); the file it's in is "This file's properties", which opens them.
+- **Web clipper** (`vau clip`, MCP `clip`) and **AI import**: ChatGPT and Claude exports become notes, and what they
+  remembered is reviewed before it reaches `ME.md`.
+- **Vault plugins without code**: a manifest can declare operations, event hooks, startup commands and a schedule that
+  run scripts in any language (`vau docs vault-plugins`).
+- **Schedules**: a plugin runs a command or any operation on a timer (`every`, `at`), on one machine; a note handed to
+  Claude each morning is `dispatch.run` on a schedule (`vau schedule list`, `vau schedule run`).
+- **Middleware over operations**: `plugin.around` rewrites an operation's parameters or answer, or refuses it.
+- The desktop app can serve DevTools to agents on the Mac (`debugPort`, off by default).
+
+### Apps
+- **Vaultite Nightly**: main built each night as an app of its own (a grey icon, its own data), installed beside
+  Vaultite and updating itself from one nightly to the next. A failed update you asked for says why in a line, with
+  Show log, instead of the build's output.
+- **Voice notes are never lost**: the watch stops a recording at 2 hours; a long one, or one the phone can't transcribe
+  or send, goes to the server as audio (kept when it can't be transcribed), waiting on the phone until it can; one past
+  1,500 words stays in the inbox instead of starting the front-door agent.
+- **A web page in another browser's tab**: plugins add buttons to the Web viewer's bar and its tab's menu; the
+  BrowserOS plugin (Vaultite/plugins) opens the page in BrowserOS's own window, shown in a tab by App windows, where
+  passkeys work.
+- **Web demo**: the whole app in a browser, nothing to install, on the sample vault (`npm run build:demo`, static
+  files for any host): edits stay in that browser until Reset; terminals, agents and connectors need the app.
+- **Web tabs show their sites' icons**: a page's own icon on its tab and in Web pages, kept for when its page isn't
+  loaded yet; the globe for a site with none or one that can't be drawn.
+- **Day recaps**: what you did each day, kept in the vault for good (`Recaps/<date>.md`, plain Markdown): notes made
+  and changed with the text you changed, tasks done or dropped (checkboxes and the Tasks plugin's, one moved from a
+  file to another, a recurring one), captures (bookmarks synced, clipped pages, transcripts), logs, and an agent's
+  session as one line. A timeline block (`recap`, in a daily note that day's), the Activity page's Days tab with a
+  grid of days, and `vau recap`.
+- **Coming from another Markdown app**: opening its vault offers to run its plugins here, all in one click or
+  each as it is or with Vaultite's own (agents can read what those draw), never both, in one row on the Plugins page
+  with a line to swap them; Browse finds that app's plugins, with what's known to work here (or isn't needed:
+  Vaultite does it), offering Vaultite's own first where there is one; one first runs once you allow it, and its code
+  changing asks again. Notes' links in its own URI scheme (open, new, search) work here, and those a plugin registers
+  (Advanced URI's) reach it.
+- **Lessons**: an agent teaches you a note, a PR or a topic as a lesson (`type: lesson`), drawn one step at a time:
+  each step's question (multiple choice with a why for each answer, recall then reveal, or putting steps in order; one
+  that opens a step is a guess first) opens the next, right or wrong, and the file keeps where you are. Cards files
+  (`type: cards`, a heading per card, ==highlights== as cloze cards) and a finished lesson's recall questions come back
+  for review when you're about to forget them (FSRS, kept in the plugin's reviews.json, never in the file), mixed
+  across files, with keys (Space, 1 to 4). `cards.due` and `cards.review` let an agent quiz you anywhere; the
+  Learning page's `lessons` block lists them.
+- **App windows** (off by default, desktop app on a Mac): other apps' windows in tabs, one window a tab, the app's own
+  window kept behind a see-through tab; ⌃⌘P opens the palette from any app while one is open. Turned on with the vault
+  open, its tab has Reopen window. Tabs and the picker show each app's own icon; a tab's menu has Close <app> window,
+  and closing a tab closes a window the app made for it (none was free) rather than leaving it empty behind. A window
+  on another desktop isn't followed there when its tab is chosen, nor replaced by a new empty one: the tab offers Go to
+  it or Use a window here.
+  Picture in picture and other floating windows no longer open a tab stuck on Opening. The picker lists windows
+  already in a tab first, marked In a tab.
+  An app coming in front with a tab's window (a link opened in it, ⌘Tab, its Dock icon) shows that tab. Going back
+  to an app's tab never shows the desktop through it: the window stays behind the window while its tab is hidden
+  (when nothing would show it), and the tab turns see-through only once the window is in place.
+- **Phone tabs like a browser's**: drag the bottom bar up and the page shrinks after your finger into the tab list;
+  pull a page down from its top for New note, the command palette or Close tab (go left or right to pick). The tab list's top
+  line is Chrome's: search the tabs, the workspace in the middle (its menu; swipe the list sideways for the next one),
+  More (select tabs, close others, close all). The list opens and closes like Chrome's and Safari's: the page's
+  picture flies between the page and its card on a spring while the other cards settle around it, with no blank
+  patches; a new tab grows out of the + with the list left as it was; closing a tab shrinks it away and the others
+  close up without the list jumping.
+  A drag cut short by the app switcher or another app (the bar, a drawer, a sheet, a card) no longer leaves the page
+  shrunk with gaps at its sides, or a drawer half out: it settles when you come back.
+- **iPhone app** (`ios/`, Capacitor): opens your Mac's Vaultite over the tailnet, remembers servers, and adds Vaultite
+  to the share sheet. Widgets and controls (iOS 26): a voice note (also on the Action button), a new note, your daily
+  note, search; your routines' week like Today's (today's ticked from the widget), or today's as icons; agents waiting,
+  approved or denied from the widget. Record a voice note for your inbox (the palette) opens the same voice note there,
+  and records one on a computer, transcribed on your Mac. Voice notes are yours, like notes you write.
+- **Health and Learning fit anyone's**: Health's `workouts` block draws any workout area (`area:`), with lifts or the
+  top grade when its logs have them; Learning's default areas are reading and study (any subject). Apple Health imports
+  every workout kind into the area named like it, else Workouts.
+- **Finance** (community plugin): a Spending page of spending, income and bills from a CSV of your transactions, with
+  a range and account filter, in your currency.
+- **Icons**: `icon:` takes any of Lucide's ~1,850 icons or an emoji, on pages and routines (a routine without one shows
+  its area's). "Search icons" finds them by name or by what they're about; "Change icon of current file" sets one.
+- **Phones get a layout of their own**: the sidebars are drawers, a header has the file's menu, a flat bottom bar docked
+  to the screen's edge, and the tab list is a grid of previews. Sheets (the tab list, colour schemes, details) fill the
+  screen and close with Done at the bottom right; the tab list has new tab and the count beside it, and the workspaces
+  as squares at the top (hold one to rename, duplicate or delete it). A blank tab looks like the desktop's. Tabs move like a browser's: the page shrinks into its
+  card as the tab list opens and grows back out of the card you pick, a new tab grows out of its +, and the bar has
+  Back and Forward, which slide the page; a swipe in from the left or right edge always opens that sidebar. Search and
+  the command palette scroll their results, not the page, even after the page was scrolled; dragging the results puts
+  the keyboard away, as iOS's own search lists do. In the iPhone app the tab
+  list's cards are real pictures of each tab, as it was when you left it.
+- **Holding is right-click on phones and tablets**: a finger held still opens the same menu a right-click does (tabs,
+  files, the sidebar's panels, blocks, a blank tab's sections and buttons), with a tap from the phone. Text in a note
+  still selects as before; the app's own menus, drawers and bars no longer do. Hold and then move to drag, as with a
+  mouse: files into folders, pinned pages, a drawer's panels, a board's cards. Swipe a file sideways for Move and
+  Delete, an Inbox result for Done and File to, an event for Read and Dismiss. Hold a card in the tab list for its menu, or move it to reorder.
+- **Select several at once**, as in Finder: ⌘-click adds a row, ⇧-click a run, ⇧↑ ⇧↓ and ⌘A from the keyboard, Esc lets
+  go, in the file tree, the tab bar and Tabs panel, Pinned, the Inbox and a blank tab's recent files. A right-click on
+  them acts on all of them with one toast and one Undo (open, move, pin, archive, copy paths, delete; close, pin or
+  split tabs; unpin pages; Done, file, read or dismiss in the Inbox), and dragging one drags them all (into a folder, a
+  pane, Pinned). On a phone, Select in a row's menu, then tap; a bar at the bottom has Actions and Done, and the tab
+  list's cards select the same way. ⌘-click in those lists no longer opens a new tab: a middle-click or ⌘↵ does.
+- **Tab groups on phones**, like Chrome's: drop a tab card on another to group them, on a group to join it, or on +
+  to take it out. A group is a pane, so on a computer it's a split, and a split shows on the phone as a group.
+- **Haptics on phones**: picking up and dropping in the tab list and sorted lists, a tick as an item passes another,
+  ticking a checkbox or routine, switches and segmented controls, the read / edit toggle and a drawer settling.
+- **Desktop app**: a real menu bar, and the **Web viewer** (web pages in tabs, logins kept per workspace, a Web pages
+  panel, Save to vault; right-click an image to save it to the vault, download, copy it or its address). Any dropped file opens in a tab. A crashed page reloads itself. Signed builds keep their
+  permissions across updates. Downloaded releases (a notarized dmg, for Apple silicon or Intel Macs, macOS 13 or
+  later) update themselves: a new version downloads in the background, then a toast offers Restart to update (quitting
+  installs it too). New icon, and you can set your own Dock icon.
+- **Errors**: the errors the app and the server hit, kept on the server's Mac for 30 days (an Errors page, `vau
+  errors`). That includes when the app stopped, which is sent after you reload, a block that failed, and the server's
+  own errors and crashes, each with its stack, device and request. A new kind of error shows a toast. The server's
+  log has the date and time on every line.
+- **Machines**: one vault across many computers. Any machine's terminals and agents can be reached from any device; click or right-click a machine to open one.
+- **Screen sharing**: another computer's screen (VNC) in a tab, whole or a single app. It stays connected in the
+  background, has a phone trackpad mode, and is faster.
+- **Terminals**: shells survive restarts without tmux (Vaultite runs its own keeper) and scroll like a real terminal.
+  Phones get a row of extra keys. Closing a tab leaves what runs in it running.
+
+### Setup and look
+- **Tooltips only say what you can't see**: a sidebar row, an inbox item, an outline heading or a links item cut off
+  shows its whole name on hover, in the open sidebar as in the rail; one that fits shows none.
+- **Folder settings pick a folder**: a plugin's folder (Clipper's, Templates', Activity's capture folders and the rest)
+  opens a fuzzy list of the vault's folders; one typed that isn't there is made, and one set that's missing shows red.
+- **Settings opens sheets, never unfolds**: Plugin settings and Fonts open in a sheet like Keyboard shortcuts, so the
+  page never shifts; Setup links to the Plugins page in a plain row like the others; a palette (a font picker) works
+  over a sheet.
+- **Everything from the keyboard**: Tab passes a list (the file tree, a panel's rows) as one stop and comes back to
+  the row it was on; F6 and ⇧F6 move between the sidebars and panes; ⇧F10 (or the menu key) opens the menu of what has
+  the keyboard, a row or the editor at its cursor; the sidebar and split edges resize with the arrows (Enter resets);
+  Tab closes a menu, the palette keeps it in its field, and links in sheets take Tab and Enter.
+- **A dock in the phone's drawer**: hold the Buttons panel's heading, Put in the dock, and its buttons are icons at the
+  drawer's bottom, at your thumb, instead of somewhere down the scroll; hold one for its name and menu, or drag to
+  reorder (`vau panels dock buttons`).
+- **The desktop app on Linux**: an AppImage and a .deb (`npm run release:linux`; the .deb sets up Ubuntu's AppArmor
+  profile for the sandbox), or `npm run app:install` from a checkout, which updates itself from main; Linux menus
+  (Ctrl keys, Settings and Quit in File), Open with and `vaultite <file>`, and the app quits with its last window.
+- **Line width for snippets**: a note's widest line is the CSS variable `--line-width` (700px), so a CSS snippet or a
+  plugin can widen or narrow notes (`:root { --line-width: 900px; }`); ⌘+ zoom still scales it.
+- **Self-hosted on Linux**: `vau service install --vault <folder>` keeps the server running as a systemd user unit
+  (lingering, for a VPS) or a launchd agent on a Mac; the README says how to run it on a server, the Self-hosted bundle
+  is for any always-on machine with its agents on, and the app says "this machine" rather than "this Mac".
+- **At home on Linux**: the desktop app keeps the window's own title bar (no gap for the Mac's traffic lights), keys
+  and tooltips say Ctrl+O rather than ⌘O and follow your hotkeys, defaults that Linux desktops take are moved there
+  (back and forward Alt+←/→, workspaces Alt+1–5, file actions also Alt+Enter), Show in folder opens the file manager,
+  Ctrl+Shift+C/V copy and paste in the terminal, Shift drags files in to move them, a middle click on a link no longer
+  pastes, Linux fonts are in the stacks, and Mac-only features (Dock icon, App windows, Look up) stay out of the way.
+- **Ambient status bar**: the status bar shows plugins' small items whatever is open, a click from their page: today's
+  routines done, agents working or waiting on you, the inbox's new, Claude's plan limits. Right-click it to choose
+  them (appearance `statusBar`); plugins add theirs with `ambient`.
+- **A vault plugin runs only once this Mac allowed it**: turning one on here allows it as its files are; one turned on
+  by sync, a shared vault or a bundle, or whose files changed since, waits on the Plugins page with what changed, what
+  it says it does and Allow (`vau plugin allow`). One made with `vau plugin new` here reloads as it's edited. Plugins on before stay allowed.
+- **Plugins from GitHub**: the Plugins page's Browse lists the plugin directory (repositories with the topic
+  vaultite-plugin) by stars, newest or last updated, with each one's version and what it says it does, and installs
+  or updates one (`vau plugin install owner/name`, `update`, `uninstall`, `search`). Where each came from is kept in
+  `.vaultite/plugins-lock.json`; a version the directory blocks doesn't load. One repository can hold several plugins
+  (`vau plugin install owner/name/folder`, tagged `<folder>/v1.2.0`), and a directory can be a private repository's
+  (plugins.json's `index`: `owner/name/index.json`, read with git).
+- **Allow all**: when several vault plugins wait to be allowed on this machine (turned on on another one), the Plugins
+  page allows them in one go, after saying what each does beyond the vault.
+- **Your plugins from another app, here**: the sheet of Vaults from other apps (and `vau other-apps plugins`) lists the plugins
+  the vault had on in its other app, each with what stands in for it here, to turn on or install in a click; a plugin
+  says which it replaces in its manifest (`replaces`).
+- An emoji in a property (an `icon:` picked in the app) is written as it is, not as `"\U0001F4A1"`.
+- **Rename a tag everywhere**: right-click a tag in the Tags panel (or Rename in its sheet, `vau tags rename`): every
+  file's frontmatter tags and #tags change, nested tags too, merging into one that exists.
+- **Writing a plugin**: `vau docs plugin-api` lists every method, key, name and service the plugin API has, written
+  from the code; a plugin that can't be installed says why; `usePluginSettings` reads and writes a plugin's settings from its frontend; a plugin installed from a folder
+  takes its edits with `vau plugin update <id> --apply` and keeps running, and `.vaultiteignore` leaves its tests out.
+- **Tabs in the sidebar, the tab bar optional**: the Tabs panel lists the open tabs pane by pane (show, close, drag,
+  their menu); with the tab bar off (Settings > Appearance, "Toggle tab bar", a tab's or the bar's right-click,
+  `vau appearance tabBar false`) each pane's bar shows only what's on screen.
+- **Tabs from your other devices**: under your own tabs, the Tabs panel lists what each of your other devices has open
+  (the iPhone app, the Mac app on each machine, each browser), the latest first; a click opens it here. Each device keeps
+  its own tabs; right-click a device to forget it.
+- **A plugin's sheet says where it's kept**, with Open: a vault plugin's folder (shown in the file tree), or a built-in
+  or community plugin's settings file once it has one.
+- **Set up Vaultite**, the desktop app's first launch (again from the Vaultite menu or the palette), is one screen: a
+  new vault (iCloud Drive when it's there) or a folder you have (another app's vault: none of its files change), and it
+  opens; or Try the playground first (the sandbox). `vau`, the CLI, is installed without Node. Another machine's server is in
+  Manage vaults: Connect to another Mac.
+- **A new vault starts minimal**, notes and links with a terminal for your coding agent: Minimal's plugins (files, search,
+  links, the graph, tags, a terminal, Claude Code), Gruvbox, the plugins' pages kept out of your files, and a pinned Start here note
+  on what to try first. An empty one also points agents started in it at the vault's rules (a line in CLAUDE.md and
+  AGENTS.md). More is a bundle or a plugin away; a vault still offered the bundles that skips them (Start with Minimal)
+  starts from Minimal too.
+- **Bundles**: apply a whole setup at once (Minimal, Life OS, Agents, and more behind a More… card), preview it, undo
+  it, save your own and share it (`vau bundle`). One that pins nothing leaves the plugins' pages unpinned.
+- Menu items that only open a page or window (Hotkeys, Bundles, Set up Vaultite, Manage vaults) lose their "…".
+- **Sandbox vault**: a made-up vault dated as of today (`vau sandbox <folder>`, Help > Open sandbox vault).
+- **Workspaces are desks**: each has its own tabs, panels, pinned pages, open folders and recent files.
+- **Sidebars**: one file (`.vaultite/sidebars.json`) with a plain stack of panels per side, plus a right sidebar.
+  Panels fit what they draw and can be dragged onto a pane as a tab. Its right-click menu lists the panels shown;
+  the hidden ones and the other sidebar's are under More. Web pages' heading has + (open an address), Pinned's pins the
+  file on screen.
+- **A new tab is yours to arrange** (`.vaultite/newtab.json`, `vau newtab`, or right-click a blank tab): show, hide and
+  reorder its sections (buttons, recent files, running terminals) and make any palette command one of its buttons.
+- **Commands have icons**: in the command palette and on a new tab's buttons (a microphone for voice notes and
+  recording); a command without one has its plugin's. Right-click a button for Change icon (newtab.json's `icons`).
+- **Turn plugins on from the command palette**: type an off plugin's name ("workspaces") and Turn on Workspaces comes
+  after the commands, with what it needs (Undo in its toast); "turn off" or "disable" and a name turns one off, saying
+  what goes with it. "Turn on" alone lists every plugin that's off. Not the vault's own plugins: they run code.
+- **File icons in the quick switcher too**, and File icons (Settings, or Toggle file icons in the command palette) hides
+  them everywhere: the tree, tabs, search, the quick switcher and the phone's tabs. Set up Vaultite's icon is a play button.
+- **Each plugin's settings open in their own sheet**; Settings keeps only the app's own, without descriptions under
+  each row. Plugins are grouped by category, one name per row, with no intro text (descriptions are in each one's sheet).
+  Search in Settings finds both: the app's rows, and any plugin's setting, which opens its sheet there.
+- **Appearance**: Gruvbox is the default (the old colours are Classic); new Amethyst and Paper schemes; separate text
+  sizes for notes and terminals; notes are narrower (700px).
+- **Folders are yours**: a file's kind comes from its `type:` alone, never its folder, so moving People/ or Dashboards/
+  breaks nothing. A folder brought in without types (another app's People/) stays plain notes until `vau type People
+  --apply` gives each file its line; `vau type` and `vau context` list such files.
+- **Archive any file**: it moves into a hidden `.archive/` folder next to it (out of other tools' way, links
+  following) with `archived: true`, and is left out of lists; "Show archived files" in the file tree shows them (showing
+  hidden files doesn't), else an archived file shows there only while it's the open file. Files archived before stay put until `vau archive tidy` (or the palette's "Move archived files into archive folders").
+
+### Editor and files
+- **Database views and bases show every row**, like Obsidian (no cap at 500), drawn as you scroll; a database view
+  without `limit` lists every match (it was 50).
+- **Nothing is cut off with no way to see the rest**: the search tab lists every file, more as you scroll, with the
+  totals right; "N more in this file" shows them, and a line opens the file there, the match selected. The quick
+  switcher lists more as you scroll, matches text from two letters, and ends with the search tab. Every unlinked
+  mention, as you scroll. Books' Up next and Finished, an embedded spreadsheet's rows and older cloud sessions have
+  Show all; embeds nest 20 deep (a loop is still caught), and HTML pages and notebook output are never clipped. Tabs
+  synced between devices keep every tab and its whole name. Export to PDF waits for every image, saying how many are
+  left when it's slow. A tab whose editor was put away keeps its undo history and selection.
+- **Obsidian's settings as defaults**: daily notes follow `.obsidian/daily-notes.json` (folder, name format, template)
+  and are found by their name, so none is made twice; the templates folder follows `templates.json`, the attachment
+  folder `attachmentFolderPath`, excluded files `userIgnoreFilters`. Set one in Vaultite and it wins; `.obsidian/` is
+  never written.
+- **Excluded files**: a File explorer setting, one path or /regex/ per line; they stay files you open, but search, the
+  graph and unlinked mentions leave them out and the quick switcher lists them last.
+- **Attachment folder**: a File explorer setting (a folder, the top, beside the note, or a folder beside it).
+- **Each kind's folder in its settings**: People, Notes, Logs, Daily notes, Dashboards and the rest show where new ones
+  go (where most are, until you pick one), and keep to it.
+- **Daily notes**: their name format and template are Today's settings; "Open today's daily note" and `vau daily` make
+  one from the template.
+- **Editor settings** (Settings > Editor, `.vaultite/editor.json`, as Obsidian's): spellcheck, indent with a tab
+  (the default) or spaces for a note not indented yet (one that is keeps its own, as VS Code does), auto-pair brackets and Markdown (typing `*` over a selection wraps it), readable line length,
+  and Properties in document (visible, hidden or source). A vault's `.obsidian/app.json` sets the ones you haven't.
+- **Live preview shows only the Markdown under the cursor**: the link, bold span or embed you're in, not its whole line;
+  bullets and checkboxes stay drawn while you type their line.
+- **Properties while reading**: shown above the text in reading view too, and open unless you fold them.
+- **⌘E switches only the tab in front**: each tab keeps its own view, as in Obsidian; a new one starts in the last you
+  picked.
+- **Aliases link to their file**: choosing an alias after `[[` writes `[[File|Alias]]`.
+- **Editing keys over the phone's keyboard**: while you write a note, a row of undo, redo, link, task, indent, bold,
+  italic, highlight, bullet list and photo sits above the keyboard, like the terminal's keys; pick them in Editing commands'
+  settings.
+- **Bug recorder** (a plugin, off until turned on): keeps the window's last minutes in memory (keys, clicks, scrolling
+  and whether the app or you moved it, edits, files changing, commands, warnings); Report a bug saves them as a note
+  with your description and a screenshot. An editor's trace names who moved its cursor when the app did.
+- **Folders show every file**, as Obsidian's do, drawn as you scroll so a folder of thousands opens at once. Files per
+  folder in the Files settings shows a folder's first ones, then Show N more; the open file always shows.
+- **Blocks are views you edit in place**: clicking a block keeps it drawn; hover for its bar (its name, Options, its
+  menu, `</>` for its Markdown, with Done and what's wrong under it). Options is a form from the block's declaration,
+  and a person's context, place, to-do and contact are changed right in the card; on a dashboard too, where right-click,
+  Options opens the form in place instead of the source. Right-click no longer flickers.
+- **Live data's folders open**: a block's menu lists the folders its live data is read from (Claude Code's account
+  folders, `~/.codex`, Cursor's), each opening in Finder.
+- **Duplicates don't take the original's names**: a copy leaves out `aliases`, `name`, `id` and `ext_id`, and a file
+  whose alias another file has says where [[that alias]] goes, with Remove the alias.
+- **Images in notes**: drawn on their line beside its number, `|300` sets the width and their corner drags it, buttons
+  open them and show their Markdown. `![](x.png)` images too.
+- **Every embed has a menu**: right-click an image, audio, video, PDF, table or embedded note (hold its header on a
+  phone) to copy, open, download, rename, move, copy its path, reveal, reset its size, remove the embed or delete the
+  file; only what fits its kind.
+- **Right-click in a note**: Add link, Format, Paragraph and Insert menus (with their keys), Cut, Copy,
+  Paste, Paste as plain text, Select all, and Search for the selection; in the Mac app also Look up, Search the web and
+  Add to dictionary. New commands: Toggle inline math, Clear formatting, Toggle task list, Insert footnote, Paste as
+  plain text, Search for selected text. Phones keep the system's menu.
+- **Renaming or moving a file or folder updates every link to it**: embeds (`![[x.png|300]]`), Markdown
+  links, links in frontmatter, a moved note's own links; `vau move` does it for agents.
+- `[[` and `![[` suggest any file in the vault (images, PDFs), by name with its extension.
+- **Add photo**: from a note's … menu on a phone (its photos or the camera), `/photo`, Insert ▸ Photo or the palette;
+  saved as an attachment and embedded, like a pasted image.
+- A file dropped anywhere on a note is saved as an attachment and embedded; a file opened from outside the vault has
+  Copy to vault (its tab's menu, its path bar's button, or right-click on it, an image or PDF too).
+- An image, PDF or other file in its own tab has a menu on right-click: Copy image, Open in default app, Download,
+  Rename, Move, Copy path, Reveal, Delete.
+- Every way of making a note (⌘N, the tree, the switcher's ⇧Enter, a link, a template) puts it in one place: the top of
+  the vault, unless its other app's settings say otherwise.
+- **Shorter file menus**: Open in new tab, New note, Rename and Copy path do the common thing on click and keep the
+  rest in a submenu (Open to the right; Canvas, Database; Change icon; from the system root, Copy link). More is last,
+  before Delete.
+- ⌘Z undoes a property removed, added, renamed or changed, a header chip and a command on the open note (Change icon,
+  Archive, a label), in the same history as the text.
+- Vim: visual block (Ctrl+V, then I, A or c) edits every line.
+- Graph blocks and the Local graph get a Fit button once moved, and can be panned in the editor.
+- Word, Excel, PowerPoint and e-books open read-only, and search and AIs can read their text. iPhone photos (HEIC)
+  open too.
+- **Bases** (`.base` files). Database views gain formulas, summaries and a map, and `this`: the note a view is
+  in (the one embedding it, when embedded), so one view embedded anywhere lists what's related to that note
+  (`where: "file.links contains this"`, `project = this`).
+- **Canvases**: edit cards in place, snapping, copy and paste, link previews, and the board fills
+  its tab.
+- **Vim** (a plugin, off by default) in the editor and across the app: leader key, vimrc, link hints. Any command can
+  be bound to a key sequence, with a hint of the next keys.
+- Find and replace, folding, page preview on hover, an All properties panel (rename or retype a property everywhere),
+  properties as chips in file headers, and a token count.
+- **Property types for the whole vault** (`.vaultite/types.json`, and another app's types.json): a date,
+  number, checkbox, list... picks the property's input (set it from the icon before its name), notes a value that
+  isn't one, and sorts database views by it.
+- Search understands operators (`path:`, `tag:`, `OR`, `-word`) and shows why each result matched.
+- Audio recorder, Slides, and Export to PDF / Print. Recordings are transcribed on the Mac with Apple's on-device speech
+  recognition (macOS 26), as the iPhone does: nothing to install, a language's model fetched the first time. Whisper is
+  optional (the setting Transcriber). A voice note the Mac can't transcribe lands in the inbox as the recording, saying
+  why, never lost.
+- Add to a `## Timeline` from the app. Back returns to the page you came from, and tabs come back scrolled where you
+  left them. Lists work with the keyboard.
+- **Reopen closed tab** (⌘⇧T in the desktop app, the command palette on the web): the tabs you closed come back one
+  by one, where they were, with their history.
+- **Pinned tabs and tabs by number**: a pinned tab keeps what it shows (what's opened from it opens
+  beside it) and stays open through ⌘W and Close others; ⌘1–⌘8 go to a pane's nth tab and ⌘9 to its last (desktop app).
+- **Note composer, Random note, Unique note creator**: move a selection into another note (a link
+  left in its place) or merge a note into another (with Undo), open a note at random, make a note named by the minute.
+- **Pop-out windows**: Move current tab to new window (or Open…, or a tab's menu) puts a tab in a
+  window of its own, with its history and tabs of its own and no sidebars; closing its last tab closes it. Move to main
+  window (a tab's menu, the palette), or a tab or pane dragged out and let go over the main window, puts it back there.
+- **Stacked tabs** (Toggle stacked tabs, a tab's or spine's menu, or the tab bar's right-click): a
+  pane's tabs side by side, sliding over each other with their titles on spines.
+- **Pinned headings and searches**: Pin current heading (the one the cursor is under) and Pin
+  current search put them in Pinned, where a click opens the note at that heading or the search (`vau pin
+  "Notes/Idea.md#Plan"`, `vau pin "search:tag:#book"`).
+- **The usual editing keys**: ⌘K makes a Markdown link (the quick switcher is ⌘O), ⌘L a task and ticks it, ⌘D
+  deletes the line, ⌘/ a comment, ⌘G opens the graph; commands for highlight, strikethrough, code, headings, lists,
+  quotes, moving lines, and callouts, tables, code and math blocks (the Editing commands plugin), and Insert current
+  date / time (Templates, in its date and time formats). The app's keys now win over the editor's, so any can be
+  rebound.
+- New note makes a plain `Untitled.md`. The file tree can make a new canvas, drawing, database or base. File menus
+  are shorter and grouped.
+- Links can run a command: `[Open Claude Code](vaultite://command/terminal:claude-split)`.
+- The file tree no longer opens folders to reveal the open file; File explorer's Reveal the open file turns it back
+  on. On a phone it opens the folders but leaves the drawer at its top.
+- **Recent files** panel: the files you opened lately in the workspace, or the vault's recently changed ones (a
+  toggle in its heading). Hidden until you show it from the sidebar's menu; also a tab. Lists 50 (a setting), then Show more.
+- **Any sidebar panel can be on a new tab**: right-click a blank tab, Sections, or `vau newtab show "recent files"`.
+- **Activity filters**: the panel's heading filters by who (you, agents, the CLI...) and what (changes, opens,
+  commands, settings), kept per workspace; the Activity tab has the same as chips, and `vau activity --action`.
+- **New tab**: every section has its title (the buttons too); drag a section by its title, or a button, to reorder.
+
+### Speed
+- The app loads less up front, redraws less and gets only what changed (`/api/state?since=`). Pages no longer jump
+  while they load.
+- The server listens at once, caches what it computes and compresses responses (with ETags). `npm run build` takes
+  about 3 s (TypeScript 7).
+- Swipe actions and quick taps (Done, Dismiss, Delete, a routine's tick, a card's rating) answer at once, with a tap
+  you feel: the row slides away before the server answers, and comes back with why if it fails. A note deleted from
+  any device closes its open tabs; one archived or moved (Done in the Inbox, Archive) keeps them, at its new place.
+
+### Changed
+- **The app writes only what you changed**: a save rewrites only the properties it changed, keeps a cleared one empty
+  (as Obsidian does), adds `type:` only to a new file and renames a file only when its title changed; a change it can't
+  apply as a small edit is a conflict, never a rewrite of the whole file. Opening or syncing the vault never writes: a
+  note gets its id and dates when it's made or edited in the app.
+- **Duplicate copies the file as it is**, as Obsidian does, and new names count from 1 everywhere ("Untitled 1", "Name
+  1"), as in Obsidian.
+- **Clipping a page again**: the web viewer's Save to vault opens the note it made before and offers Update, which
+  clips the page as it is now into that note (`vau clip <url> --update`).
+- **Logs keep emoji in file names, and make new areas**: a log's file is named with its title as written (only what a
+  file name can't hold goes), and a log for an area that isn't in the settings yet adds it instead of being refused.
+- **Photos named as in Obsidian**: a photo from the camera or a nameless pasted image is "Pasted image
+  YYYYMMDDHHmmss", whatever its format.
+- **A machine you remove stays removed**: a server adds itself to Machines once, and no longer comes back after you
+  take it off the list.
+- **Map pins stay out of your files**: a person's or your own place is looked up when you enter it or the People map
+  needs it, and kept in the app's cache, never written as `coordinates`; a place that isn't found has no pin instead of
+  a guess, and the map starts on the whole world, then fits the pins.
+- **Nothing is cut or thrown away behind your back**:
+  - AI import keeps every chat (one message is enough), every image whatever its size, and attachments, project files,
+    tool results and memories whole; an attachment too long to read inline becomes a text file in Attachments/.
+  - Inbox events keep their whole title and body (an event that leads nowhere opens in place); unread ones stay until
+    you read or dismiss them, and only read ones go after Days to keep (the last 200).
+  - Voice notes keep their recording above what was said, from the watch, the phone (with the app updated) or the app
+    (Keep voice notes' audio, in the Inbox's settings). A tap under 0.7 s says "Too short, not saved".
+  - Terminals never end for being left alone: a shell ends when its last tab closes at its prompt, or when you end it.
+    What's pasted into one stays while it runs and 30 days after; Scrollback is one setting every backend keeps, all of
+    it shown again when you come back.
+  - The trash is emptied of what's been there 30 days, like Recently deleted, once a day by one machine; restore works
+    until then.
+  - Agent files deletes a root AGENTS.md or CLAUDE.md only when it made it for its line; yours stay, even empty.
+- **Nothing personal leaves without a yes**: Cursor's usage is read from your Cursor account only once you allow it
+  (asked in its plan card, kept in Cursor's settings); Activity no longer records what agents and scripts read unless
+  Record reads is on, and its description says how it names who called.
+- **Updates on your terms** (desktop app): Settings, Updates is Automatic (it restarts into a new version while you're
+  away, with nothing unsaved), Notify (the default: ready in the background, then Restart to update) or Off. A new
+  build of the page reloads by itself only when nothing would be lost; while you type or have unsaved edits, it says
+  "A new version of Vaultite is ready" with Reload.
+- **Web pages ask, like a browser**: a site that wants the camera, microphone, location and the like asks once (Allow,
+  Don't allow, remembered for the site; signing out of it forgets); pages you left are kept rather than reloaded
+  (the oldest end only when the Mac runs short of memory), and a page's notifications past six a minute wait their
+  turn instead of being dropped.
+- **Fewer interruptions**: the phone gets a push only for what waits on you (an agent asking, a report on work you
+  sent; Inbox settings, Phone notifications); an error toasts once per kind while the server runs, the rest only
+  listed in Errors; the cards reminder comes only once you've reviewed cards.
+- **What agents in terminals are told**, word for word: Show what agents in terminals are told (the palette, Terminal's
+  settings) or `vau terminal instructions`.
+- The iPhone's share sheet takes photos and files: they go to the inbox in a note with the text shared with them,
+  saved in the attachments folder.
+- Desktop: ⌃⌘P opens the palette from another app only while an app window's tab shows (App windows), no longer
+  whenever one is open; the menu bar lists every command, and files from outside the vault are remembered however many
+  you've opened, so restored tabs keep working.
+- **Links resolve as in Obsidian**: when several files share a name, the one closest to the linking file wins (not
+  whichever came first), `[[Work/Idea]]` finds any …/Work/Idea, and `[[` writes the shortest path that finds the file.
+  A first name alone (`[[Alice]]` for Alice Park) or a path that isn't there no longer goes somewhere silently: a click
+  asks "Did you mean" (add an alias to make it a link).
+- **Every link and image renders, as in Obsidian**: `[x](Note)`, `[pdf](files/a.pdf)` and links to other apps
+  (`obsidian://`, `zotero://`, `tel:`, `file://`) are links on every surface and the desktop app opens them; raw HTML
+  (`<br>`, `<sub>`, `<kbd>`, `<span class>`, `<img>`, `<details>`, an https `<iframe>` such as a video, sandboxed) is
+  drawn, made safe; vault images show in embeds and anywhere Markdown is drawn; `![[Note]]` in the middle of a line is
+  an embed. Web pages asking to open another app ask you first. A #tag clicked without the Tags plugin searches for
+  it. Links in query, base and log cells go to the file closest to their row's.
+- **Any folder can be a vault**: Manage vaults on the web opens folders outside the home folder and on external drives
+  (only hidden and system folders are refused), and a vault asked for that isn't there (a typo, a drive not connected)
+  is made only once you say so, in the desktop app and the server alike. Managing vaults on the web answers only this
+  machine's owner.
+- **Graph as in Obsidian**: the whole graph shows files with no links, and a local graph goes 1 link out by default (up
+  to 5; the Local graph panel follows the setting).
+- **Kinds and relations of your own**: a timeline takes any kind of a word or two (Other in Add: coffee, game night) and
+  a person any relation (colleague); the known ones keep their icons and groups, and nothing is flagged.
+- **Bases list every file Obsidian sees**: templates and archived files too, but none in a hidden folder (`.archive/`);
+  a database view still hides archived files, and says how many ("3 archived hidden").
+- **Archived means archived: true or yes**: another value (a date, maybe) no longer hides a file.
+- **Token count flags only agent files**: CLAUDE.md, AGENTS.md, ME.md, skills and the rest keep their limits; an
+  ordinary note has none unless you set one.
+- **Costs say they're estimates**: Claude Code's, Codex's and Cursor's are labelled estimated at list prices, in the
+  app and in what agents read.
+- **Keyboard shortcuts on any window**: Settings shows them on narrow windows, iPads and phones (with a keyboard) too.
+- **Built-in is the core; the rest are Vaultite plugins**: the Plugins page lists the app's essential plugins under
+  Built-in and its other ones (Today, People, Logs, Projects, the format viewers...) apart as Vaultite plugins, off
+  until turned on, by hand or by a bundle (Life OS, Everything; Minimal is the core). Vim is built in again, off until
+  turned on, its init.vim kept.
+- The app's text no longer names other apps: their vaults, settings and plugins are described as such
+  (`vau other-apps`, `vau docs from-other-apps`); the plugin that runs Obsidian's plugins, and its Browse tab, still say
+  Obsidian.
+- **A kind's blocks are drawn, not written**: a person's profile, a log's fields (and its area's blocks, a workout's
+  sets), a book's and a project's card are drawn on top of each of its files without a fence, so new files hold only
+  what's theirs and a kind's view can change for every file at once. A fence of one still places it (changing its
+  options or source writes one); `vau blocks tidy` takes the old ones out. Blocks are read one way everywhere (a
+  ```` ~~~block-x ```` or a word after the name included, none inside another code fence).
+- Done on the inbox result you're reading (its Done anywhere: the sidebar, a phone's swipe, the file menu) opens the
+  next one to review in its tab, rather than closing the tab.
+- The API answers only this app's own pages: another site's page, or one reaching the server under another site's name (DNS
+  rebinding), is refused; a reverse proxy's own domain goes in `VAULTITE_HOSTS`.
+- Plugins for one kind of life or one tool (Work, Finance, Hevy, Apple Health, Reddit, GitHub, Code stats, Excalidraw,
+  Vim, Screen sharing, Tailscale, herdr) aren't part of the app anymore: install them from Vaultite's plugins
+  (`vau plugin install`; Hevy's and Apple Health's imports are now `vau hevy import` and `vau apple-health import`).
+  The coding agents, Health and Learning are built in, and the Plugins page has two groups, Built-in and Vault plugins.
+  Dock icon is off until you turn it on.
+- The lists you show or hide in a menu work one way: the sidebar's panels (Panels ▸), the pinned pages (Pinned pages ▸)
+  and a new tab's sections and buttons list what's shown, ticked, and the rest under More ▸. Every row ticks or
+  unticks with the menu left open, so you can add or hide several at once, and keeps its place until the menu closes
+  (unticked and ticked again, it's back where it was). Two pages of one name say their folders.
+- An app update never changes your pages (Today, Health...): a page with a newer version says Update available, with
+  See changes, Update (the old one stays in file history) and Dismiss; `vau dashboard updates` does the same.
+- Made-up names in docs and examples are generic (Alice Park, Bob Lee); a shorter README. The docs name other apps only
+  where the app reads their files or formats.
+- Each workspace is its own file, `.vaultite/plugins/workspaces/<n>.json`, so computers and phones on different
+  workspaces never write the same file through iCloud. The old list in `data.json` is copied over by itself.
+- Your own file, `ME.md`, is the Me plugin's: its setting puts it anywhere in the vault (moving it in the app updates
+  the setting), and with Me off nothing asks for it. `Me.md` from before still works.
+- Health, Learning and Work are community plugins. Logs has no areas of its own: they come from the plugins that are
+  on.
+- CSV, HTML, Vaults from other apps, Pinned, Dashboards and Terminal are now plugins you can turn off. The Plugins page
+  calls the app's plugins Built-in.
+- Renamed keys (the old ones are still read): a book's `added` is now `created`; a journal entry is a note tagged
+  `journal`; notes' `pinned` is no longer read.
+- Opening a vault never changes your files: plain Markdown notes (another app's) no longer get an `id` and dates written
+  into them; only notes in Vaultite's format (`type: note`) do.
+- `vau`: settings edits merge through the server; plain `vau` writes `source: cli`; `vau files` and `vau search`
+  print a Markdown list; `vau terminal` replaces `ls`; `vau clip --html -` reads stdin.
+
+### Fixed
+- **An agent's ended session keeps its tab**: when Claude Code or another agent's session ends by itself (it exited,
+  died, or finished after its report), its tab stays with "Session ended" and Restart, as in VS Code, instead of closing
+  in every workspace. End session and closing the tab still end it for good.
+- **Properties keep what you typed**: "007", "1.50" or "1e3" in a number field stays that text, not 7 or 1.5; editing a
+  date and time keeps its seconds and offset; only times a kind keeps itself (a note's created and updated) show locked
+  in local time, not every `created`, `updated` or `added`.
+- **Timeline view only in people**: a `## Timeline` heading in a note stays the Markdown you wrote; only a person's file
+  draws it as a timeline.
+- **Edits survive a closed window**: what you typed, at any size, stays on the device until the server has it; a
+  window closed or killed mid-save offers it back (Restore them) the next time the file opens. A big note's last save
+  no longer fails as the window closes.
+- **JSON saves as you type it**: a .json file (comments, a half-done edit), a notebook or a canvas source is saved as
+  it is, with a note while it isn't valid JSON; a plugin's settings file that doesn't parse keeps working from its last
+  good copy.
+- **Paste keeps the text**: cells copied from Excel, Numbers or Word paste as their text, as in Obsidian, not as a
+  picture of them; a picture alone is still attached. Also in canvases and terminals.
+- **Names with odd characters**: a [[link]] or a new note named with `:`, `?` and the like makes a note named as the
+  app names files (`:` a dash, the others spaces) with the name as typed as its alias, so the link finds it (no more
+  "A B 1"); "/" makes folders. A rename to such a name is refused, saying which characters.
+- **Approvals show all they ask**: an app's request for your yes opens whole in a scrolling box (Approve in a row or on
+  the phone's notification only when it shows all of it), and a vault plugin waiting to be allowed lists every changed
+  file, with the exact count.
+- **Bundles keep images and fonts**: a bundle's files that aren't text are saved, applied, exported and imported as
+  their bytes; one that can't be read is listed saying why instead of vanishing (up to 64 MB, any number of files); and
+  applying one never lowers a number you set, like how many days File history keeps.
+- **Big files open and edit at any size**: a file over 1 MB (an Excalidraw drawing with images, a long note) no longer
+  opens read-only, nor one over 8 MB as a card; typing in a 16 MB note is as quick as in a short one.
+- **No size limits**: File history keeps files of any size (one growing past 1 MB is no longer taken for deleted) and
+  its diff is right at any size; search reads every text file whole, however many (an embedded image's base64 aside);
+  books, web pages, sheets and CSVs give all their text; the graph reads links from files of any size; a PDF's page
+  count at any size; uploads (the app's, `POST /api/ops/file.upload` with the file as the body, MCP upload links, a
+  file pasted into a terminal) stream with no cap; a web image saved to the vault says why when it can't be.
+- **More size limits gone**: a voice note for the inbox streams at any length (no base64); token counts for files over
+  4 MB; an HTML page's saved state over 2 MB; clipping a page over 8 MB (it was cut short when fetched); the editor sees a
+  frontmatter of any size. Excalidraw's interface font loads (it was a 404).
+- **iPhone: voice notes and shares at any size**: the watch's and the phone's recordings, and files shared to Vaultite,
+  go to the server as they are (streamed from disk), never as base64 in JSON.
+- **Agent hooks reach a server on its own address**: with `HOST` set to one address, the inbox's and Activity's hooks
+  post there instead of to 127.0.0.1, which nothing answered.
+- **iPhone: never a blank screen**: a server's page that doesn't load (unreachable, or reloaded after iOS ended the page
+  in the background) goes back to the first screen, saying why, with the server's buttons to try again. Also: Hermes
+  messages with an image show again; File history keeps a version rewritten within a millisecond; `vau` piped into a
+  reader that stops ends quietly; a rules file iCloud is still downloading is fetched instead of logged.
+- **Replying keeps your place**: sending a reply from an agent's report no longer jumps it back to the top when it
+  moves into the archive; a file moved or renamed while open stays scrolled where it was.
+- **The desktop app recovers instead of closing**: a vault whose server crashes gets a new one on its port and its
+  page reconnects; a hung page offers Wait or Reload, one that keeps crashing says so with Reload (pop-outs too);
+  another machine's window retries until its server answers; an update is swapped in whole or not at all, and a
+  stalled one stops; App windows' calls give up on an app that hangs; dropping files copies the rest when one fails.
+- **The server stays up when one part fails**: a plugin's failed promise, socket handler or file fill, a plugin that
+  can't load, a settings file that isn't an object, or a folder linked back up the vault is logged (and in Errors), not
+  the server ended or its vault left unread; uploads and File history's copies are whole or not there, a request over
+  256 MB is refused, a terminal client that stopped reading is dropped (it reconnects), the public MCP listener retries
+  its port, and the log says when something holds the vault over 30 s.
+- **A broken part fails alone**: a plugin's background work, status bar, file bar or note-top item, new-tab section,
+  sheet or tab title that throws no longer stops the app; a failing command or menu item says so in a toast; settings
+  of the wrong shape and malformed saved tabs fall back to defaults; a hung request can't freeze live updates; the
+  crash screen offers Reload with vault plugins off.
+- **⌘E keeps the cursor**: back from reading, the cursor is where it was (when it's in sight), on a dashboard too,
+  whose editor is made anew; typing no longer lands at the top of the file. A new editor never starts in the hidden
+  frontmatter. Each editor's changes, cursor jumps and view switches are traced in memory (`vau dev eval
+  __vauTrace.editor`), without the text.
+- **The server running out of memory with two machines**: machines that follow each other's inbox no longer send it
+  back and forth (17 times a second, the whole list each time) until a slow socket's backlog filled the heap.
+- **Linux**: restarting `vau service`'s systemd unit no longer ends every terminal and agent (the keeper and tmux get a
+  scope of their own); idle shells read as idle, not "/bin/bash"; Open in its app and Show in file manager work (gio,
+  FileManager1); sockets and run scripts in a private runtime folder, not the shared /tmp; the vault watcher skips .git
+  and node_modules and says when inotify runs out; Activity names callers with ss; HEIC with ImageMagick 6 or vips;
+  an agent's session in a folder with accents is found and linked to its terminal.
+- A table drawn in a note aligns its columns as its separator row says (`:-:`, `--:`), and one inside a callout is
+  drawn as a table.
+- A table too wide for a phone scrolls sideways instead of breaking its words a letter per line.
+- Two devices on one workspace showing different files no longer rewrite its recent files back and forth, each putting
+  its own first.
+- An embed of a file that arrives after the note is open (made by an agent, synced, just dropped in) draws it, instead of
+  "No file ... in the vault" until the note is opened again.
+- A block in a note follows a change made to the note elsewhere (a review list's count could stay as it was).
+- A vault plugin's status bar item shows as soon as its code arrives, not only after the bar's choices change.
+- Vault plugins' editor extensions work: their CodeMirror imports are the app's own copy, not a second one the editor
+  refused.
+- On iPhone, the tabs list no longer stops the app when a tab shows a Claude Code (or Codex, Cursor, OpenCode)
+  session read back.
+- A phone's pinned tiles keep their names on the screen: a long one wraps to two lines instead of running off the left.
+- On iPhone, scroll bars are whole again: the sidebar's headings (and other sticky bars) no longer cut through them.
+- Desktop app in full screen: the sidebar toggle and the tabs no longer leave room for the window buttons, which full
+  screen hides (the toggle sits at the window's edge, the folded sidebar's tabs right after it).
+- A terminal that exits cleanly closes its tab on every device, also one that was away (a phone's tab put back later).
+- An agent's news from another machine opens its session on that machine on a phone, not an empty one here.
+- The pinned pages' menu ticks follow each click (a page unpinned from it showed ticked still).
+- Phones: typing in a field (a search, a rename, a note's small text) no longer zooms the whole app in and leaves it
+  zoomed.
+- A tab, sidebar panel, header item or sheet that fails to draw fails alone: the error shows in its place, with Try
+  again and Close tab, instead of "Vaultite stopped" (whose reload opened the same tab again). A part of the app that
+  didn't load while the server restarted or updated reconnects and reloads once it answers, and "Vaultite stopped"
+  offers Reload with a new tab (leading with it when it stopped again right after a reload).
+- Closing a terminal's tab while a script runs in it (`mo`, which is bash) keeps it running, named by its script,
+  instead of ending it as a shell at its prompt.
+- Dispatch runs an action's shell command only once you said yes to it on this Mac (it shows the command first), and
+  the desktop app shows a vault file that would run (an app, a script) in Finder instead of opening it.
+- Desktop app: an error nothing caught in the app's main process goes to Errors (a toast the first time) instead of
+  Electron's "A JavaScript error occurred in the main process" box.
+- `vau remember` (and MCP's `remember`) makes your file when there's none yet, instead of failing.
+- The server no longer stops at start when a vault plugin's file is still in iCloud: that plugin waits until it's there.
+- Desktop app: clicking the palette's backdrop near the top of the window closes it instead of grabbing the window.
+- Phones: holding a block drawn in a note opens its menu in the editor too.
+- Phones: the tab list's bar shows its new tab button and Inbox as it opens, and a note's read / edit toggle shows in
+  the header as a tab opens, instead of only after the animation.
+- A key the app adds to a header (`origin`) goes after the last value, keeping the header's blank lines.
+- Desktop app: a file (a screenshot) dropped on a terminal goes to the terminal, its path typed, instead of opening in a tab.
+- ⇧↩ in a terminal is a new line in Claude Code's prompt, rather than sending it.
+- A blank tab's menu offers the buttons' items only on the buttons, and not once they're hidden.
+- A blank tab's sections all share one text size, row height and left edge (a panel's, the buttons, recent files,
+  Pinned's tiles, terminals), with even room between them; a terminal's state no longer squeezes its name. The tabs
+  that show a panel (Pinned pages, Recent files, Terminals, Tags, Outline, Links) are drawn the same way, a size up on phones.
+- The status bar's word, character and token counts keep their width as you type, and line numbers stay still while you
+  type in a note zoomed to another text size; no stray column at the left edge on narrow windows.
+- Phones: a menu's More (and other submenus) opens in place, with Back; sheets close with Done, which asks before
+  discarding a form you've typed in.
+- Workspaces, tabs and pins no longer vanish or fail to save for a few seconds after a change while iCloud uploads
+  the settings file: the app keeps what it last read, and a save it couldn't make is retried. A file another device
+  changed in iCloud is downloaded when it can't be read, instead of staying unreadable.
+- Pasting a big image into a terminal no longer stops the server. `vau --url` now acts on that server's vault. Clicks
+  at the top of the desktop window land where you click. A terminal fits its view again after another device used it.
+  Shells shown only in another workspace keep running. Blank tabs don't stay behind. The keyboard comes back after a
+  sheet or the palette. On phones the page under a palette, menu, drawer or dialog no longer scrolls, and the right
+  sidebar slides in from the right after the left one was open. Deleting the
+  same name twice in a second keeps both copies in the trash. A double tap on the terminal's ⌃C key keeps the
+  keyboard up. Terminals survive a restart after Vaultite's folder is moved or renamed (the keeper started from the
+  old folder makes way for a new one); a terminal that has to run in the server says so, since a restart ends it.
+  An open page no longer stops when the app is rebuilt under it: the last days' files are kept, and a page that still
+  misses one reloads into the new version.
+
+### Plugin API 3
+- `plugin.onCreateFile(fn)` gets the new file read-only, as `{ size, head(n), tail(n) }` (an upload can be any size),
+  and can no longer change its bytes; `diffLines` (app and server) diffs lines fast at any size; an op with `input`
+  takes bytes.
+- **A plugin's icon is its manifest's `icon`**, its one source (definePlugin has no `icon`): a Lucide name, one a plugin
+  adds (`claude`, `github`) or a brand's mark as an SVG file, so Browse shows each plugin as it looks once installed.
+- `webPageActions` adds buttons to a web page's bar and its tab's menu; `appWindows.open(bundle, url)` opens a web
+  address in an app and answers the window it's in, for a `view:app/<bundle>:<wid>` tab.
+- `newTab` takes only sections by name (the old function form is gone); `parseTerminal(id)` reads which agent, account,
+  session and machine a terminal id names.
+- A plugin takes an error as its own by `preventDefault()` in its window listener (the app then doesn't report it), and the
+  desktop app answers a page's native open, save and message dialogs while it waits (`dialogSync`).
+- `schemeLink` takes links of another app's scheme clicked in the app (`zotero://…`); `takeSchemeLink(url)` offers one.
+- `fileFormat(path)` draws one Markdown file a plugin's own way, decided as it opens (a hosted plugin's board or
+  drawing), embeds included; `openView(…, { focus: false })` opens a view in a split without moving the focus.
+- `editorMenu` adds a plugin's items to a text editor's right-click menu; `commandList` is every command, for a plugin
+  keeping the app's keys first; editing commands act before `runCommandById` returns (once the editor has loaded them).
+- `fileRows` lets a plugin draw into the file tree's rows (classes, attributes, a style, elements around the name), and
+  `noteTop` draws under a note's properties.
+- A host's `browse` offers a source on the Plugins page's Browse, its `trust` says what its plugins can do; a
+  manifest's `replaces` makes opt-in plugins standing in for the same one alternatives, never both on (`standingIn`).
+- **Hosted plugins** (`hostPlugins`): a plugin can run others (another app's plugins), each
+  listed on the Plugins page in its host's group with its own switch, settings sheet, approval and Uninstall, and drawn like
+  any plugin (commands, panels, tabs, fences, status items), redrawing what it adds as it comes. On a phone, `revealPanel`
+  opens the drawer the panel is in.
+- `markdownHtml` and `hydrateMarkdown` draw Markdown as the app does into a plugin's own elements, and
+  `onMarkdownDrawn` hears each element Markdown was drawn into (embeds, previews, callouts and tables in the editor);
+  `menuShowing` says whether the app's menu is open; an embed's `![[link]]` is marked `data-wiki-embed`.
+- `formatDate` and `parseDate` (moment.js-style formats, weeks from any first day, names read back strictly or
+  loosely) on both sides, `@vaultite` and core/plugins.ts: Templates, Templater and Periodic notes share them.
+- `fileIcons` gives files and folders icons and colours (the tree, tabs, lists; a file's own `icon:` wins) and
+  `folderMenu` adds to a folder's menu in the file tree; a note's `tint:` colours its icon without an `icon:` too.
+- A vault plugin's `editor` extensions share the app's CodeMirror (`@codemirror/*`, `@lezer/highlight`), like React,
+  so they work in the editor; a plugin that has them says `apiVersion: 3`.
+- `usePluginSettings`, `useSheetGuard` (a form in a sheet asks before its unsaved input is lost) and the `SettingDecl`
+  type from `@vaultite`.
+- `check_plugins` leaves out what a plugin's `.vaultiteignore` keeps out of installs (its tests can import Node).
+- A fence a plugin draws in its own language (```tasks) no longer gets "its options should be `key: value` lines" under
+  it while editing.
+- A vault plugin's `import()`s are chunks of their own, loaded when used (`api/plugins/<id>/<version>/<file>`), so a
+  big package no longer slows every start (Excalidraw: 160 KB at start instead of 7.9 MB).
+- A manifest's `replaces`: other apps' plugins it stands in for, by app.
+- The Templates plugin's service `template:expand`: a plugin expands a template's text as a note is made from it or it's
+  inserted (Templater's `<% %>`), and may move the note; `ui.choose` with no items and `other` asks for text.
+- A vault plugin's screen-size and state variants the app doesn't have (`md:-m-1`) win over the app's plain classes on
+  its own elements, as they would in the app (they were silently under them).
+- A manifest's `userFiles`: files a plugin writes as the user's own (Vim's init.vim), not a new version to allow.
+- A manifest's `marks`: frontmatter keys that type a file without `type:` (`{"kanban-plugin": "kanban"}`), so a plugin
+  draws files another app's plugin made.
+- A manifest's `disclosures.network` can say `"*"`: any host its settings name (a sync's own server).
+- `plugin.every(name, null)` removes a job, for a schedule its settings set.
+- A vault plugin's modules that its `index.tsx` doesn't import run on the server and may use Node, like `plugin.ts`.
+- **Inline code as text**: a plugin's service `inline-code` reads inline code (Dataview's `` `= this.file.name` ``) as text
+  for agents, as `fence:<lang>` does a code fence.
+- File history lists versions other plugins keep of a file beside its own (the service `versions:<source>`: Git's
+  commits), to compare and restore the same way.
+- `fileMenu(path)`, a file's menu as its tab shows it, for a plugin's own list of files; `moveManyInto(paths, folder)`,
+  a drop into a folder with one Undo.
+
+### Plugin API 2
+- An app plugin with a backend can be `offByDefault` too: the server keeps its ops, services, hooks, jobs and pages off
+  until it's in plugins.json's `enabled`. `plugin.isOff()` and `vault.switchedOff()` say what's off, `enabled` counted.
+- **Breaking (views)**: a view's `icon` is only an icon; one picked per tab is `iconFor(arg)`.
+- **Breaking (sidebars)**: the `panels` provider is now `sidebarSetup` over `sidebars.json`'s shape. `panelSetup`,
+  `savedPanelSetup`, `storedPanelSetup` and `panelsChanged` are now `sidebars`, `savedSidebars`, `vaultSidebars` and
+  `sidebarsChanged`. plugins.json's old panel keys are gone (vaults are migrated once).
+- `newTab` is sections by name (`{ title, sort, hidden, only, heading, render }`), arranged by newtab.json; the older
+  function form still works as one section. Commands take an `icon` and a `label` for when they're buttons.
+- Lists select like the app's own (`useSelectable`, `selectClick`, `rowMenu`, `useSelected` from `@vaultite`), and a
+  `fileMenu` item with `many(paths)` is offered for several files at once. `SwipeRow` is exported.
+- A block's ctx has `setProperty` (absent when the file can't change), and kit's `Editable` shows a value it changes in
+  place.
+- Manifests declare `blocks` (checked, suggested in the editor, listed for AIs), `settings` (a sheet with no React),
+  `category`, `offByDefault`, `live` and `reads`; `settingsSearch` lists what a settings panel has, for Settings'
+  search. Plugins add operations with `plugin.op` and call them with
+  `op(id, params)`.
+- Many additions (formats and fences, editor extensions, status and file-bar items, workspace and device state,
+  machines, agents, `onCreate`, `onMove`, `onServerError`, `onAppError`): `web/src/api.ts` and `core/plugins.ts`. **Breaking**: `PinnedPages`, `ClaudeIcon`,
+  `GitHubIcon` and the plugin types are no longer re-exported from `@vaultite` (import them from their plugin:
+  `@plugins/core/<id>/types`). A vault plugin's `index.tsx` gets the app's CodeMirror (an `editor` extension works) and
+  can import a package's stylesheet.
+- Manifests say `version`, `author`, `repo`, `fundingUrl` and `disclosures` (checked; shown before a plugin is
+  allowed); `plugin.allows` / `plugin.allow` keep this Mac's yes to a command a setting names.
+- `startDrag(e, item, { touch: true })`: a finger drags it too, once held. `edgeScroller` (exported) also scrolls a
+  box sideways (`"x"`).
+
+## 0.1.0 (2026-09-29)
+
+The first versioned release. Plugin API 1.
+
+- **Vault as the only store**: every person, note, log, book, project, routine and page is a Markdown file; the server
+  indexes them in memory, watches the folder and pushes changes to every open app over a WebSocket. Writes are small
+  edits that keep comments, key order and hand-written text.
+- **Plugins**: core and community plugins, and vault plugins (the user's own, in `.vaultite/plugins/`, off until
+  turned on, reloaded live). Manifests can declare `apiVersion` and `minAppVersion`; plugins that need more than the
+  app has aren't loaded and say why.
+- **Pages**: dashboards made of blocks, pinned files in the sidebar and phone tab bar, tabs for a page's views, and
+  `/api/render` to read any page as text.
+- **Database views**: `block-query` as a table, cards, list, board or calendar, with inline property editing.
+- **Data plugins**: People (profiles, timelines, map), Logs (areas, gym, climbing, sleep, nutrition), Notes, Books,
+  Projects (GitHub stats, lines of code), Routines and daily notes, Work, Calendar (iCal), Templates.
+- **Editor**: CodeMirror with reading, live preview and source modes; code highlighting, Mermaid, math, callouts,
+  footnotes, a slash menu; any file type opens (code, images, PDF, media, notebooks); HTML artifacts and CSV tables.
+- **Obsidian compatibility**: wikilinks, backlinks and unlinked mentions, graph view, JSON Canvas boards, Excalidraw
+  drawings, Obsidian themes and CSS snippets.
+- **Workspace**: tabs and splits, drag and drop, quick switcher, command palette, hotkeys, five workspaces shared across
+  devices, file history with diff and restore, toasts with Undo.
+- **Agents**: an `AGENTS.md` written into the vault, the `vau` CLI, terminal tabs, and Claude Code integration.
+- **Apps**: web app and phone PWA served by Node, and a macOS desktop app (Electron) with one window per vault.
+- A sample vault in `examples/vault/`.
+
+
+## Before 0.1.0
+
+Built in a few days before versioning: data moved from SQLite into Markdown files, the backend from Python to
+TypeScript on Node, and the repo was cleared of personal data (who the user is lives in the vault's `ME.md`).

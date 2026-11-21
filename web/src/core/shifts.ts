@@ -1,0 +1,71 @@
+import { getStore, onStore } from "@/core/data"
+import { trace } from "@/core/trace"
+import { isNumber, isObj, isText } from "../../../core/values.ts"
+
+type Shift = { startTime: number; value: number; hadRecentInput: boolean; nodes: (Node | null)[] }
+function shiftOf(e: PerformanceEntry): Shift | null {
+  if (!("value" in e) || !isNumber(e.value)) return null
+  const sources: unknown[] = "sources" in e && Array.isArray(e.sources) ? e.sources : []
+  return { startTime: e.startTime, value: e.value, hadRecentInput: "hadRecentInput" in e && e.hadRecentInput === true,
+    nodes: sources.map((s) => (isObj(s) && s.node instanceof Node ? s.node : null)) }
+}
+
+function named(n: Node | null | undefined): string {
+  if (!(n instanceof Element)) return n ? n.nodeName.toLowerCase() : "?"
+  const data = [...n.attributes].filter((a) => a.name.startsWith("data-")).map((a) => `[${a.name}]`).slice(0, 3).join("")
+  const cls = typeof n.className === "string" ? n.className.split(/\s+/).filter(Boolean).slice(0, 3).map((c) => `.${c}`).join("") : ""
+  return `${n.tagName.toLowerCase()}${data}${cls}`.slice(0, 160)
+}
+
+const REGIONS: [string, string][] = [
+  ["aside[data-side=left]", "left sidebar"], ["aside[data-side=right]", "right sidebar"], ["[data-status-bar]", "status bar"],
+  ["[data-tab-bar], [role=tablist]", "tabs"], ["[data-pane]", "pane"],
+]
+function regionOf(n: Node | null | undefined): string {
+  const el = n instanceof Element ? n : n?.parentElement
+  return (el && REGIONS.find(([sel]) => el.closest(sel))?.[1]) || "page"
+}
+
+const LOAD_MS = 10_000
+const KEPT = "vaultite.loadshifts"
+type Load = { at: string; moved: Record<string, number> }
+const isLoad = (l: unknown): l is Load => isObj(l) && isText(l.at) && isObj(l.moved) && Object.values(l.moved).every(isNumber)
+function keptLoads(): Load[] {
+  const kept: unknown = JSON.parse(localStorage.getItem(KEPT) ?? "[]")
+  return Array.isArray(kept) ? kept.filter(isLoad) : []
+}
+let readyAt = 0
+const load: Record<string, number> = {}
+
+function keep() {
+  try {
+    const all = [...keptLoads(), { at: new Date().toISOString(), moved: { ...load } }].slice(-30)
+    localStorage.setItem(KEPT, JSON.stringify(all))
+  } catch { /* private mode, or full */ }
+}
+
+globalThis.__vauLoadShifts = () => {
+  let loads: Load[] = []
+  try { loads = keptLoads() } catch { /* none kept */ }
+  const moved = loads.filter((l) => Object.keys(l.moved).length).length
+  return { loads: loads.length, moved, share: loads.length ? Math.round((moved / loads.length) * 100) / 100 : 0, last: loads.slice(-10) }
+}
+
+const stop = onStore(() => {
+  if (!getStore() || readyAt) return
+  readyAt = performance.now()
+  setTimeout(keep, LOAD_MS)
+  queueMicrotask(stop)
+})
+
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries().map(shiftOf)) {
+      if (!e || e.hadRecentInput || !e.value) continue
+      const ready = !!readyAt && e.startTime >= readyAt
+      const regions = [...new Set(e.nodes.map(regionOf))]
+      if (ready && e.startTime - readyAt < LOAD_MS) for (const r of regions) load[r] = (load[r] ?? 0) + 1
+      trace("shift", { value: Math.round(e.value * 1e4) / 1e4, phase: ready ? "ready" : "loading", regions, moved: e.nodes.map(named) })
+    }
+  }).observe({ type: "layout-shift", buffered: true })
+} catch { /* no layout-shift entries here (WebKit) */ }

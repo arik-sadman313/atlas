@@ -1,0 +1,83 @@
+import { acceptCompletion, closeCompletion, completionStatus, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion, type CompletionContext, type CompletionResult, type CompletionSource } from "@codemirror/autocomplete"
+import { type EditorState, Prec, StateEffect, StateField } from "@codemirror/state"
+import { keymap, ViewPlugin, type EditorView } from "@codemirror/view"
+import { trackSoon } from "@/core/unsaved"
+
+const dismiss = StateEffect.define<number>()
+const dismissed = StateField.define<number | null>({
+  create: () => null,
+  update(at, tr) {
+    for (const e of tr.effects) if (e.is(dismiss)) at = e.value
+    if (at === null) return null
+    if (tr.docChanged) at = tr.changes.mapPos(at, -1)
+    const head = tr.state.selection.main.head
+    return head < at || tr.state.doc.lineAt(head).from > at ? null : at
+  },
+})
+
+// The editor's `override` makes CodeMirror ignore `autocomplete` language data, so plugins add theirs as `suggest`.
+export const pluginSuggest: CompletionSource = (ctx) => {
+  const sources = ctx.state.languageDataAt<CompletionSource>("suggest", ctx.pos)
+  // Stays sync when the sources are: while a result is pending, CodeMirror lets Enter through as a new line.
+  const next = (i: number): ReturnType<CompletionSource> => {
+    if (i >= sources.length) return null
+    const r = sources[i](ctx)
+    return r instanceof Promise ? r.then((x) => x ?? next(i + 1)) : r ?? next(i + 1)
+  }
+  return next(0)
+}
+
+const starts = new WeakMap<EditorView, number>()
+export function quiet(source: CompletionSource): CompletionSource {
+  return (ctx: CompletionContext) => {
+    const check = (r: CompletionResult | null) => {
+      if (!r || (!ctx.explicit && ctx.state.field(dismissed, false) === r.from)) return null
+      if (ctx.view) starts.set(ctx.view, r.from)
+      return r
+    }
+    const r = source(ctx)
+    return r instanceof Promise ? r.then(check) : check(r)
+  }
+}
+
+const close = (view: EditorView) => {
+  if (completionStatus(view.state) !== "active") return false
+  const from = starts.get(view)
+  closeCompletion(view)
+  if (from !== undefined) view.dispatch({ effects: dismiss.of(from) })
+  return true
+}
+
+export const PICK_DELAY = 75
+const suggesting = new Map<EditorView, number>()
+trackSoon("suggestions", () => [...suggesting].some(([v, opened]) => completionStatus(v.state) === "pending" || Date.now() - opened < PICK_DELAY))
+const settles = ViewPlugin.define((view) => {
+  suggesting.set(view, 0)
+  return {
+    update(u) { if (currentCompletions(u.state).length && !currentCompletions(u.startState).length) suggesting.set(view, Date.now()) },
+    destroy() { suggesting.delete(view) },
+  }
+})
+
+const hoverPicks = ViewPlugin.define((view) => {
+  const move = (e: PointerEvent) => {
+    const moved = e.movementX || e.movementY
+    if (e.pointerType !== "mouse" || !moved || !view.hasFocus || completionStatus(view.state) !== "active") return
+    const li = e.target instanceof Element ? e.target.closest(".cm-tooltip-autocomplete li[role=option]") : null
+    const i = Number(/-(\d+)$/.exec(li?.id ?? "")?.[1] ?? NaN)
+    if (Number.isInteger(i) && i !== selectedCompletionIndex(view.state)) view.dispatch({ effects: setSelectedCompletion(i) })
+  }
+  document.addEventListener("pointermove", move)
+  return { destroy: () => document.removeEventListener("pointermove", move) }
+})
+
+export const suggestKeys = [settles, dismissed, hoverPicks, Prec.highest(keymap.of([{ key: "Escape", run: close }, { key: "Tab", run: acceptCompletion }]))]
+
+export function optionGlyph(c: Completion) {
+  const glyph = "glyph" in c && c.glyph instanceof Function ? c.glyph() : null
+  return glyph instanceof Node ? glyph : null
+}
+export function optionTrail(c: Completion, _s: EditorState, view: EditorView) {
+  const trail = "trail" in c && c.trail instanceof Function ? c.trail(view) : null
+  return trail instanceof Node ? trail : null
+}

@@ -1,0 +1,108 @@
+// The panes from the keyboard, with the real keys: ⌘D and ⇧⌘D split (in an editor too), ⌃⌘ arrows focus (past the
+// last pane into a sidebar), ⌃⌘] and [ go in order, ⌃⇧⌘ arrows swap, ⌃⌥⌘ arrows resize, ⌃⌘= evens out (off a Mac,
+// Alt+Shift focuses, goes in order and evens out); Dim inactive panes fades the others, light and dark. WRITES:
+// throwaway server only.
+//   node web/qa/panekeys.mjs <base url> <vault path> [out dir]
+import { mkdirSync, readdirSync, readFileSync } from "node:fs"
+import { command, qa, wait } from "./lib/qa.mjs"
+const { args: [B, VAULT, OUT = "/tmp/panekeys-shots/"], browser, check, watch, done } = await qa(import.meta.url, { motion: true })
+mkdirSync(OUT, { recursive: true })
+const MAC = process.platform === "darwin"
+const note = readdirSync(`${VAULT}/Notes`).filter((f) => f.endsWith(".md")).sort()[0]
+
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+await ctx.addInitScript(() => { if (!sessionStorage.getItem("qa")) { localStorage.clear(); sessionStorage.setItem("qa", "1") } })
+const page = watch(await ctx.newPage(), { console: true })
+const shot = (name) => page.screenshot({ path: `${OUT}panekeys-${name}.png` })
+
+const panes = () => page.evaluate(() => [...document.querySelectorAll("[data-pane-area] > section[data-pane-frame]:not([data-away])")].map((s) => {
+  const r = s.getBoundingClientRect()
+  return { id: s.dataset.paneFrame, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), focused: s.hasAttribute("data-focused") }
+}).sort((a, b) => a.x - b.x || a.y - b.y))
+const focused = async () => (await panes()).find((p) => p.focused)
+/** Which pane's editor has the keyboard (its id), or what else does. */
+const keyboard = () => page.evaluate(() => {
+  const a = document.activeElement
+  return a?.closest(".cm-content") ? `editor:${a.closest("section[data-pane-frame]")?.dataset.paneFrame}` : a?.closest("[data-sidebar-body]") ? "sidebar" : a?.tagName ?? ""
+})
+const press = async (k) => { await page.keyboard.press(k); await wait(350) }
+
+await page.goto(`${B}#file/${encodeURIComponent(`Notes/${note}`)}`); await wait(1500)
+await page.locator(".cm-content").first().click(); await wait(200)
+const text = readFileSync(`${VAULT}/Notes/${note}`, "utf8")
+
+// ---------- splitting ----------
+await press("ControlOrMeta+D")
+let ps = await panes()
+check("⌘D in an editor splits right (not Delete paragraph)", ps.length === 2 && ps[0].y === ps[1].y && ps[1].focused, ps)
+check("...the keyboard goes with the focus, into the new pane's editor", await keyboard() === `editor:${ps[1].id}`, await keyboard())
+await wait(1200)
+check("...the note is untouched", readFileSync(`${VAULT}/Notes/${note}`, "utf8") === text)
+await press("ControlOrMeta+Shift+D")
+ps = await panes()
+check("⇧⌘D splits down", ps.length === 3 && ps[2].x === ps[1].x && ps[2].y > ps[1].y && ps[2].focused, ps)
+
+// The pane keys' modifiers: ⌃⌘ on a Mac, Alt+Shift elsewhere.
+const P = MAC ? "Meta+Control" : "Alt+Shift", K = MAC ? "⌃⌘" : "Alt+Shift+"
+const [L, TR, BR] = ps
+{
+  // ---------- focus ----------
+  await press(`${P}+ArrowUp`)
+  check(`${K}↑ focuses the pane above`, (await focused())?.id === TR.id, await panes())
+  await press(`${P}+ArrowLeft`)
+  check(`${K}← focuses the pane to the left, its editor taking the keyboard`, (await focused())?.id === L.id && await keyboard() === `editor:${L.id}`, [await panes(), await keyboard()])
+  await press(`${P}+ArrowLeft`)
+  check("...past the last pane, the left sidebar", await keyboard() === "sidebar", await keyboard())
+  await press(`${P}+ArrowRight`)
+  check("...and back to the pane", await keyboard() === `editor:${L.id}`, await keyboard())
+  await press(`${P}+]`)
+  const n1 = (await focused())?.id
+  await press(`${P}+]`); await press(`${P}+]`)
+  check(`${K}] goes to the next pane in order, round to the first`, n1 === TR.id && (await focused())?.id === L.id, [n1, await focused()])
+  await press(`${P}+[`)
+  check(`${K}[ goes back round to the last`, (await focused())?.id === BR.id, await focused())
+}
+if (MAC) {
+  // ---------- moving and resizing ----------
+  await press("Meta+Control+ArrowLeft")
+  await press("Meta+Control+Shift+ArrowRight")
+  ps = await panes()
+  check("⌃⇧⌘→ swaps the pane with its neighbour, keeping the focus", ps[0].id === TR.id && ps[1].id === L.id && ps[1].focused && ps[1].h === TR.h, ps)
+  const w0 = ps[0].w
+  await press("Meta+Control+Alt+ArrowLeft")
+  ps = await panes()
+  check("⌃⌥⌘← moves its divider left (the pane on the right grows)", Math.abs(ps[0].w - (w0 - 48)) <= 3, [w0, ps[0].w])
+  await press("Meta+Control+Alt+ArrowDown")
+  ps = await panes()
+  const [up, down] = ps.filter((p) => p.x === ps[1].x)
+  check("⌃⌥⌘↓ moves its divider down", up.focused && up.h - down.h >= 90, [up, down])
+}
+// (off a Mac, moving a divider has no default keys: the palette's)
+if (!MAC) { await command(page, "Resize pane left"); await command(page, "Resize pane up"); await wait(400) }
+const before = await panes()
+check("...the splits are uneven first", Math.abs(before[0].w - before[1].w) > 40 && Math.abs(before[1].h - before[2].h) > 40, before)
+await press(`${P}+=`)
+ps = await panes()
+check(`${K}= evens every split out`, Math.abs(ps[0].w - ps[1].w) <= 2 && Math.abs(ps[1].h - ps[2].h) <= 2, [before, ps])
+
+// ---------- Dim inactive panes ----------
+const dims = () => page.evaluate(() => [...document.querySelectorAll("[data-pane-area] > section[data-pane-frame]:not([data-away])")].map((s) => ({
+  focused: s.hasAttribute("data-focused"), o: Number(getComputedStyle(s.querySelector("[data-pane-body]"), "::after").opacity),
+})))
+let d = await dims()
+check("on by default: the panes without the focus fade, the focused one doesn't", d.filter((x) => !x.focused).every((x) => x.o > 0.2) && d.find((x) => x.focused)?.o === 0, d)
+await shot("dim-light")
+await command(page, "Theme…"); await page.keyboard.type("Dark"); await page.keyboard.press("Enter"); await wait(600)
+await shot("dim-dark")
+// The fade follows the focus, cross-fading (mid-way, both are part-faded).
+await page.evaluate(() => document.querySelector("[data-pane-area] > section[data-pane-frame]:not([data-away]):not([data-focused]) [data-pane-body]")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })))
+await wait(40)
+const mid = await dims()
+await wait(400)
+d = await dims()
+check("...the focus moving cross-fades: mid-way part-faded, then the new one clear", mid.some((x) => x.o > 0 && x.o < 0.3) && d.find((x) => x.focused)?.o === 0, [mid, d])
+await command(page, "Theme…"); await page.keyboard.type("Light"); await page.keyboard.press("Enter"); await wait(300); await command(page, "Dim inactive panes"); await wait(400)
+check("...switched off, nothing dims", (await dims()).every((x) => x.o === 0), await dims())
+
+await ctx.close()
+await done()

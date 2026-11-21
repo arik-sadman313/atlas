@@ -1,0 +1,195 @@
+import { StrictMode, useEffect, useRef, useState } from "react"
+import { createRoot } from "react-dom/client"
+import { AudioLines, ChevronLeft, Clapperboard, Ellipsis, LoaderCircle, Server as ServerIcon } from "lucide-react"
+import "./index.css"
+import { ContextMenus, menuBelow } from "@/components/ContextMenu"
+import { phoneApp, type PhoneDownload, type Server } from "@/core/phoneapp"
+import { cn, followSystemTheme } from "@/lib/utils"
+import { plainText } from "../../core/plainerror.ts"
+
+followSystemTheme()
+
+function serverUrl(typed: string): string | null {
+  const t = typed.trim()
+  if (!t) return null
+  try {
+    const u = new URL(/^[a-z]+:\/\//i.test(t) ? t : `https://${t}`)
+    if (!/^https?:$/.test(u.protocol) || !u.hostname) return null
+    return u.origin
+  } catch { return null }
+}
+
+const nameOf = (url: string) => new URL(url).hostname.split(".")[0]
+
+const VIDEO = /\.(mp4|m4v|mov|webm|ogv)$/i
+const placeKey = (path: string) => `vaultite.offline.${path}`
+
+function Kept({ items, play, remove }: { items: PhoneDownload[]; play: (d: PhoneDownload) => void; remove: (d: PhoneDownload) => void }) {
+  return (
+    <section aria-label="On this iPhone" className="flex flex-col">
+      <h2 className="px-4 pb-1.5 text-[13px] text-muted-foreground">On this iPhone</h2>
+      <div className="overflow-hidden rounded-[10px] bg-card">
+        {items.map((d, i) => {
+          const Icon = VIDEO.test(d.path) ? Clapperboard : AudioLines
+          const sub = d.done ? `${Math.round(d.size / 1e6)} MB` : d.error ? d.error : d.size ? `Downloading, ${Math.floor((d.got / d.size) * 100)}%` : "Downloading…"
+          return (
+            <div key={d.path} className={cn("flex items-center", i > 0 && "border-t-[0.5px] border-border")}>
+              <button type="button" disabled={!d.done} onClick={() => play(d)}
+                className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 py-2 pl-4 text-left active:bg-foreground/[0.06] disabled:cursor-default">
+                <Icon className="size-5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-[17px]">{d.title}</span>
+                  <span className={cn("truncate text-[13px]", d.error ? "text-destructive" : "text-muted-foreground")}>{sub}</span>
+                </span>
+              </button>
+              <button type="button" aria-label={`More for ${d.title}`} onClick={(e) => menuBelow(e, [{ label: "Remove from this iPhone", danger: true, run: () => remove(d) }])}
+                className="grid size-11 shrink-0 cursor-pointer place-items-center text-muted-foreground active:bg-foreground/[0.06]">
+                <Ellipsis className="size-5" strokeWidth={2} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function Playing({ d, close }: { d: PhoneDownload; close: () => void }) {
+  const ref = useRef<HTMLVideoElement & HTMLAudioElement>(null)
+  useEffect(() => {
+    const el = ref.current!
+    let last = 0
+    const keep = () => {
+      if (!Number.isFinite(el.duration)) return
+      last = Date.now()
+      localStorage.setItem(placeKey(d.path), String(el.currentTime))
+      void phoneApp!.setPlace({ path: d.path, t: el.currentTime, d: el.duration, at: Date.now() }).catch(() => {})
+    }
+    const meta = () => { const t = Number(localStorage.getItem(placeKey(d.path)) || 0); if (t > 5 && t < el.duration - 10) el.currentTime = t }
+    const tick = () => { if (Date.now() - last > 15_000) keep() }
+    el.addEventListener("loadedmetadata", meta)
+    el.addEventListener("pause", keep)
+    el.addEventListener("timeupdate", tick)
+    return () => { keep(); el.removeEventListener("loadedmetadata", meta); el.removeEventListener("pause", keep); el.removeEventListener("timeupdate", tick) }
+  }, [d.path])
+  const src = `${location.origin}/_capacitor_file_${d.file}`
+  return (
+    <section aria-label={d.title} className="flex flex-col gap-3">
+      <button type="button" onClick={close} className="flex h-11 cursor-pointer items-center gap-1 self-start text-[17px] text-primary"><ChevronLeft className="size-5" strokeWidth={2.5} />Back</button>
+      <h2 className="px-1 text-[20px] font-semibold">{d.title}</h2>
+      {VIDEO.test(d.path)
+        ? <video ref={ref} src={src} controls playsInline autoPlay className="w-full rounded-[10px] bg-black" />
+        : <audio ref={ref} src={src} controls autoPlay className="w-full" />}
+    </section>
+  )
+}
+
+function Phone() {
+  const [servers, setServers] = useState<Server[] | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
+  const [error, setError] = useState<{ url: string; text: string } | null>(null)
+  const [typed, setTyped] = useState("")
+  const [kept, setKept] = useState<PhoneDownload[]>([])
+  const [playing, setPlaying] = useState<PhoneDownload | null>(null)
+  const loadKept = () => { void phoneApp?.downloads().then((r) => setKept(r.items ?? []), () => {}) }
+  useEffect(loadKept, [])
+
+  const open = async (url: string) => {
+    setOpening(url); setError(null)
+    const r = await phoneApp!.probe({ url }).catch((e: Error) => ({ ok: false, error: e.message }))
+    if (r.ok) {
+      setTimeout(() => { setOpening(null); setError({ url, text: "It answered, but its page didn't load" }) }, 15_000)
+      return phoneApp!.open({ url }).catch((e: Error) => { setOpening(null); setError({ url, text: plainText(e) }) })
+    }
+    setOpening(null)
+    setError({ url, text: r.error || "It didn't answer" })
+  }
+
+  useEffect(() => {
+    if (!phoneApp) return
+    phoneApp.servers().then((r) => {
+      setServers(r.servers)
+      const q = new URLSearchParams(location.search), pick = q.has("pick"), failed = q.get("failed")
+      // Never reopened on its own: a server that answers its check but not its page would loop.
+      if (failed) return setError({ url: failed, text: `Its page didn't load: ${(q.get("why") || "no answer").replace(/\.$/, "")}` })
+      if (r.last && !pick && r.servers.some((s) => s.url === r.last)) open(r.last)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount
+  }, [])
+
+  const save = (list: Server[]) => { setServers(list); return phoneApp!.setServers({ servers: list }) }
+  const add = async () => {
+    const url = serverUrl(typed)
+    if (!url) return setError({ url: "", text: "That isn't a web address" })
+    if (!servers!.some((s) => s.url === url)) await save([...servers!, { url, name: nameOf(url) }])
+    setTyped("")
+    open(url)
+  }
+
+  if (!phoneApp) return <p className="p-6 text-[17px] text-muted-foreground">This page is the iPhone app's.</p>
+  const shell = "mx-auto flex min-h-dvh max-w-[480px] flex-col gap-6 px-4 pt-[max(env(safe-area-inset-top),16px)] pb-[max(env(safe-area-inset-bottom),16px)]"
+  if (playing) return <main className={shell}><Playing d={playing} close={() => setPlaying(null)} /></main>
+  return (
+    <main className={shell}>
+      <div className="flex flex-col items-center gap-2 pt-10 pb-2">
+        <img src="icon.svg" alt="" className="size-16" />
+        <h1 className="text-[22px] font-semibold">Vaultite</h1>
+      </div>
+
+      {servers && !!servers.length && (
+        <section aria-label="Servers" className="flex flex-col">
+          <h2 className="px-4 pb-1.5 text-[13px] text-muted-foreground">Servers</h2>
+          <div className="overflow-hidden rounded-[10px] bg-card">
+            {servers.map((s, i) => (
+              <div key={s.url} className={cn("flex items-center", i > 0 && "border-t-[0.5px] border-border")}>
+                <button type="button" disabled={!!opening} onClick={() => open(s.url)}
+                  className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 py-2 pl-4 text-left active:bg-foreground/[0.06]">
+                  <ServerIcon className="size-5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-[17px]">{s.name}</span>
+                    <span className="truncate text-[13px] text-muted-foreground">{new URL(s.url).host}</span>
+                    {error?.url === s.url && <span role="alert" className="text-[13px] text-destructive">{error.text}. Is Tailscale on and the server awake?</span>}
+                  </span>
+                  {opening === s.url && <LoaderCircle className="size-5 shrink-0 animate-spin text-muted-foreground" strokeWidth={2} />}
+                </button>
+                <button type="button" aria-label={`More for ${s.name}`}
+                  onClick={(e) => menuBelow(e, [{ label: "Remove", run: () => { save(servers.filter((x) => x.url !== s.url)) } }])}
+                  className="grid size-11 shrink-0 cursor-pointer place-items-center text-muted-foreground active:bg-foreground/[0.06]">
+                  <Ellipsis className="size-5" strokeWidth={2} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!!kept.length && <Kept items={kept} play={setPlaying} remove={(d) => { void phoneApp!.removeDownload({ path: d.path }).then(loadKept) }} />}
+
+      {servers && (
+        <section aria-label="Add a server" className="flex flex-col">
+          <h2 className="px-4 pb-1.5 text-[13px] text-muted-foreground">Add a server</h2>
+          <form onSubmit={(e) => { e.preventDefault(); add() }} className="flex items-center gap-2 rounded-[10px] bg-card p-1.5 pl-4">
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="my-server.tailnet.ts.net:8447" aria-label="Server address"
+              type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              className="h-9 min-w-0 flex-1 bg-transparent text-[17px] outline-none" />
+            <button type="submit" disabled={!typed.trim() || !!opening}
+              className="h-9 shrink-0 cursor-pointer rounded-[8px] bg-primary px-4 text-[17px] font-medium text-primary-foreground disabled:opacity-50">
+              Add
+            </button>
+          </form>
+          {error && !error.url && <p role="alert" className="px-4 pt-1.5 text-[13px] text-destructive">{error.text}</p>}
+          <p className="px-4 pt-1.5 text-[13px] text-muted-foreground">
+            Vaultite runs on your machine. Serve it on your tailnet (Tailscale Serve), turn on Tailscale on this iPhone, and add its address.
+          </p>
+        </section>
+      )}
+    </main>
+  )
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <Phone />
+    <ContextMenus />
+  </StrictMode>,
+)

@@ -1,0 +1,292 @@
+# The desktop app for Mac, Linux and Windows (each built on its own architecture). A v* tag is that GitHub release and
+# goes on the update feed (vaultite.com/updates); nightly, if main changed, it's Vaultite Nightly (electron/nightly.cjs).
+# Secrets: MAC_CERT_P12 (the Developer ID Application certificate and key, base64), NOTARY_KEY (an App Store Connect
+# API key's .p8, base64), SITE_DEPLOY_TOKEN (fine-grained: tkslucas/vaultite-site, Contents read and write), AUR_SSH_KEY
+# (the private key of the AUR account that maintains vaultite-bin).
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "37 7 * * *" # (off the hour: GitHub delays, and may drop, runs on it)
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish (the nightly release and feed); off, it only builds
+        type: boolean
+        default: true
+concurrency:
+  group: release-${{ github.ref }}
+permissions:
+  contents: write
+env:
+  STABLE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          if [ "$STABLE" = true ]; then
+            [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::package.json's version is $v, the tag $GITHUB_REF_NAME"; exit 1; }
+            echo "version=$v" >> "$GITHUB_OUTPUT"; echo "build=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::a nightly is built from main"; exit 1; }
+          last=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$last" = "$GITHUB_SHA" ]; then
+            echo "main hasn't changed since the last nightly"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          IFS=. read -r major minor patch <<< "${v%%-*}"
+          echo "version=$major.$minor.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+          echo "build=true" >> "$GITHUB_OUTPUT"
+
+  # Both architectures in one job: with a runner each, GitHub at times gave one no macOS runner and cancelled it after
+  # 15 minutes queued (v0.14.0's arm64, twice), so a release waits on one macOS runner, not two at once.
+  mac:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Signing identity and notary profile, in a keychain of the run's own
+        env:
+          CERT: ${{ secrets.MAC_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          for s in CERT CERT_PASSWORD NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do
+            [ -n "${!s}" ] || { echo "::error::a secret for signing or notarizing isn't set ($s; see the top of release.yml)"; exit 1; }
+          done
+          kc="$RUNNER_TEMP/signing.keychain-db"; pw=$(openssl rand -hex 16)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$kc" > /dev/null
+          # shellcheck disable=SC2046 # the runner's keychains, one word each (no spaces in their paths)
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          # (base64 twice when it was stored from a file picker that already gave it as base64)
+          if ! grep -q "BEGIN PRIVATE KEY" "$RUNNER_TEMP/notary.p8"; then
+            base64 --decode < "$RUNNER_TEMP/notary.p8" > "$RUNNER_TEMP/key" && mv "$RUNNER_TEMP/key" "$RUNNER_TEMP/notary.p8"
+          fi
+          grep -q "BEGIN PRIVATE KEY" "$RUNNER_TEMP/notary.p8" || { echo "::error::NOTARY_KEY isn't a .p8 key"; exit 1; }
+          xcrun notarytool store-credentials vaultite-notary --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER" --keychain "$kc"
+          rm "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+          echo "VAULTITE_NOTARY_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+      - run: npx playwright-core install chromium
+      - if: env.STABLE != 'true'
+        run: npm pkg set version=${{ needs.plan.outputs.version }}
+      - run: npm run ${{ env.STABLE == 'true' && 'release' || 'release:nightly' }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mac
+          if-no-files-found: error
+          path: |
+            dist-app/*.dmg
+            dist-app/*-mac.zip
+            dist-app/*-mac.zip.blockmap
+            dist-app/*-mac.yml
+
+  linux:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/apt-cache
+        with:
+          name: release
+      - run: npx playwright-core install --with-deps chromium
+      - uses: ./.github/actions/apt-cache
+        with:
+          name: release
+          save: "true"
+      - if: env.STABLE != 'true'
+        run: npm pkg set version=${{ needs.plan.outputs.version }}
+      - run: npm run ${{ env.STABLE == 'true' && 'release:linux' || 'release:linux:nightly' }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-${{ runner.arch }}
+          if-no-files-found: error
+          path: |
+            dist-app/*.AppImage
+            dist-app/*.deb
+            dist-app/*-linux*.yml
+
+  # Windows' installer (NSIS, per user), each architecture on its own runner; publish merges their update lists
+  # (tools/feed.ts), from which each app takes its architecture's.
+  windows:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    strategy:
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+      # (npm's scripts are sh: Git Bash's)
+      - run: npm config set script-shell "$(cygpath -w "$(command -v bash)")"
+      - run: npm ci
+      - run: npx playwright-core install chromium
+      - if: env.STABLE != 'true'
+        run: npm pkg set version=${{ needs.plan.outputs.version }}
+      # Signed only when Azure Trusted Signing is set up (electron-builder's azureSignOptions; it signs the app's .exe
+      # files and the installer, and the app then checks its updates are signed by the same publisher).
+      - name: Signing, when Azure Trusted Signing is set up
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ENDPOINT: ${{ vars.AZURE_SIGN_ENDPOINT }}
+          ACCOUNT: ${{ vars.AZURE_SIGN_ACCOUNT }}
+          PROFILE: ${{ vars.AZURE_SIGN_PROFILE }}
+          PUBLISHER: ${{ vars.AZURE_SIGN_PUBLISHER }}
+        run: |
+          if [ -z "$AZURE_CLIENT_ID" ]; then echo "::warning::Windows' installer isn't signed (no Azure Trusted Signing: see the top of release.yml)"; exit 0; fi
+          npm pkg set "build.win.azureSignOptions.endpoint=$ENDPOINT" "build.win.azureSignOptions.codeSigningAccountName=$ACCOUNT" \
+            "build.win.azureSignOptions.certificateProfileName=$PROFILE" "build.win.azureSignOptions.publisherName=$PUBLISHER"
+      - run: npm run ${{ env.STABLE == 'true' && 'release:win' || 'release:win:nightly' }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      # (its update list names only its installer: kept under its arch, for publish to merge with the other's)
+      - run: |
+          arch=$(echo "${{ runner.arch }}" | tr '[:upper:]' '[:lower:]')
+          for f in dist-app/latest.yml dist-app/nightly.yml; do [ -f "$f" ] && mv "$f" "${f%.yml}.$arch.yml"; done
+          ls dist-app
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-${{ runner.arch }}
+          if-no-files-found: error
+          path: |
+            dist-app/*-Setup-*.exe
+            dist-app/*-Setup-*.exe.blockmap
+            dist-app/latest.*.yml
+            dist-app/nightly.*.yml
+
+  publish:
+    needs: [plan, mac, linux, windows]
+    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: out
+          merge-multiple: true
+      - run: node tools/feed.ts out
+      - name: The GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.plan.outputs.version }}
+        run: |
+          if [ "$STABLE" = true ]; then
+            # The notes are the section's summary, above its first ### (the rest is in the changelog, linked)
+            awk -v h="## $V" 'index($0, h) == 1 { on = 1; next } on && /^##/ { exit } on' CHANGELOG.md > notes.md
+            printf '\nEvery change: [CHANGELOG.md](%s/blob/%s/CHANGELOG.md).\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
+            gh release create "$GITHUB_REF_NAME" out/*.dmg out/*.AppImage out/*.deb out/*-Setup-*.exe --verify-tag --title "Vaultite $V" \
+              --notes-file notes.md
+          else
+            gh release delete nightly --cleanup-tag --yes || true
+            gh release create nightly out/*.dmg out/*.AppImage out/*.deb out/*-Setup-*.exe --prerelease --target "$GITHUB_SHA" \
+              --title "Nightly $V" --notes "Vaultite Nightly: main at $GITHUB_SHA, built $(date -u '+%Y-%m-%d %H:%M') UTC. It installs beside Vaultite and updates itself to each next nightly."
+          fi
+      # The feed's files, the update lists last so they never name a file that isn't there yet (a nightly's are
+      # nightly*.yml, named after the version's prerelease; Windows' are latest.yml and nightly.yml).
+      - name: The update feed
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "$STABLE" = true ]; then dir=""; else dir="nightly/"; fi
+          for f in out/*-mac.zip out/*-mac.zip.blockmap out/*.AppImage out/*.deb out/*-Setup-*.exe out/*-Setup-*.exe.blockmap out/*.yml; do
+            npx -y wrangler@4.156.0 r2 object put "vaultite-updates/$dir$(basename "$f")" --file "$f" --remote
+          done
+          node tools/check_feed.ts "https://vaultite.com/updates/$dir" out
+          node tools/prune_feed.ts "$dir"
+      # vaultite.com's demo is the latest release: its repository's deploy.yml builds this one and deploys the site.
+      - name: The website
+        if: env.STABLE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::warning::SITE_DEPLOY_TOKEN isn't set: vaultite.com wasn't redeployed (its Deploy workflow, by hand)"; exit 0; }
+          gh api repos/tkslucas/vaultite-site/dispatches -f event_type=release -f "client_payload[tag]=$GITHUB_REF_NAME"
+
+  # The AUR's vaultite-bin (packaging/aur): a release's .debs repackaged, built once here, then pushed to the AUR.
+  aur:
+    needs: [plan, publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm --needed git openssh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: linux-*
+          path: out
+          merge-multiple: true
+      - name: The PKGBUILD for this release, built once
+        env:
+          V: ${{ needs.plan.outputs.version }}
+        run: |
+          pacman -S --noconfirm --needed alsa-lib at-spi2-core gtk3 libnotify libsecret libxss libxtst nss util-linux-libs xdg-utils
+          useradd -m builder
+          cp "out/vaultite_${V}_amd64.deb" "packaging/aur/vaultite-${V}-x86_64.deb"
+          chown -R builder packaging/aur out
+          su builder -c "packaging/aur/bump.sh '$V' 'out/vaultite_${V}_amd64.deb' 'out/vaultite_${V}_arm64.deb' && cd packaging/aur && makepkg -f --noconfirm"
+      - name: Pushed to the AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          V: ${{ needs.plan.outputs.version }}
+        run: |
+          [ -n "$AUR_SSH_KEY" ] || { echo "::warning::AUR_SSH_KEY isn't set: vaultite-bin wasn't updated"; exit 0; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          # (AUR's published host key: aur.archlinux.org's front page, SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4)
+          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN" > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/vaultite-bin.git aur
+          cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO aur/
+          cd aur
+          git add PKGBUILD .SRCINFO
+          git -c user.name="Vaultite releases" -c user.email="noreply@vaultite.com" commit -m "vaultite-bin $V"
+          git push origin HEAD:master

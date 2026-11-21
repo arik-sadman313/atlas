@@ -1,0 +1,21 @@
+{
+  "density": "compact",
+  "sidebarScroll": "panels",
+  "panelDividers": false,
+  "panelHeadings": "shown",
+  "snippets": [],
+  "fileIcons": false,
+  "tabBar": true,
+  "paneTabBars": true, "dimPanes": true, "paneCards": false,
+  "rails": true, "peekShade": false, "sidebarButtons": false, "fileBarFade": "off",
+  "lineNumbers": false,
+  "iconPickerEmoji": true,
+  "statusBar": null,
+  "statusBarMore": [],
+  "statusBarLeft": null,
+  "fileBar": null,
+  "fileBarHidden": [],
+  "sidebarHeader": null,
+  "sidebarFoot": null,
+  "pullActions": null
+}

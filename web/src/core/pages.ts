@@ -1,0 +1,86 @@
+import {
+  AppWindow, Banknote, Calculator, ChartColumn, ChartLine, ChartPie, PiggyBank, Receipt, Sheet,
+  Activity, Apple, Bike, BookOpen, Bot, Brain, Briefcase, Gem, Layers, Package, Server, SquareTerminal, CalendarDays, Camera, Code2, Coffee, Compass, Dumbbell, Flag, FolderGit2,
+  Footprints, Globe, GraduationCap, Heart, HeartPulse, House, Inbox, Leaf, Lightbulb, ListChecks, LayoutDashboard, Map, Moon,
+  Mountain, Music, NotebookText, Palette, PenLine, Plane, Rocket, Sparkles, Star, Sun, Target, Trophy, Users, Wallet,
+  Archive, Blend, Check, Circle, CircleCheck, CircleDashed, CircleDot, CircleHelp, CircleX, Clock, Eye, Pencil, TriangleAlert,
+  User, UserCheck, X, type LucideIcon,
+} from "lucide-react"
+import type { ComponentType } from "react"
+import { getStore, type Store } from "@/core/data"
+import { anyIcon, GitHubIcon, markIcon } from "@/core/icons"
+import type { VaultFile } from "@/core/files"
+import { fileViewFor, iconNamed, isEnabled, pluginById } from "@/core/plugins"
+import { getPrefs } from "@/core/prefs"
+
+export const ICONS: Record<string, LucideIcon> = {
+  activity: Activity, apple: Apple, bike: Bike, "book-open": BookOpen, book: BookOpen, brain: Brain, briefcase: Briefcase,
+  calendar: CalendarDays, "calendar-days": CalendarDays, camera: Camera, code: Code2, coffee: Coffee, compass: Compass,
+  dumbbell: Dumbbell, flag: Flag, "folder-git-2": FolderGit2, footprints: Footprints, globe: Globe,
+  "graduation-cap": GraduationCap, heart: Heart, "heart-pulse": HeartPulse, house: House, home: House, inbox: Inbox,
+  leaf: Leaf, lightbulb: Lightbulb, "list-checks": ListChecks, "layout-dashboard": LayoutDashboard, dashboard: LayoutDashboard,
+  map: Map, moon: Moon, mountain: Mountain, music: Music, "notebook-text": NotebookText, palette: Palette, pen: PenLine,
+  "pen-line": PenLine, plane: Plane, rocket: Rocket, sparkles: Sparkles, star: Star, sun: Sun, target: Target, trophy: Trophy,
+  users: Users, wallet: Wallet, "app-window": AppWindow, banknote: Banknote, calculator: Calculator,
+  "chart-column": ChartColumn, "chart-line": ChartLine, "chart-pie": ChartPie, "piggy-bank": PiggyBank, receipt: Receipt, sheet: Sheet,
+  bot: Bot, gem: Gem, layers: Layers, package: Package, server: Server, terminal: SquareTerminal,
+  archive: Archive, blend: Blend, check: Check, circle: Circle, "circle-check": CircleCheck, "circle-dashed": CircleDashed,
+  "circle-dot": CircleDot, "circle-help": CircleHelp, "circle-x": CircleX, clock: Clock, eye: Eye, pencil: Pencil,
+  "triangle-alert": TriangleAlert, user: User, "user-check": UserCheck, x: X, github: GitHubIcon,
+}
+
+/** An icon by its name (`dumbbell`): one of ICONS, one a plugin adds, any other of Lucide's, or an emoji; null for none. */
+export const namedIcon = (name?: string | null): LucideIcon | null => {
+  const n = name?.trim()
+  if (!n) return null
+  return ICONS[n.toLowerCase()] ?? iconNamed(n.toLowerCase()) ?? anyIcon(n.toLowerCase())
+}
+
+export const pluginIcon = (icon?: string | null): LucideIcon | null =>
+  icon?.startsWith("data:image/svg+xml,") ? markIcon(icon) : namedIcon(icon)
+
+export const commandIcon = (c: { icon?: ComponentType<{ className?: string; strokeWidth?: number }> | string }, named?: string | null): ComponentType<{ className?: string; strokeWidth?: number }> | null =>
+  namedIcon(named) ?? (typeof c.icon === "string" ? namedIcon(c.icon) : c.icon ?? null)
+
+/** A file's own icon (its `icon:`), or the icon of the plugin that brought it, or
+ *  of the plugin whose kind of file it is (a dashboard's, a person's), or the core's for its own kind (Me), if any. */
+export function iconOf(f?: Pick<VaultFile, "icon" | "plugin" | "type" | "path"> | null): LucideIcon | null {
+  if (!f) return null
+  return namedIcon(f.icon) || (f.plugin && pluginById(f.plugin)?.icon) || fileViewFor(f, getPrefs().disabled)?.view.icon || null
+}
+
+/** `tint: people` -> var(--people): a colour token (never a hex, so schemes recolour it). */
+export function tintOf(t?: string | null) {
+  return t && /^[a-z][a-z-]*$/.test(t) ? `var(--${t})` : undefined
+}
+
+/** Left out of lists of pages (the sidebar's): a page whose plugin (its `plugin:`, the one that brought it) is off. */
+export const offPlugin = (f: Pick<VaultFile, "plugin"> | undefined, disabled = getPrefs().disabled) => !!f?.plugin && !!pluginById(f.plugin) && !isEnabled(f.plugin, disabled)
+
+const paths = new WeakMap<{ path: string }[], globalThis.Map<string, number>>()
+export function fileAt<F extends { path: string }>(files: F[], path: string): F | undefined {
+  let byPath = paths.get(files)
+  if (!byPath) paths.set(files, (byPath = new globalThis.Map(files.map((f, i) => [f.path, i]))))
+  const i = byPath.get(path)
+  return i === undefined ? undefined : files[i]
+}
+
+export function pageView(path: string, store: Store | null = getStore(), disabled = getPrefs().disabled) {
+  const f = store ? fileAt(store.files.files, path) : undefined
+  return f ? fileViewFor(f, disabled)?.view.page ?? null : null
+}
+
+/** A page: a file a plugin draws as one (a dashboard). In a tab, a file opened from it opens beside it
+ *  (core/workspace.ts go()), and a phone's tab list calls it a page. */
+export function isPage(path: string, store: Store | null = getStore()) {
+  return !!pageView(path, store)
+}
+/** A page offered to pin where the pages are listed (Pinned's): not one of a dated run (PageView `series`). */
+export function isListedPage(path: string, store: Store | null = getStore()) {
+  const v = pageView(path, store)
+  return !!v && !v.series
+}
+
+/** A page a plugin brought, by its file name ("Activity"), wherever the user keeps it, or undefined. */
+export const pageOf = (store: Store | null | undefined, plugin: string, name: string) =>
+  store?.files.files.find((f) => f.plugin === plugin && f.type === "dashboard" && f.path.split("/").pop() === `${name}.md`)

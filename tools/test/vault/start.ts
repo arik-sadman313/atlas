@@ -1,0 +1,261 @@
+import fs from "node:fs"
+import path from "node:path"
+import type { VaultTest } from "./harness.ts"
+import { MOVED, NOW_OPT_IN } from "../../../core/migrations.ts"
+import { whoOf } from "../../../core/ops.ts"
+import { readAhead } from "../../../core/readahead.ts"
+import { Vault } from "../../../core/vault.ts"
+
+/** The desktop app, as Set up Vaultite calls the starter (the user's write, not an agent's). */
+const APP = whoOf("app/desktop", null)
+
+// The app's own plugins that are off until turned on: Standard (the app's defaults) turns none of them on.
+const optIn = fs.readdirSync(path.join(import.meta.dirname, "../../../plugins/core")).filter((id) => {
+  try { return !!JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../../../plugins/core", id, "manifest.json"), "utf8")).offByDefault } catch { return false }
+})
+
+export default async ($: VaultTest) => {
+  const { check, open, tmp } = $
+  // A start takes a file's text from the last start's when its mtime and size are the same, else reads it.
+  {
+    const dir = path.join(tmp, "Kept texts")
+    fs.mkdirSync(dir)
+    for (const n of ["same", "changed"]) fs.writeFileSync(path.join(dir, `${n}.md`), `---\ntitle: ${n} on disk\n---\n\nBody.\n`)
+    const st = (n: string) => fs.statSync(path.join(dir, `${n}.md`), { bigint: true })
+    const v = new Vault(dir)
+    v.startTexts = { now: new Map(), had: new Map([
+      ["same.md", [String(st("same").mtimeNs), Number(st("same").size), "---\ntitle: same kept\n---\n\nBody.\n", ["kept-tag"]]],
+      ["changed.md", [String(st("changed").mtimeNs - 1n), Number(st("changed").size), "---\ntitle: changed kept\n---\n\nBody.\n"]]]) }
+    await v.sync()
+    const kept = v.startTexts.now
+    v.startTexts = null
+    check("start: an unchanged file's text comes from the last start's, a changed one is read",
+      v.entries.get("same.md")?.fm.title === "same kept" && v.entries.get("changed.md")?.fm.title === "changed on disk" &&
+      kept.get("changed.md")?.[2].includes("changed on disk") && kept.size === 2, [...v.entries.values()].map((e) => e.fm.title))
+    check("start: ...and its tags from the last start's, not worked out again", v.entries.get("same.md")?.tags.join() === "kept-tag" && !v.entries.get("changed.md")?.tags.length,
+      [...v.entries.values()].map((e) => e.tags))
+  }
+  {
+    const dir = path.join(tmp, "Read ahead")
+    fs.mkdirSync(path.join(dir, "Notes"), { recursive: true })
+    const odd = ["---\ntitle: crlf\r\ntags: [a, b]\r\n---\r\n\r\nBody #inline\r\n", "\ufeff---\ntitle: bom\n---\nBody", "---\ntitle: [broken\n---\nBody", "---\ntitle: only header\n---",
+      "No header at all, #tag and `#code`\n", "  \n\n  ", "---\n---\n\n  spaced body  \n\n"]
+    for (let i = 0; i < 900; i++) fs.writeFileSync(path.join(dir, `Notes/n${i}.md`), odd[i % odd.length] + (i % 3 ? `\nline ${i} #t${i % 5}\n` : ""))
+    fs.writeFileSync(path.join(dir, "Notes/latin1.md"), Buffer.from([0x66, 0xe9, 0x0a]))
+    const read = async (ahead: boolean) => {
+      const v = new Vault(dir)
+      v.startTexts = { now: new Map(), had: new Map(Array.from({ length: 300 }, (_, i) => {
+        const rel = `Notes/n${i * 2}.md`, st = fs.statSync(path.join(dir, rel), { bigint: true })
+        return [rel, [String(st.mtimeNs), Number(st.size), fs.readFileSync(path.join(dir, rel), "utf8").replace(/\r\n?/g, "\n").replace(/^\ufeff/, "")]]
+      })) }
+      if (ahead) v.reading = readAhead(dir)
+      await v.sync()
+      return v
+    }
+    const [plain, ahead] = await Promise.all([read(false), read(true)])
+    const offThread = [...ahead.entries.values()].filter((e) => e.tagCache).length
+    const seen = (v: Vault) => [...v.entries.values()].map((e) => [e.rel, e.text, e.fm, e.body, e.bodyLine, e.tags, e.problems, e.broken])
+    check("start: notes read ahead on other threads index as read on the main one", JSON.stringify(seen(plain)) === JSON.stringify(seen(ahead)) && plain.entries.size === 901 && offThread > 500,
+      seen(ahead).filter((x, i) => JSON.stringify(x) !== JSON.stringify(seen(plain)[i])).slice(0, 3))
+  }
+  // A vault opened for the first time starts from Standard (core/start.ts), writing nothing outside .vaultite/; a new one
+  // gets Start here only when the user chose it (vault.starter). Last: opening another vault binds the plugins to it.
+  {
+    const conf = (dir: string, name: string) => { try { return JSON.parse(fs.readFileSync(path.join(dir, `.vaultite/${name}.json`), "utf8")) } catch { return null } }
+    const fresh = path.join(tmp, "Fresh vault")
+    fs.mkdirSync(fresh)
+    const freshApp = await open(fresh)
+    const pj = conf(fresh, "plugins"), look = conf(fresh, "appearance")
+    check("new vault: Standard's plugins (a terminal and Claude Code, none that's off until turned on)", !(pj?.enabled ?? []).some((id: string) => optIn.includes(id))
+      && !pj?.disabled?.includes("terminal") && !pj?.disabled?.includes("claude-code") && !pj?.disabled?.includes("provenance"), pj)
+    check("new vault: Standard's look (Gruvbox, the default: unset)", !look?.scheme && look?.fileIcons === false, look)
+    check("new vault: nothing outside .vaultite/ until asked", JSON.stringify(fs.readdirSync(fresh)) === '[".vaultite"]', fs.readdirSync(fresh))
+    await freshApp.callOp("vault.starter", {}, APP)
+    const fp = conf(fresh, "pages"), text = (rel: string) => fs.readFileSync(path.join(fresh, rel), "utf8")
+    check("new vault, starter content chosen: Start here, the only pin", JSON.stringify(fp?.pinned) === '["Start here.md"]', [fp, fs.readdirSync(fresh)])
+    const how = text("How this vault works.md")
+    check("new vault, starter content chosen: How this vault works, linked from Start here", how.includes("\\text{notes a year}") && how.includes("```mermaid") &&
+      text("Start here.md").includes("[[How this vault works]]"), how.slice(0, 400))
+    // (AI isn't answered yet: nothing of it, and nothing for agents, until the user says to use one)
+    const said = /\b(AI|Claude|claude|Codex|agents?)\b|Connections/
+    check("new vault, starter content chosen: no word of AI or a menu that isn't there", !said.test(text("Start here.md")) && !said.test(how), [text("Start here.md"), how])
+    check("new vault, starter content chosen: about notes (links, properties, daily notes, templates, the graph), not kinds or dashboards", ["## Links", "## Properties", "## Daily notes and templates", "## The graph"].every((h) => how.includes(h))
+      && !how.includes("type:") && !how.includes("Dashboards"), how)
+    check("new vault: nothing written into its notes (Note dates is off until asked)", text("Start here.md").startsWith("This vault") && text("How this vault works.md").startsWith("A vault"), text("Start here.md").slice(0, 80))
+    check("new vault, starter content chosen: no agent's page, no AGENTS.md or CLAUDE.md", JSON.stringify(fs.readdirSync(fresh).sort()) === '[".vaultite","How this vault works.md","Start here.md"]', fs.readdirSync(fresh))
+    check("new vault: nothing to restore, nothing offered", !fs.existsSync(path.join(fresh, ".vaultite/bundles/previous.json")) && !fs.existsSync(path.join(fresh, ".vaultite/bundles/onboarding.json")))
+    await freshApp.host().call("POST", "bundles/standard/apply", {})
+    await freshApp.state()
+    check("new vault, Standard applied: what it had, no plugin's page added (Errors, People)", !fs.existsSync(path.join(fresh, "Dashboards")), fs.readdirSync(fresh))
+    const inUse = async () => ((await freshApp.host().call("GET", "bundles")) as { bundles: { id: string; inUse?: boolean; modified?: boolean }[] }).bundles
+      .filter((b) => b.inUse).map((b) => `${b.id}${b.modified ? " modified" : ""}`)
+    const was = await inUse()
+    await freshApp.host().call("PATCH", "config/appearance", { tabBar: false })
+    const changed = await inUse()
+    await freshApp.host().call("PATCH", "config/appearance", { tabBar: null })
+    check("new vault: Standard is in use, and changed, still, modified", JSON.stringify(was) === '["standard"]' && JSON.stringify(changed) === '["standard modified"]' &&
+      JSON.stringify(await inUse()) === '["standard"]', [was, changed])
+    // Each of the app's bundles says every part any of them says (Standard the defaults): Zen, then Standard, is a new
+    // vault's Standard again, every settings file as it was (key order aside).
+    const sorted = (x: unknown): unknown => Array.isArray(x) ? x.map(sorted) : x && typeof x === "object"
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, sorted(v)])) : x
+    const configs = () => {
+      const dir = path.join(fresh, ".vaultite/plugins")
+      const names = ["appearance", "plugins", "sidebars", "pages", "newtab", "hotkeys", ...(fs.existsSync(dir) ? fs.readdirSync(dir).map((id) => `plugins/${id}/data`) : [])]
+      return JSON.stringify(Object.fromEntries(names.flatMap((n) => { const o = conf(fresh, n); return o && Object.keys(o).length ? [[n, sorted(o)]] : [] })))
+    }
+    const standard = configs()
+    await freshApp.host().call("POST", "bundles/zen/apply", {})
+    const zen = configs()
+    const guide = "Guides/How Zen works.md", withZen = fs.existsSync(path.join(fresh, guide))
+    await freshApp.host().call("POST", "bundles/standard/apply", {})
+    check("new vault: Zen, then Standard, is Standard again (every settings file as it was)", zen !== standard && configs() === standard, [standard, zen, configs()])
+    // (as the welcome card's tiles do: a layout looked at and left leaves nothing; Undo puts it back)
+    check("new vault: Zen, then Standard, takes back Zen's guide, its folder too", withZen && !fs.existsSync(path.join(fresh, "Guides")), fs.readdirSync(fresh))
+    await freshApp.host().call("POST", "bundles/restore", {})
+    check("...and a restore to Zen puts its guide back", fs.existsSync(path.join(fresh, guide)), fs.readdirSync(fresh))
+    await freshApp.host().call("POST", "bundles/standard/apply", {})
+    fs.writeFileSync(path.join(fresh, "Mine.md"), "Mine.\n")
+    await freshApp.host().call("POST", "bundles/zen/apply", {})
+    fs.appendFileSync(path.join(fresh, guide), "My own line.\n")
+    await freshApp.host().call("POST", "bundles/standard/apply", {})
+    check("...but one the user changed stays, and the user's own files", fs.existsSync(path.join(fresh, guide)) && fs.existsSync(path.join(fresh, "Mine.md")), fs.readdirSync(fresh))
+    fs.rmSync(path.join(fresh, "Guides"), { recursive: true })
+    fs.rmSync(path.join(fresh, "Mine.md"))
+    // The welcome card's Use it: the agent's page and pointers come, and the notes, as written, say what it can do.
+    const plain = [text("Start here.md"), text("How this vault works.md")]
+    const used = (await freshApp.callOp("vault.starter", { agent: "claude-code" }, APP)).result as { wrote: string[] }
+    await freshApp.vault.sync()
+    check("new vault, its agent used: the agent's page (Claude), not pinned, not the others' (Errors)", fs.existsSync(path.join(fresh, "Dashboards/Claude.md")) &&
+      !fs.existsSync(path.join(fresh, "Dashboards/Errors.md")) && JSON.stringify(conf(fresh, "pages")?.pinned) === '["Start here.md"]', [used, conf(fresh, "pages")])
+    check("new vault, its agent used: agents started in it find its rules", /\.vaultite\/AGENTS\.md/.test(text("CLAUDE.md")) && fs.existsSync(path.join(fresh, "AGENTS.md")), fs.readdirSync(fresh))
+    check("new vault, its agent used: Start here says to ask it, and where Settings has the AI apps", text("Start here.md").includes("`@claude what can I do with this vault?`") &&
+      text("Start here.md").includes("Settings > AI connects") && !text("Start here.md").includes("Connections"), text("Start here.md"))
+    check("new vault, its agent used: How this vault works names it", text("How this vault works.md").includes("Claude Code follows the same rules") && text("How this vault works.md") !== plain[1], text("How this vault works.md").slice(0, 600))
+    const twice = (await freshApp.callOp("vault.starter", { agent: "claude-code" }, APP)).result as { wrote: string[] }
+    check("new vault, its agent used again: nothing more to write", !twice.wrote.length && plain[0] !== text("Start here.md"), twice)
+    // The welcome card's Not now (AI off): Standard is still the layout in use, unchanged (AI is the user's, not a
+    // layout's), and Use it's content doesn't come.
+    const noAi = path.join(tmp, "Fresh, no AI")
+    fs.mkdirSync(noAi)
+    const noAiApp = await open(noAi)
+    await noAiApp.callOp("vault.starter", {}, APP)
+    await noAiApp.host().call("PATCH", "config/plugins", { ai: false })
+    const layouts = ((await noAiApp.host().call("GET", "bundles")) as { bundles: { id: string; inUse?: boolean; modified?: boolean }[] }).bundles.filter((b) => b.inUse)
+    check("new vault, AI off: Standard is in use, not changed", JSON.stringify(layouts.map((b) => `${b.id}${b.modified ? " modified" : ""}`)) === '["standard"]', layouts)
+    const notUsed = (await noAiApp.callOp("vault.starter", { agent: "claude-code" }, APP)).result as { wrote: string[] }
+    check("new vault, AI off: no agent's page or pointers", !notUsed.wrote.length && JSON.stringify(fs.readdirSync(noAi).sort()) === '[".vaultite","How this vault works.md","Start here.md"]', [notUsed, fs.readdirSync(noAi)])
+    await noAiApp.host().call("PATCH", "config/plugins", { ai: null })
+    await noAiApp.state()
+    check("new vault, AI turned on: none of its plugins' pages (they were switched on all along)", !fs.existsSync(path.join(noAi, "Dashboards")) && JSON.stringify(conf(noAi, "pages")?.pinned) === '["Start here.md"]', [fs.readdirSync(noAi), conf(noAi, "pages")])
+    // A layout's guide opens the first time it comes; taken back and come again, quietly (the user has read it).
+    type Applied = { open: string | null }
+    const first = await noAiApp.host().call("POST", "bundles/zen/apply", {}) as Applied
+    await noAiApp.host().call("POST", "bundles/standard/apply", {})
+    const again = await noAiApp.host().call("POST", "bundles/zen/apply", {}) as Applied
+    check("a layout's guide opens the first time it comes, not when it comes back", first.open === "Guides/How Zen works.md" && again.open !== first.open
+      && fs.existsSync(path.join(noAi, "Guides/How Zen works.md")), [first.open, again.open])
+    const own = path.join(tmp, "Own notes")
+    fs.mkdirSync(path.join(own, "Ideas"), { recursive: true })
+    fs.writeFileSync(path.join(own, "Ideas/One.md"), "An idea.\n")
+    await open(own)
+    const files = fs.readdirSync(own, { recursive: true }).map((f) => String(f).split(path.sep).join("/")).filter((f) => !f.startsWith(".vaultite")).sort()
+    check("a folder of notes: Standard, and nothing added among its files", !(conf(own, "plugins")?.enabled ?? []).length && JSON.stringify(files) === '["Ideas","Ideas/One.md"]'
+      && fs.readFileSync(path.join(own, "Ideas/One.md"), "utf8") === "An idea.\n", files)
+    check("new vault: its settings start up to date (core/migrations.ts)", conf(fresh, "migrations")?.done?.includes("plugins-opt-in-2026-10") && conf(fresh, "migrations")?.done?.includes("daily-notes-2026-10") && !(pj?.enabled ?? []).includes("codex"), conf(fresh, "migrations"))
+    // Opened before, from when the agents' plugins were on from the start: what was on stays on, once (but those that
+    // moved out of the app since: they'd be installed).
+    const STILL = NOW_OPT_IN.filter((id) => !Object.hasOwn(MOVED, id))
+    const opened = path.join(tmp, "Opened before")
+    fs.mkdirSync(path.join(opened, ".vaultite"), { recursive: true })
+    await open(opened)
+    check("a vault the app opened before keeps its setup", JSON.stringify(conf(opened, "plugins")?.enabled) === JSON.stringify(STILL) && !fs.existsSync(path.join(opened, "Start here.md")), conf(opened, "plugins"))
+    const older = path.join(tmp, "Older setup")
+    fs.mkdirSync(path.join(older, ".vaultite"), { recursive: true })
+    fs.writeFileSync(path.join(older, ".vaultite/plugins.json"), JSON.stringify({ disabled: ["codex", "clipper"], enabled: ["people"], order: ["people"] }))
+    await open(older)
+    const op = conf(older, "plugins")
+    check("migrated: the ones that became opt-in and were on are in enabled, the others' lists as they were", op.disabled.join() === "clipper" && !("order" in op) &&
+      op.enabled.join() === ["people", ...STILL.filter((id) => id !== "codex")].join(), op)
+    fs.writeFileSync(path.join(older, ".vaultite/plugins.json"), JSON.stringify({ ...op, enabled: ["people"] }))
+    await open(older)
+    check("migrated once: turned off since, they stay off", conf(older, "plugins").enabled.join() === "people", conf(older, "plugins"))
+    // Daily notes out of Today: its settings (not over Daily notes' own), hotkey and button follow, in saved bundles and
+    // the setup a restore puts back too.
+    const daily = path.join(tmp, "Daily before")
+    const put = (rel: string, o: unknown) => { fs.mkdirSync(path.dirname(path.join(daily, rel)), { recursive: true }); fs.writeFileSync(path.join(daily, rel), JSON.stringify(o)) }
+    put(".vaultite/plugins/today/data.json", { format: "YYYY/MM/YYYY-MM-DD", template: "Templates/Day" })
+    put(".vaultite/plugins/daily-notes/data.json", { template: "Templates/Mine" })
+    put(".vaultite/hotkeys.json", { "file:new": ["Mod+N"], "today:daily-note": ["Mod+D"] })
+    put(".vaultite/newtab.json", { actions: ["file:new", "today:daily-note"], icons: { "today:daily-note": "sun" } })
+    put(".vaultite/bundles/mine/plugins/today/data.json", { format: "DD-MM-YYYY", other: 1 })
+    put(".vaultite/bundles/previous.json", { bundle: "mine", name: "Mine", at: "2026-10-01", config: { hotkeys: { "today:daily-note": null }, "plugins/today/data": { format: null } },
+      absent: ["plugins/today/data"], pins: null, pinned: [], workspace: null, added: [] })
+    await open(daily)
+    check("migrated: Today's daily note settings are Daily notes' (its own kept), Today's file gone", JSON.stringify(conf(daily, "plugins/daily-notes/data")) === '{"template":"Templates/Mine","format":"YYYY/MM/YYYY-MM-DD"}'
+      && !fs.existsSync(path.join(daily, ".vaultite/plugins/today/data.json")), conf(daily, "plugins/daily-notes/data"))
+    check("migrated: the command's hotkey and button follow it, in their place", JSON.stringify(conf(daily, "hotkeys")) === '{"file:new":["Mod+N"],"daily-notes:today":["Mod+D"]}'
+      && JSON.stringify(conf(daily, "newtab")) === '{"actions":["file:new","daily-notes:today"],"icons":{"daily-notes:today":"sun"}}', [conf(daily, "hotkeys"), conf(daily, "newtab")])
+    check("migrated: a saved bundle's daily note settings too, its other keys kept", JSON.stringify(conf(daily, "bundles/mine/plugins/daily-notes/data")) === '{"format":"DD-MM-YYYY"}'
+      && JSON.stringify(conf(daily, "bundles/mine/plugins/today/data")) === '{"other":1}', conf(daily, "bundles/mine/plugins/today/data"))
+    const prev = conf(daily, "bundles/previous")
+    check("migrated: a restore puts back Daily notes' keys", JSON.stringify(prev?.config) === '{"hotkeys":{"daily-notes:today":null},"plugins/today/data":{},"plugins/daily-notes/data":{"format":null}}'
+      && prev.absent.includes("plugins/daily-notes/data") && conf(daily, "migrations")?.done?.includes("daily-notes-2026-10"), prev)
+    // The status bar's file items joined its list: a saved one gets them after its own (unset and bundles' too).
+    const bar = path.join(tmp, "Status bar before")
+    const putBar = (rel: string, o: unknown) => { fs.mkdirSync(path.dirname(path.join(bar, rel)), { recursive: true }); fs.writeFileSync(path.join(bar, rel), JSON.stringify(o)) }
+    putBar(".vaultite/appearance.json", { theme: "dark", statusBar: ["inbox:new"] })
+    putBar(".vaultite/bundles/mine/appearance.json", { statusBar: [] })
+    putBar(".vaultite/bundles/other/appearance.json", { statusBar: null })
+    await open(bar)
+    const FILE = "vim:mode,properties:chips,provenance:origin,core:view,core:words,core:characters,token-count:tokens"
+    check("migrated: a saved status bar list has the file's items after its own", conf(bar, "appearance")?.statusBar?.join() === `inbox:new,${FILE}` && conf(bar, "appearance")?.theme === "dark", conf(bar, "appearance"))
+    check("migrated: a saved bundle's too, an unset one left unset", conf(bar, "bundles/mine/appearance")?.statusBar?.join() === FILE && conf(bar, "bundles/other/appearance")?.statusBar === null,
+      [conf(bar, "bundles/mine/appearance"), conf(bar, "bundles/other/appearance")])
+    // plugins.json's saved order is gone: the vault's, a saved bundle's and the setup a restore puts back.
+    const ordered = path.join(tmp, "Ordered before")
+    const putOrder = (rel: string, o: unknown) => { fs.mkdirSync(path.dirname(path.join(ordered, rel)), { recursive: true }); fs.writeFileSync(path.join(ordered, rel), JSON.stringify(o)) }
+    putOrder(".vaultite/plugins.json", { disabled: ["clipper"], order: ["people", "terminal"], updatesOff: ["lighthouse"] })
+    putOrder(".vaultite/bundles/mine/plugins.json", { enabled: ["people"], order: ["people"] })
+    putOrder(".vaultite/bundles/previous.json", { bundle: "mine", name: "Mine", at: "2026-10-01", config: { plugins: { disabled: null, order: ["people"] } }, absent: [] })
+    await open(ordered)
+    const oc = conf(ordered, "plugins")
+    check("migrated: plugins.json's order is gone, its other keys kept", !("order" in oc) && oc.disabled.join() === "clipper" && oc.updatesOff.join() === "lighthouse", oc)
+    check("migrated: a saved bundle's and a restore's too", JSON.stringify(conf(ordered, "bundles/mine/plugins")) === '{"enabled":["people"]}' &&
+      JSON.stringify(conf(ordered, "bundles/previous")?.config) === '{"plugins":{"disabled":null}}', [conf(ordered, "bundles/mine/plugins"), conf(ordered, "bundles/previous")])
+    // Kinds' stamps were UTC: now the vault's local time, a user's own time keys left as they were.
+    const stamped = path.join(tmp, "Stamped before")
+    fs.mkdirSync(path.join(stamped, ".vaultite"), { recursive: true })
+    fs.mkdirSync(path.join(stamped, "Notes/.archive"), { recursive: true })
+    const note = "---\ntype: note\ncreated: '2026-10-18 05:11:09'\nupdated: 2026-10-18 05:12:00\nmet: '2026-10-18 05:11:09'\n---\nBody.\n"
+    fs.writeFileSync(path.join(stamped, "Notes/.archive/Old.md"), note)
+    fs.writeFileSync(path.join(stamped, "Home.md"), "```base\nviews: []\nwide: true\n```\n")
+    await open(stamped)
+    check("migrated: a base's wide is in its info line, where a fence a plugin draws keeps it", fs.readFileSync(path.join(stamped, "Home.md"), "utf8") === "```base wide\nviews: []\n```\n",
+      fs.readFileSync(path.join(stamped, "Home.md"), "utf8"))
+    const local = (s: string) => { const d = new Date(`${s}Z`), p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` }
+    const got = fs.readFileSync(path.join(stamped, "Notes/.archive/Old.md"), "utf8")
+    check("migrated: a note's created and updated in local time, other keys and the body as they were", got.includes(`created: '${local("2026-10-18T05:11:09")}'`)
+      && got.includes(local("2026-10-18T05:12:00")) && got.includes("met: '2026-10-18 05:11:09'") && got.endsWith("---\nBody.\n"), got)
+    // A new vault still being offered the bundles writes no page; given Standard (the plugins already on), still none:
+    // as a new vault, no dashboards.
+    const offered = path.join(tmp, "Offered")
+    fs.mkdirSync(path.join(offered, ".vaultite/bundles"), { recursive: true })
+    fs.writeFileSync(path.join(offered, ".vaultite/bundles/onboarding.json"), "{}\n")
+    const o = await open(offered)
+    await o.state()
+    const none = !fs.existsSync(path.join(offered, "Dashboards"))
+    await o.host().call("POST", "bundles/standard/apply", {})
+    await o.state()
+    check("Standard picked: as a new vault, no plugin's page", none && !fs.existsSync(path.join(offered, "Dashboards")), fs.existsSync(path.join(offered, "Dashboards")) && fs.readdirSync(path.join(offered, "Dashboards")))
+    check("a bundle pinning nothing pins nothing (not Errors)", JSON.stringify(conf(offered, "pages")?.pinned) === "[]", conf(offered, "pages"))
+    // Skipping the offer starts from Standard, with nothing to restore.
+    const skipped = path.join(tmp, "Skipped")
+    fs.mkdirSync(path.join(skipped, ".vaultite/bundles"), { recursive: true })
+    fs.writeFileSync(path.join(skipped, ".vaultite/bundles/onboarding.json"), "{}\n")
+    const sk = await open(skipped)
+    const after = await sk.host().call("POST", "bundles/onboarding", {}) as { onboarding: boolean; previous: unknown }
+    check("skipping the offer: Standard, nothing offered or to restore", !(conf(skipped, "plugins")?.enabled ?? []).length && !after.onboarding && !after.previous
+      && !fs.existsSync(path.join(skipped, ".vaultite/bundles/previous.json")), [after, conf(skipped, "plugins")])
+  }
+}

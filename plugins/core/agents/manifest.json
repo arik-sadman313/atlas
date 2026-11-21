@@ -1,0 +1,85 @@
+{
+  "id": "agents",
+  "icon": "bot",
+  "category": "ai-apps",
+  "alwaysOn": true,
+  "settingsAdvanced": true,
+  "ai": true,
+  "requires": ["terminal"],
+  "name": "Coding agents",
+  "description": "Every coding agent on every machine in one list, the ones that need you first: the Agents panel (terminals, chats, cloud sessions). And one set of blocks for every coding agent: its plan's limits, its sessions, its usage by day, project and model, and one project's. A block's `agent:` names whose (claude-code, codex...): each agent's plugin draws them, read from that agent's own files, and with that plugin off its blocks are off too.",
+  "settings": {
+    "group": { "type": "enum", "values": ["none", "state", "project", "machine", "account"], "labels": { "none": "None", "state": "State", "project": "Repository", "machine": "Machine", "account": "Account" }, "default": "none", "label": "Group agents by", "description": "headings in the Agents panel and tab; by where they stand, the repository or folder they work in, the machine they run on, or the account they run in (the panel's menu sets it too)" },
+    "sort": { "type": "enum", "values": ["status", "recent"], "labels": { "status": "Status", "recent": "Recent" }, "default": "status", "label": "Sort agents by", "description": "status: the ones that need you first, then the ones working, then the ones done; recent: the latest first" },
+    "hide": { "type": "list", "values": ["terminal", "chat", "cloud"], "labels": { "terminal": "Terminals", "chat": "Chats", "cloud": "Cloud" }, "label": "Hidden kinds", "description": "kinds the Agents panel and tab leave out: the ones in terminals, in chats or in the cloud" },
+    "fold": { "type": "enum", "values": ["1", "5", "15", "30", "60", "never"], "labels": { "1": "After a minute", "5": "After 5 minutes", "15": "After 15 minutes", "30": "After 30 minutes", "60": "After an hour", "never": "Never" }, "default": "5", "label": "Fold finished agents", "description": "when a finished agent folds under Earlier; an agent done and read, with nothing for you and no tab open, stays in the Agents and Terminals panels this long, and never keeps every one listed" }
+  },
+  "blocks": {
+    "agent-limits": {
+      "description": "an agent's plan limits (the session, the week, a month's included usage): how much is used and when each renews",
+      "live": "the agent's account, asked through its CLI or its own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, cursor, grok-bot)" },
+        "account": { "type": "string", "description": "one account's (its id, like default or personal); all of them when left out" },
+        "for": { "type": "string", "description": "a plugin that runs the agent (companion): the accounts it uses come first, tinted and saying for what (Companion chat, Jobs), as its settings say now" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    },
+    "agent-sessions": {
+      "description": "an agent's sessions open now, then the latest ones (and Claude Code's Remote Control servers)",
+      "live": "the agent's own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, opencode...)" },
+        "recent": { "type": "number", "default": 5, "description": "how many recent sessions to list after the open ones" },
+        "account": { "type": "string", "description": "one account's (its id: a Claude Code account, a Hermes profile, an OpenClaw agent); all of them when left out" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    },
+    "agent-usage": {
+      "description": "an agent's value at list prices (or the cost it recorded) and tokens per day, today and over the last days",
+      "live": "the agent's own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, opencode...)" },
+        "days": { "type": "number", "default": 30, "min": 1, "max": 3650, "description": "how many days back it covers" },
+        "account": { "type": "string", "description": "one account's (its id: a Claude Code account, a Hermes profile, an OpenClaw agent); all of them when left out" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    },
+    "agent-projects": {
+      "description": "an agent's usage by project over the last days",
+      "live": "the agent's own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, opencode...)" },
+        "days": { "type": "number", "default": 30, "min": 1, "max": 3650, "description": "how many days back it covers" },
+        "account": { "type": "string", "description": "one account's (its id: a Claude Code account, a Hermes profile, an OpenClaw agent); all of them when left out" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    },
+    "agent-models": {
+      "description": "an agent's usage by model over the last days",
+      "live": "the agent's own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, opencode...)" },
+        "days": { "type": "number", "default": 30, "min": 1, "max": 3650, "description": "how many days back it covers" },
+        "account": { "type": "string", "description": "one account's (its id: a Claude Code account, a Hermes profile, an OpenClaw agent); all of them when left out" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    },
+    "agent-project": {
+      "description": "in a project file: that project's usage by an agent over the last 30 days and its sessions",
+      "live": "the agent's own files on the machine the server runs on",
+      "by": "agent",
+      "options": {
+        "agent": { "type": "string", "required": true, "description": "whose: an agent's plugin (claude-code, codex, opencode...)" },
+        "project": { "type": "string", "description": "another project than the file's (its folder's name, as the agent names it)" },
+        "account": { "type": "string", "description": "one account's (its id: a Claude Code account, a Hermes profile, an OpenClaw agent); all of them when left out" },
+        "machine": { "type": "string", "description": "another machine's (its id in the Machines plugin's list)" }
+      }
+    }
+  }
+}

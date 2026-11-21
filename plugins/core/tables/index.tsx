@@ -1,0 +1,19 @@
+import { Sheet } from "lucide-react"
+import { definePlugin, numberText, parseCsv, type FileFormat } from "@vaultite"
+import { CsvView } from "./Table"
+
+const count = (text: string) => Math.max(0, parseCsv(text).slice(1).filter((r) => r.some((f) => f !== "")).length)
+
+const format: FileFormat = {
+  exts: ["csv"], icon: Sheet, code: "text", page: true, layout: "inline",
+  status: (text) => { const n = count(text); return `${numberText(n)} ${n === 1 ? "row" : "rows"}` },
+  render: ({ text, editable, onChange }) => <CsvView text={text} onChange={editable ? onChange : undefined} />,
+  embed: ({ text }) => <div className="px-3 pb-3"><CsvView text={text} embed /></div>,
+}
+
+const SAMPLE = "date,amount,note\n2026-01-01,-5.20,\"Coffee, large\"\n2026-01-02,1200,Pay\n2026-01-03,-42,Groceries\n2026-01-04,-9,Books\n"
+
+export default definePlugin({
+  formats: { table: format },
+  preview: () => <CsvView text={SAMPLE} embed />,
+})

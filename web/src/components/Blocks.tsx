@@ -1,0 +1,258 @@
+import { Suspense, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react"
+import { createPortal } from "react-dom"
+import { Blocks, Ellipsis, SlidersHorizontal } from "lucide-react"
+import { choose } from "@/components/Chooser"
+import { Catch } from "@/components/Guard"
+import type { Store } from "@/core/data"
+import type { FileCtx } from "@/core/define"
+import { readFile } from "@/core/files"
+import { useRead } from "@/core/reading"
+import { embedOf, fenceBlock } from "@/core/formats"
+import { blockName, scan } from "../../../core/sections.ts"
+import { innerOf, noteParts, setBlockText, setProp } from "@/core/frontmatter"
+import { errorText, notifyError } from "@/core/notify"
+import { resolver } from "@/core/links"
+import { blockFor, codeArriving, offText, usePluginsVersion } from "@/core/plugins"
+import { usePrefs } from "@/core/prefs"
+import { slashItems } from "@/core/slash"
+import { useDraft } from "@/core/statefor"
+import { Loading } from "@/components/kit"
+import { Switch } from "@/components/Switch"
+import { BlockSource, openBlockMenu } from "@/components/BlockSource"
+import type { BlockEdit } from "@/editor/livePreview"
+import { capitalize } from "@/lib/utils"
+import { optionNotes, parseOptions, resolveOptions, type BlockDecl, type OptionDecl } from "../../../core/blocks.ts"
+
+/** A block's text read as options ({} when it's empty or isn't YAML), the way the server reads them (core/blocks.ts). */
+export function blockOptions(text: string): Record<string, unknown> {
+  return parseOptions(text).options
+}
+
+const NONE: string[] = []
+export function useKindSections(store: Store, path: string): string[] {
+  const kind = store.files.files.find((f) => f.path === path)?.kind
+  const key = (kind && store.kinds?.[kind]?.sections.join(",")) || ""
+  return useMemo(() => (key ? key.split(",") : NONE), [key])
+}
+
+export function kindStamps(store: Store, path: string): string[] {
+  const kind = store.files.files.find((f) => f.path === path)?.kind
+  return (kind ? store.kinds?.[kind]?.stamps : /\.md$/i.test(path) && store.noteStamps) || NONE
+}
+
+/** A body in pieces: blocks, embeds and the Markdown between (blank-only text dropped). `line`: its 0-based start, so a
+ *  drawn page and the editor find the same place; a block's `info`, its fence's info line (its layout: fenceLayout). */
+export type Segment = ({ block: string; text: string; info: string } | { md: string } | { embed: string; height?: number }) & { line: number }
+export function segments(body: string): Segment[] {
+  const out: Segment[] = []
+  const { lines, prose, fences } = scan(body)
+  const opens = new Map(fences.map((f) => [f.open, f]))
+  let md: string[] = []
+  let mdAt = 0
+  const flush = () => {
+    if (md.join("\n").trim()) out.push({ md: md.join("\n").trim(), line: mdAt + md.findIndex((l) => l.trim()) })
+    md = []
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const f = opens.get(i)
+    const name = f && f.close !== null ? blockName(f.info) ?? fenceBlock(f.info) : null
+    if (f && name) {
+      flush()
+      out.push({ block: name, text: lines.slice(i + 1, f.close!).join("\n"), info: f.info, line: i })
+      i = f.close!
+      continue
+    }
+    if (f) { if (!md.length) mdAt = i; const end = f.close ?? lines.length - 1; md.push(...lines.slice(i, end + 1)); i = end; continue }
+    const e = prose[i] ? embedOf(lines[i]) : null
+    if (e) { flush(); out.push({ embed: e.target, height: e.height, line: i }); continue }
+    if (!md.length) mdAt = i
+    md.push(lines[i])
+  }
+  flush()
+  return out
+}
+
+/** Pick a block to add (the slash menu's: those of the plugins on), given as its fence with its required options. */
+export function chooseBlock(store: Store, pick: (fence: string) => void) {
+  const items = slashItems(store).filter((i) => i.section === "Blocks" && i.text)
+  choose({
+    title: "Add a block", placeholder: "Find a block…", items: items.map((i) => ({ id: i.id, label: i.title, detail: i.detail, icon: i.icon ?? Blocks })),
+    onPick: (c) => { const it = items.find((i) => i.id === c.id); if (it?.text) pick(it.text.replace("$|", "")) },
+  })
+}
+
+/** ```block-<name> drawn by its plugin with its options (defaults filled in); one whose plugin is off says so (`quiet`:
+ *  nothing). `editing` shows option notes; `edit` (in an editor): its bar and options form, which writes its fence. */
+export function BlockView(props: { name: string; text: string; ctx: FileCtx; disabled: string[]; quiet?: boolean; editing?: boolean; nth?: number; edit?: BlockEdit }) {
+  const { name, text, ctx, edit } = props
+  usePluginsVersion()
+  const [form, setForm] = useState(false)
+  const { decl, plugin } = blockFor(name, props.disabled, parseOptions(text).options)
+  const label = name.startsWith("```") && plugin ? plugin.name : capitalize(name.replace(/-/g, " "))
+  const write = edit?.setText ?? (ctx.setProperty && props.nth !== undefined && !ctx.host
+    ? (t: string) => void setBlockText(ctx.path, name, props.nth!, t).catch((e) => notifyError(e, "Couldn't change its options")) : null)
+  const options = !!decl?.options && Object.keys(decl.options).length > 0 && !!write
+  const menu = (at: { x: number; y: number }, el?: HTMLElement) => openBlockMenu(at, { name, text, path: ctx.path, nth: props.nth, edit, el, options: options ? () => setForm(true) : undefined })
+  return (
+    <BlockSource name={name} menu={menu}>
+      <Block {...props} write={write} />
+      {form && options && <BlockOptions decl={decl!} text={text} set={write!} close={() => setForm(false)} source={edit?.source ?? null} />}
+      {edit && createPortal(<BlockBar name={label} options={options} form={form} setForm={setForm} menu={menu} />, edit.bar)}
+    </BlockSource>
+  )
+}
+
+function BlockBar({ name, options, form, setForm, menu }: { name: string; options: boolean; form: boolean; setForm: (f: boolean) => void; menu: (at: { x: number; y: number }) => void }) {
+  const hold = (e: ReactMouseEvent) => e.preventDefault()
+  return (
+    <>
+      <span className="cm-block-name">{name}</span>
+      {options && (
+        <button type="button" className="cm-block-btn" data-tip="Options" aria-label="Options" aria-pressed={form} onMouseDown={hold} onClick={() => setForm(!form)}>
+          <SlidersHorizontal className="size-4" strokeWidth={2.25} />
+        </button>
+      )}
+      <button type="button" className="cm-block-btn" data-tip="More" aria-label="More" onMouseDown={hold}
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); menu({ x: r.left, y: r.bottom + 4 }) }}>
+        <Ellipsis className="size-4" strokeWidth={2.25} />
+      </button>
+    </>
+  )
+}
+
+function BlockOptions({ decl, text, set, close, source }: { decl: BlockDecl; text: string; set: (text: string) => void; close: () => void; source: (() => void) | null }) {
+  const { options: now, error } = parseOptions(text)
+  const put = (key: string, value: unknown) => {
+    const empty = value === undefined || value === "" || (Array.isArray(value) && !value.length)
+    set(innerOf(setProp(`---\n${text}\n---\n`, key, empty ? undefined : value)))
+  }
+  const all = Object.entries(decl.options ?? {})
+  const rows = all.filter(([, d]) => !(Array.isArray(d.type) ? d.type : [d.type]).includes("map"))
+  return (
+    <div className="cm-block-options" data-no-edit>
+      {error && <p className="text-[13px] text-muted-foreground">{capitalize(error)}: fix it in its source.</p>}
+      {!error && rows.map(([key, d]) => (
+        <label key={key} className="flex min-h-9 items-center gap-3 py-1">
+          <span className="w-28 shrink-0 text-[13px] font-medium">{capitalize(key.replace(/_/g, " "))}</span>
+          <span className="min-w-0 flex-1"><OptionInput d={d} value={now[key]} set={(v) => put(key, v)} /></span>
+          <span className="hidden min-w-0 flex-1 truncate text-[13px] text-muted-foreground md:block" data-tip-trunc data-tip={capitalize(d.description)}>{capitalize(d.description)}</span>
+        </label>
+      ))}
+      <div className="mt-1 flex gap-4 text-[13px] font-semibold text-primary">
+        <button type="button" className="cursor-pointer" onClick={close}>Done</button>
+        {source && rows.length < all.length && <button type="button" className="cursor-pointer" onClick={source}>More in its source</button>}
+      </div>
+    </div>
+  )
+}
+
+const listOf = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(",") : []).map((x) => x.trim()).filter(Boolean)
+
+function OptionInput({ d, value, set }: { d: OptionDecl; value: unknown; set: (v: unknown) => void }) {
+  const ts = Array.isArray(d.type) ? d.type : [d.type]
+  const shown = value === undefined || value === null ? "" : Array.isArray(value) ? value.join(", ") : String(value)
+  const [v, setV] = useDraft(shown)
+  const hint = d.default === undefined ? "" : Array.isArray(d.default) ? d.default.join(", ") : String(d.default)
+  if (ts.length === 1 && ts[0] === "boolean") return <Switch on={value === undefined ? d.default === true : value === true} onChange={set} label={d.description} />
+  if (ts.includes("enum") && d.values?.length) {
+    return (
+      <select value={shown} onChange={(e) => set(e.target.value === "" ? undefined : ts.includes("number") && !isNaN(Number(e.target.value)) ? Number(e.target.value) : e.target.value)}
+        className="h-8 w-full min-w-0 cursor-pointer rounded-[6px] bg-foreground/[0.04] px-1.5 text-[15px] outline-none">
+        <option value="">{hint ? `Default (${hint})` : "Default"}</option>
+        {d.values.map((x) => <option key={String(x)} value={String(x)}>{String(x)}</option>)}
+      </select>
+    )
+  }
+  const commit = () => {
+    if (v === shown) return
+    const t = v.trim()
+    if (ts.includes("list") && !ts.includes("string")) set(listOf(t))
+    else if (ts.includes("number") && t !== "" && !isNaN(Number(t))) set(Number(t))
+    else set(t)
+  }
+  return (
+    <input value={v} placeholder={hint} spellCheck={false} aria-label={d.description} inputMode={ts.length === 1 && ts[0] === "number" ? "decimal" : undefined}
+      onChange={(e) => setV(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur() } if (e.key === "Escape") { setV(shown); e.currentTarget.blur() } }}
+      className="h-8 w-full min-w-0 rounded-[6px] bg-foreground/[0.04] px-1.5 text-[15px] outline-none placeholder:text-muted-foreground focus:bg-foreground/[0.06]" />
+  )
+}
+
+function Block({ name, text, ctx, disabled, quiet, editing, write }: { name: string; text: string; ctx: FileCtx; disabled: string[]; quiet?: boolean; editing?: boolean; write?: ((text: string) => void) | null }) {
+  const parsed = parseOptions(text)
+  const { plugin, render, decl, unnamed } = blockFor(name, disabled, parsed.options)
+  if (!render) {
+    if (quiet || (plugin ? codeArriving(plugin.id) : codeArriving())) return null
+    return (
+      <p className="text-[15px] text-muted-foreground">
+        {plugin ? `${offText(plugin, disabled)}, so this ${name} block isn't drawn.` : unnamed || `No plugin draws block-${name}.`}
+      </p>
+    )
+  }
+  const options = resolveOptions(decl, parsed.options)
+  const notes = editing && !name.startsWith("```") ? optionNotes(decl, parsed.options, parsed.error) : []
+  const drawn = typeof options.file === "string" && options.file.trim()
+    ? <OtherFile name={name} text={text} options={options} ctx={ctx} render={render} editing={editing} />
+    : <Island key={plugin?.version} retry={text} name={name} editing={editing}><Drawn render={render} ctx={{ ...ctx, text, options, setText: write ?? undefined }} /></Island>
+  if (!notes.length) return drawn
+  return <>{drawn}<BlockNotes name={name} notes={notes} /></>
+}
+
+type Render = NonNullable<ReturnType<typeof blockFor>["render"]>
+
+function Drawn({ render, ctx }: { render: Render; ctx: Parameters<Render>[0] }) {
+  return <Suspense fallback={<Loading />}>{render(ctx)}</Suspense>
+}
+
+function BlockNotes({ name, notes }: { name: string; notes: string[] }) {
+  const text = notes.join("; ")
+  return (
+    <p className="mt-1.5 text-[13px] leading-[18px] text-muted-foreground" data-block-notes={name}>
+      {text.split(/(`[^`]*`)/).map((part, i) => (part.startsWith("`") && part.endsWith("`") && part.length > 1
+        ? <code key={i} className="rounded-[4px] bg-muted px-1 font-mono text-[12px]">{part.slice(1, -1)}</code>
+        : i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))}
+    </p>
+  )
+}
+
+function fileFor(store: Store, target: string, from?: string): string | null {
+  const t = target.trim().replace(/^\[\[|\]\]$/g, "")
+  if (t.endsWith("/")) {
+    const dir = t.replace(/^\/+/, "").toLowerCase()
+    const inside = store.files.files.filter((f) => f.path.toLowerCase().startsWith(dir) && f.path.endsWith(".md"))
+    return inside.sort((a, b) => b.mtime - a.mtime)[0]?.path ?? null
+  }
+  return resolver(store)(t, from)?.file ?? null
+}
+
+function OtherFile({ name, text, options, ctx, render, editing }: {
+  name: string; text: string; options: Record<string, unknown>; ctx: FileCtx; render: Render; editing?: boolean
+}) {
+  const path = fileFor(ctx.store, String(options.file), ctx.path)
+  const mtime = ctx.store.files.files.find((f) => f.path === path)?.mtime
+  const read = useRead(path ? () => readFile(path).then((f) => ({ path, ...noteParts(f.text) })) : null, [path, mtime])
+  const other = read.value
+  if (!path) return <p className="text-[15px] text-muted-foreground">No file {String(options.file)} to draw this {name} block for.</p>
+  if (other?.path !== path) return <Loading className="min-h-20" error={read.error !== undefined && errorText(read.error, `Couldn't read ${String(options.file)}`)} />
+  return <Island retry={`${path}\0${text}`} name={name} editing={editing}><Drawn render={render} ctx={{ ...ctx, ...other, host: undefined, text, options }} /></Island>
+}
+
+/** Another file's blocks, as that file has them (Projects: each project's card is its file's blocks). `fm` is what
+ *  they read from its frontmatter; `fallback` are the blocks to draw when the file isn't in the vault (previews). */
+export function FileBlocks({ store, path, fm = {}, fallback = [] }: { store: Store; path: string; fm?: Record<string, unknown>; fallback?: string[] }) {
+  const { disabled } = usePrefs()
+  const f = store.files.files.find((x) => x.path === path)
+  const blocks = f ? f.blocks : fallback.map((n): [string, string] => [n, ""])
+  const ctx: FileCtx = { store, path, fm, body: "" }
+  return <>{blocks.map(([name, text], i) => <BlockView key={i} name={name} text={text} ctx={ctx} disabled={disabled} quiet />)}</>
+}
+
+function Island({ children, name, editing, retry }: { children: ReactNode; name?: string; editing?: boolean; retry?: string }) {
+  const what = name ? `This ${name} block` : "This block"
+  const failed = (e: unknown) => (
+    <p className="text-[15px] text-muted-foreground" data-block-failed={name ?? ""}>
+      {editing ? errorText(e, `${what} couldn't be drawn`) : `${what} couldn't be drawn. Edit the file to see its text.`}
+    </p>
+  )
+  return <Catch fallback={failed} reset={retry} onError={(e) => console.error(`block${name ? `-${name}` : ""}:`, e)}>{children}</Catch>
+}

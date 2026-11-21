@@ -1,0 +1,100 @@
+// Browsers list installed fonts only through `queryLocalFonts()`, which asks first ("local-fonts": not in TypeScript's DOM).
+
+export type Font = { family: string; mono: boolean }
+
+declare global {
+  interface Permissions { query(permission: { name: "local-fonts" }): Promise<PermissionStatus> }
+}
+
+const SANS = [
+  "Helvetica Neue", "Helvetica", "Arial", "Avenir", "Avenir Next", "Futura", "Gill Sans", "Optima", "Seravek", "Verdana",
+  "Trebuchet MS", "Tahoma", "Lucida Grande", "Geneva", "Arial Rounded MT Bold", "DIN Alternate", "Skia", "Inter",
+  "Inter Variable", "Geist", "Roboto", "Open Sans", "Lato", "Source Sans 3", "Source Sans Pro", "Noto Sans",
+  "IBM Plex Sans", "Segoe UI", "Ubuntu", "Montserrat", "Nunito", "Work Sans", "Figtree", "Manrope", "DM Sans",
+  "Atkinson Hyperlegible", "Fira Sans", "PT Sans", "Cantarell", "SF Pro Text", "SF Pro Display", "SF Pro Rounded",
+  "Hiragino Sans", "PingFang SC", "Apple SD Gothic Neo", "Comic Sans MS", "Chalkboard SE", "Marker Felt",
+]
+const SERIF = [
+  "New York", "Georgia", "Times New Roman", "Times", "Palatino", "Baskerville", "Hoefler Text", "Didot", "Bodoni 72",
+  "Big Caslon", "Charter", "Iowan Old Style", "Cochin", "Athelas", "Superclarendon", "Rockwell", "American Typewriter",
+  "Cambria", "Garamond", "EB Garamond", "Libre Baskerville", "Merriweather", "Lora", "Source Serif 4",
+  "Source Serif Pro", "Noto Serif", "IBM Plex Serif", "Literata", "Crimson Pro", "Crimson Text", "Spectral", "PT Serif",
+  "Charis SIL", "Bookerly", "Sitka Text", "Constantia", "iA Writer Quattro S", "iA Writer Quattro V",
+]
+const MONO = [
+  "SF Mono", "Menlo", "Monaco", "Courier New", "Courier", "Andale Mono", "PT Mono", "JetBrains Mono", "Fira Code",
+  "Fira Mono", "Source Code Pro", "IBM Plex Mono", "Cascadia Code", "Cascadia Mono", "Consolas", "Hack", "Inconsolata",
+  "Ubuntu Mono", "Roboto Mono", "Iosevka", "Berkeley Mono", "Geist Mono", "Victor Mono", "Commit Mono",
+  "Monaspace Neon", "Monaspace Argon", "iA Writer Mono S", "iA Writer Duo S", "Input Mono", "Operator Mono",
+  "Dank Mono", "MonoLisa", "Lucida Console", "DejaVu Sans Mono", "Space Mono", "Red Hat Mono", "Martian Mono",
+]
+
+let ctx: CanvasRenderingContext2D | null | undefined
+const SAMPLE = "mmmmmmmmmmlli1WQ@#&%"
+const width = (font: string) => { ctx!.font = `32px ${font}`; return ctx!.measureText(SAMPLE).width }
+const quote = (family: string) => `"${family.replace(/"/g, "")}"`
+
+function drawn(family: string) {
+  if (ctx === undefined) ctx = document.createElement("canvas").getContext("2d")
+  if (!ctx) return false
+  return ["monospace", "serif", "sans-serif"].some((g) => width(`${quote(family)}, ${g}`) !== width(g))
+}
+
+function monospaced(family: string) {
+  if (!ctx) return false
+  ctx.font = `32px ${quote(family)}, sans-serif`
+  return Math.abs(ctx.measureText("iiiiiiiiii").width - ctx.measureText("WWWWWWWWWW").width) < 0.5
+}
+
+const MONO_NAMES = new Set(MONO.map((f) => f.toLowerCase()))
+const MONO_WORD = /mono|code|courier|consol|menlo|monaco|terminal/i
+
+let common: Font[] | null = null
+let local: Font[] | null = null
+
+function commonFonts(): Font[] {
+  if (common) return common
+  const seen = new Set<string>()
+  common = []
+  for (const family of [...SANS, ...SERIF, ...MONO]) {
+    if (seen.has(family.toLowerCase()) || !drawn(family)) continue
+    seen.add(family.toLowerCase())
+    common.push({ family, mono: MONO.includes(family) || monospaced(family) })
+  }
+  return common
+}
+
+const query = () => window.queryLocalFonts
+
+export const canListAll = () => typeof query() === "function"
+
+export async function listAllowed() {
+  if (!canListAll()) return false
+  if (local) return true
+  if (window.vaultite) return true
+  try {
+    const p = await navigator.permissions.query({ name: "local-fonts" })
+    return p.state === "granted"
+  } catch { return false }
+}
+
+// queryLocalFonts needs a click or key press when the browser asks.
+export async function loadAll(): Promise<boolean> {
+  const q = query()
+  if (!q) return false
+  try {
+    const data = await q.call(window)
+    const families = [...new Set(data.map((d) => d.family).filter((f) => f && !f.startsWith(".")))]
+    // By name, not measured: measuring loads each font, half a second for a Mac's few hundred.
+    local = families.map((family) => ({ family, mono: MONO_NAMES.has(family.toLowerCase()) || MONO_WORD.test(family) }))
+    return true
+  } catch { return false }
+}
+
+export function fonts(): Font[] {
+  const byName = new Map<string, Font>()
+  for (const f of local ?? commonFonts()) if (!byName.has(f.family.toLowerCase())) byName.set(f.family.toLowerCase(), f)
+  return [...byName.values()].sort((a, b) => a.family.localeCompare(b.family))
+}
+
+export const listedAll = () => !!local

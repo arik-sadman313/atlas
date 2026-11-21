@@ -1,0 +1,141 @@
+import fs from "node:fs"
+import path from "node:path"
+import { Marked, type Tokens } from "marked"
+import { z } from "zod"
+import { HTTPError, OpError, Plugin, type Request, Text } from "../../../core/plugins.ts"
+
+export const plugin = new Plugin(import.meta.url)
+
+const CARDS = path.join(import.meta.dirname, "cards")
+const file = (name: string) => fs.readFileSync(path.join(CARDS, name), "utf8")
+const page = (name: string) => () => file(`${name}.html`).replace("/*card.css*/", file("card.css")).replace("/*bridge.js*/", file("bridge.js"))
+
+const decoded = (s: string) => { try { return decodeURI(s) } catch { return s } }
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+const md = new Marked({ gfm: true, breaks: false, renderer: {
+  html: ({ text }: Tokens.HTML | Tokens.Tag) => esc(text),
+  image: ({ text, href }: Tokens.Image) => `<span class="img">${esc(text || href)}</span>`,
+  link({ href, tokens }: Tokens.Link) {
+    const inner = this.parser.parseInline(tokens)
+    return /^(https?|mailto):/i.test(href) ? `<a href="${esc(href)}" data-url="${esc(href)}">${inner}</a>` : `<a data-open="${esc(decoded(href))}">${inner}</a>`
+  },
+  code: ({ text, lang }: Tokens.Code) => (/^block-/.test(lang ?? "") ? "" : `<pre><code>${esc(text)}</code></pre>`),
+} })
+
+export function noteHtml(text: string, resolve: (target: string) => string | null = () => null) {
+  const body = text.replace(/^---\n[\s\S]*?\n---\n?/, "")
+    .replace(/!?\[\[([^[\]\n|]+?)(?:\|([^[\]\n]+?))?\]\]/g, (_all, target: string, shown?: string) => {
+      const label = (shown ?? target.replace(/#.*/, "")).replace(/[[\]]/g, "")
+      const to = resolve(target.replace(/#.*/, "").trim())
+      return to ? `[${label}](<${to}>)` : label
+    })
+  return md.parse(body, { async: false })
+}
+
+const fmTitle = (text: string) => /^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$[\s\S]*?\n---/m.exec(text)?.[1]
+const links = (p: string, app: string | null) => ({ open: `vaultite://open/${p.split("/").map(encodeURIComponent).join("/")}`,
+  ...(app ? { web: `${app}/#file/${encodeURIComponent(p)}` } : {}) })
+
+const Obj = z.record(z.string(), z.unknown()).catch({})
+type R = z.infer<typeof Obj>
+const Groups = z.array(z.object({ names: z.array(z.string()), tasks: z.array(Obj) })).catch([])
+const UiLink = z.object({ ui: z.object({ resourceUri: z.string().optional() }).optional() }).catch({})
+plugin.provide("mcp:apps", () => [{
+  uri: "ui://vaultite/note",
+  name: "Note",
+  description: "A vault note, drawn, with a link that opens it in Vaultite",
+  html: page("note"),
+  meta: { prefersBorder: true },
+  tools: ["read"],
+  data: ({ result, app }: { result: unknown; app: string | null }) => {
+    const f = Obj.parse(result)
+    const p = String(f.path ?? "")
+    if (!p.endsWith(".md")) return undefined
+    const text = String(f.text ?? "")
+    return { path: p, title: fmTitle(text) ?? p.split("/").pop()!.replace(/\.md$/, ""), html: noteHtml(text, (t) => plugin.vault.resolveLink(t, p)), partial: f.from !== undefined && f.to !== f.lines,
+      ...links(p, app) }
+  },
+}, {
+  uri: "ui://vaultite/tasks",
+  name: "Tasks",
+  description: "Tasks from a Tasks query, ticked in place",
+  html: page("tasks"),
+  meta: { prefersBorder: true },
+  tools: ["tasks_list"],
+  also: ["tasks_complete"],
+  data: ({ tool, result, app }: { tool: string; result: unknown; app: string | null }) => {
+    if (tool !== "tasks_list") return result
+    const r = Obj.parse(result), groups = Groups.parse(r.groups ?? [])
+    return { today: r.today, total: r.total, shown: r.shown, problems: r.problems, app, groups: groups.map((g) => ({ names: g.names, tasks: g.tasks.map((t) => ({
+      path: t.path, line: t.line, text: t.text, description: t.description, status: t.status, priority: t.priority, dates: t.dates,
+      recurrence: t.recurrence, tags: t.tags, ...links(String(t.path), app) })) })) }
+  },
+}, {
+  uri: "ui://vaultite/board",
+  name: "Board",
+  description: "A Kanban board: its lanes and cards, moved and ticked in place",
+  html: page("board"),
+  meta: { prefersBorder: true },
+  tools: ["kanban_read"],
+  also: ["kanban_move", "kanban_done"],
+  data: ({ result, app }: { result: unknown; app: string | null }) => {
+    const r = Obj.parse(result)
+    return r.board ? { ...r, ...links(String(r.path), app) } : undefined
+  },
+}])
+
+
+type Host = {
+  tool: (name: string) => Promise<{ declared: R; kind: string | null } | null>
+  call: (req: Request, name: string, args: R) => Promise<R>
+  read: (uri: string) => Promise<{ contents: { uri: string; mimeType: string; text: string; _meta?: R }[]; csp: string } | null>
+}
+const host = (): Host => {
+  const fn = plugin.service("mcp:app-host")
+  if (typeof fn !== "function") throw new HTTPError(404, "the MCP plugin is off")
+  return fn() as Host
+}
+const args = (v: unknown): R => Obj.parse(v)
+
+async function blockTool(name: string) {
+  const t = await host().tool(name)
+  if (!t) throw new OpError(`no tool ${name || "(none)"}: \`vau ops\` lists the operations, each one's tool named`, 404)
+  if (t.kind !== "read") throw new OpError(`${name} changes the vault: a block runs only tools that read`)
+  return t
+}
+
+plugin.route("POST", "mcp-apps/run", async (req) => {
+  const b = args(req.body), name = String(b.tool ?? "")
+  const t = await blockTool(name)
+  const uri = UiLink.parse(t.declared._meta).ui?.resourceUri ?? null
+  return { tool: t.declared, uri, result: await host().call(req, name, args(b.arguments)) }
+}, { lock: false })
+
+plugin.route("POST", "mcp-apps/call", async (req) => {
+  const b = args(req.body), name = String(b.name ?? "")
+  if (name === "call" || !(await host().tool(name))) return { content: [{ type: "text", text: `no tool ${name} for cards` }], isError: true }
+  return host().call(req, name, args(b.arguments))
+}, { lock: false })
+
+plugin.route("GET", "mcp-apps/resource", async (req) => {
+  const r = await host().read(String(req.query.uri ?? ""))
+  if (!r) throw new HTTPError(404, "no such card")
+  return { contents: r.contents }
+}, { lock: false })
+
+plugin.serve("mcp-app", async (req) => {
+  const r = await host().read(String(req.query.uri ?? ""))
+  if (!r) throw new HTTPError(404, "no such card")
+  return new Text(r.contents[0].text, "text/html; charset=utf-8", {
+    "Content-Security-Policy": `sandbox allow-scripts; ${r.csp}`, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+  })
+})
+
+plugin.block("mcp-app", async (ctx) => {
+  const name = String(ctx.options.tool ?? "")
+  try {
+    await blockTool(name)
+    const r = await host().call({} as Request, name, args(ctx.options.arguments)) as { content?: { text?: string }[] }
+    return r.content?.map((c) => c.text ?? "").join("\n") ?? ""
+  } catch (e) { return `_${e instanceof Error ? e.message : String(e)}_` }
+})

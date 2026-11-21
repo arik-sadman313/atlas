@@ -1,0 +1,772 @@
+import fs from "node:fs"
+import type { IncomingMessage } from "node:http"
+import path from "node:path"
+import { setImmediate as turn } from "node:timers/promises"
+import { Readable } from "node:stream"
+import { pipeline } from "node:stream/promises"
+import { HTTPError, LOADED, type Plugin, reply, serviceFor } from "./plugins.ts"
+import { ARCHIVE_DIR, inArchive } from "./fileprops.ts"
+import { extOf, isTextKind, kindOf, tooBig } from "./filetypes.ts"
+import { searchAll, SORTS } from "./filesearch.ts"
+import { xmlDecode } from "./unzip.ts"
+import { editOf } from "./texthash.ts"
+import { planSave, saveBody } from "./contracts/save.ts"
+import { blocksIn } from "./sections.ts"
+import { prose } from "./frontmatter.ts"
+import { linkResolver, noteLinks } from "./links.ts"
+import { addEntry, entryLine, entryProblem, type NewEntry, timelineKind } from "./timeline.ts"
+import { guard, notHereYet } from "./writegate.ts"
+import { byGuest, guestRefusal } from "./guests.ts"
+import { cmp, DEVICE_NAME, type Entry, linkKey, fetchFromICloud, iCloud, type Item, ms, newFile, newFileAt, readBytes, readSoon, readText, removeTree, renameFile, sameFile, sortBy, statFrom, stemOf, type Vault, writeAtomic, writeNew, writeText } from "./vault.ts"
+import { logger } from "./log.ts"
+import { messageOf } from "./values.ts"
+
+const log = logger("files")
+
+const WIKI = () => /\[\[([^[\]\n|#^]+)((?:#[^[\]\n|]*)?)((?:\|[^[\]\n]*)?)\]\]/g
+const SKIP = new Set([".DS_Store", ".git", ".localized"])
+const STAMP = / \d{4}-\d{2}-\d{2} \d{6}(?: \d+)?$/
+
+function showHidden(vault: Vault | null) {
+  return !!(vault && vault.config("files").showHidden)
+}
+
+function locked(rel: string) {
+  return rel.startsWith(".trash/") || rel === ".vaultite/generated" || rel.startsWith(".vaultite/generated/")
+}
+
+function splitext(rel: string): [string, string] {
+  const slash = rel.lastIndexOf("/")
+  const name = rel.slice(slash + 1)
+  const dot = name.replace(/^\.+/, (m) => " ".repeat(m.length)).lastIndexOf(".")
+  return dot > 0 ? [rel.slice(0, slash + 1 + dot), name.slice(dot)] : [rel, ""]
+}
+
+const SLIDE_THEMES = ".obsidian/plugins/obsidian-advanced-slides/css/"
+
+const SETTINGS = /^\.vaultite\/(?:(?:[^./][^/]*\/)*[^./][^/]*\.(?:json|md|vim|css)|(?:snippets|themes)(?:\/[^./][^/]*)*)$/
+
+/** A safe vault-relative path, or a 400. Hidden ones only when Settings shows hidden files, or (`explicit`: opening
+ *  one file by its path) the app's settings files, or (`trash`: restoring) something in .trash. */
+export function clean(p: unknown, mustExist = false, vault: Vault | null = null, explicit = false, trash = false) {
+  const parts = String(p ?? "").replaceAll("\\", "/").trim().replace(/^\/+|\/+$/g, "").split("/").filter((x) => x !== "" && x !== ".")
+  const hidden = showHidden(vault) || (explicit && SETTINGS.test(parts.join("/"))) ||
+    (trash && parts.length > 1 && parts[0] === ".trash" && !parts.slice(1).some((x) => x.startsWith(".")))
+  if (!parts.length || parts.some((x) => x === ".." || SKIP.has(x) || (x.startsWith(".") && x !== ARCHIVE_DIR && !hidden))) {
+    throw new HTTPError(400, `not a path in the vault: '${p ?? "None"}'`)
+  }
+  if (parts.some((x) => /[*"\\<>:|?]/.test(x))) throw new HTTPError(400, 'names can\'t contain * " \\ < > : | ?')
+  if (parts.some((x) => /[\x00-\x1f\x7f]/.test(x))) throw new HTTPError(400, "names can't contain line breaks or other control characters")
+  // (Windows drops a trailing dot or space, and its device names aren't files: written, they'd be another file or none)
+  if (process.platform === "win32" && parts.some((x) => /[. ]$/.test(x) || DEVICE_NAME.test(x))) {
+    throw new HTTPError(400, "Windows names can't end in a dot or a space, or be CON, PRN, AUX, NUL, COM1-9 or LPT1-9")
+  }
+  const rel = parts.join("/")
+  if (mustExist && vault && !fs.existsSync(vault.abs(rel))) throw new HTTPError(404, `no file '${rel}'`)
+  return rel
+}
+
+export const chars = (s: string, n: number) => {
+  if (s.length <= n) return s
+  let at = 0
+  for (let k = 0; k < n && at < s.length; k++) at += s.codePointAt(at)! > 0xffff ? 2 : 1
+  return at < s.length ? `${s.slice(0, at)}…` : s
+}
+
+export function context(line: string, at?: (s: string) => [number, number][]) {
+  let s = line.replace(/^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?|>\s*|#{1,6}\s+)/, "").trim()
+  const first = at?.(s)[0]?.[0] ?? 0
+  if (first > 100) { const from = s.indexOf(" ", first - 40); s = `…${s.slice(from >= 0 && from < first ? from + 1 : first - 40)}` }
+  return chars(s, 200)
+}
+
+function linksOf(e: Entry) {
+  const out: [string, string][] = []
+  for (const l of noteLinks(e.body)) out.push([l.target, l.line])
+  for (const [k, v] of Object.entries(e.fm)) {
+    for (const s of Array.isArray(v) ? v : [v]) {
+      if (typeof s === "string") for (const m of s.matchAll(WIKI())) out.push([m[1].trim(), `${k}: ${s}`])
+    }
+  }
+  return out
+}
+
+
+export type TreeRow = { path: string; mtime: number; ctime: number; size: number; archived?: boolean; excluded?: boolean; type?: string | null
+  kind?: string | null; title?: string; aliases?: string[]; problems?: number; tags?: string[]; blocks?: string[][]; icon?: string; tint?: string
+  plugin?: string; container?: string }
+
+function row(rel: string, e: Entry): TreeRow {
+  const aliases = e.fm.aliases
+  const look: Item = {}
+  for (const k of ["icon", "tint", "plugin", "container"]) if (typeof e.fm[k] === "string") look[k] = e.fm[k]
+  const title = e.fm.title || e.fm.name || stemOf(rel)
+  return {
+    ...look,
+    path: rel, type: e.type, kind: e.kind ? e.kind.collection : null, title: typeof title === "string" ? title : String(title),
+    aliases: (Array.isArray(aliases) ? aliases : aliases ? [aliases] : []).map(String),
+    mtime: ms(e.stat.ns), ctime: e.stat.born, size: e.stat.size,
+    problems: e.problems.length,
+    ...(e.archived ? { archived: true } : {}),
+    ...(e.tags.length ? { tags: e.tags } : {}),
+    blocks: blocksIn(e.body).map((b) => [b.name, b.text]),
+  }
+}
+
+const rows = new WeakMap<Entry, { row: TreeRow; excluded?: TreeRow }>()
+const otherRows = new WeakMap<object, TreeRow>()
+type Tree = { files: TreeRow[]; others: TreeRow[]; folders: string[] }
+const trees = new WeakMap<object, { version: number; settings: number; pages: Plugin[]; tree: Tree }>()
+type Looks = (vault: Vault, rel: string, mtime: number) => Item
+
+const sortedOf = new WeakMap<Vault, { entries?: string[]; others?: string[] }>()
+function sortedKeys(vault: Vault, slot: "entries" | "others"): string[] {
+  const m = vault[slot] as Map<string, unknown>
+  let all = sortedOf.get(vault)
+  if (!all) sortedOf.set(vault, all = {})
+  const was = all[slot]
+  if (was && was.length === m.size && was.every((k) => m.has(k))) return was
+  return all[slot] = [...m.keys()].sort(cmp)
+}
+
+function pagePlugins(vault: Vault) {
+  const off = vault.switchedOff()
+  return LOADED.filter((p) => !off.has(p.id) && Object.keys(p.services).some((k) => k.startsWith("looks:")))
+}
+
+export function tree(vault: Vault): Tree {
+  let hit = trees.get(vault)
+  const pages = pagePlugins(vault)
+  if (hit?.version !== vault.version || hit.settings !== vault.settingsVersion || hit.pages.length !== pages.length || hit.pages.some((p, i) => p !== pages[i])) {
+    const files: TreeRow[] = [], others: TreeRow[] = []
+    for (const rel of sortedKeys(vault, "entries")) {
+      const e = vault.entries.get(rel)!
+      let r = rows.get(e)
+      if (!r) rows.set(e, r = { row: Object.freeze(row(rel, e)) })
+      files.push(vault.excluded(rel) ? r.excluded ??= Object.freeze({ ...r.row, excluded: true }) : r.row)
+    }
+    for (const r of sortedKeys(vault, "others")) {
+      const st = vault.others.get(r)!, excluded = vault.excluded(r)
+      let base = otherRows.get(st)
+      if (base?.path !== r || !!base.excluded !== excluded) {
+        otherRows.set(st, base = Object.freeze({ path: r, mtime: ms(st.ns), ctime: st.born, size: st.size, ...(inArchive(r) ? { archived: true } : {}), ...(excluded ? { excluded: true } : {}) }))
+      }
+      const looks = serviceFor(pages, "looks", r) as Looks | null
+      if (!looks) {
+        others.push(base)
+        continue
+      }
+      const look = looks(vault, r, base.mtime) ?? {}
+      files.push({ ...look, ...base, type: null, kind: null, title: look.title ?? stemOf(r).replace(/\.[^.]+$/, ""), aliases: [], problems: 0, blocks: [] })
+    }
+    hit = { version: vault.version, settings: vault.settingsVersion, pages, tree: Object.freeze({ files, others, folders: [...vault.folders] }) }
+    trees.set(vault, hit)
+  }
+  if (!showHidden(vault)) return hit.tree
+  const [hf, hd] = hiddenFiles(vault)
+  return { files: hit.tree.files, others: [...hit.tree.others, ...hf], folders: [...hit.tree.folders, ...hd].sort() }
+}
+
+function hiddenFiles(vault: Vault): [TreeRow[], string[]] {
+  const files: TreeRow[] = [], folders: string[] = []
+  const stack: [string, boolean][] = [["", false]]
+  while (stack.length) {
+    const [sub, inside] = stack.pop()!
+    let names: string[]
+    try {
+      names = fs.readdirSync(sub ? vault.abs(sub) : vault.path)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (SKIP.has(name) || name.endsWith(".icloud") || name.includes(".tmp-")) continue
+      const rel = sub ? `${sub}/${name}` : name
+      const hid = inside || (name.startsWith(".") && name !== ARCHIVE_DIR)
+      let st: fs.BigIntStats
+      try {
+        st = fs.statSync(vault.abs(rel), { bigint: true })
+      } catch {
+        continue
+      }
+      if (st.isDirectory()) {
+        if (hid) folders.push(rel)
+        stack.push([rel, hid])
+        continue
+      }
+      if (!hid) continue
+      files.push({ path: rel, mtime: ms(st.mtimeNs), ctime: statFrom(st).born, size: Number(st.size) })
+    }
+  }
+  return [sortBy(files, (f) => f.path), folders]
+}
+
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+
+function textOf(data: Buffer) {
+  if (data.subarray(0, 8000).includes(0)) return null
+  try {
+    return utf8.decode(data).replace(/\r\n?/g, "\n")
+  } catch (e) {
+    if (tooBig(e)) throw e
+    return null
+  }
+}
+
+export type FileText = ReturnType<typeof read>
+
+function read(vault: Vault, rel: string) {
+  let data: Buffer, st: fs.BigIntStats
+  try {
+    st = fs.statSync(vault.abs(rel), { bigint: true })
+    if (st.isDirectory()) throw new HTTPError(400, `'${rel}' is a folder`)
+    data = readBytes(vault.abs(rel))
+  } catch (e) {
+    if (e instanceof HTTPError || notHereYet(e)) throw e
+    if (tooBig(e)) throw new HTTPError(413, `'${rel}' is too big to open as text`)
+    throw new HTTPError(404, `no file '${rel}'`)
+  }
+  let text: string | null
+  try { text = textOf(data) } catch { throw new HTTPError(413, `'${rel}' is too big to open as text`) }
+  if (text === null) throw new HTTPError(415, `'${rel}' isn't text`)
+  const e = vault.entries.get(rel)
+  return { path: rel, text, mtime: ms(st.mtimeNs), size: Number(st.size), kind: e && e.kind ? e.kind.collection : null, problems: e ? [...e.problems] : [] }
+}
+
+async function downloaded(vault: Vault, rel: string, wait = 10_000) {
+  let st: fs.Stats
+  try { st = fs.statSync(vault.abs(rel)) } catch { return }
+  if (st.isDirectory()) return
+  if (await readSoon(vault.abs(rel), wait, { join: true }).catch(() => true) === null) throw new HTTPError(503, `iCloud is still downloading ${rel}; try again in a moment`)
+}
+
+function writable(vault: Vault, rel: string) {
+  if (isTextKind(kindOf(rel))) return true
+  try {
+    const st = fs.statSync(vault.abs(rel))
+    return st.isFile() && textOf(fs.readFileSync(vault.abs(rel))) !== null
+  } catch {
+    return false
+  }
+}
+
+async function pdfPages(abs: string) {
+  const PIECE = 32 << 20, OVER = 1 << 20
+  let most = 0, pages = 0, carry = "", at = 0
+  const fh = await fs.promises.open(abs)
+  try {
+    const buf = Buffer.alloc(Math.min(PIECE, (await fh.stat()).size + 1))
+    for (;;) {
+      const { bytesRead, buffer } = await fh.read(buf, 0, buf.length, at)
+      at += bytesRead
+      const s = carry + buffer.subarray(0, bytesRead).toString("latin1"), end = bytesRead < buf.length ? s.length : s.length - OVER
+      for (const m of s.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages\b/g)) if (m.index < end) most = Math.max(most, Number(m[1] ?? m[2]))
+      for (const m of s.matchAll(/\/Type\s*\/Page\b(?!s)/g)) if (m.index < end) pages++
+      if (bytesRead < buf.length) break
+      carry = s.slice(end)
+    }
+  } finally {
+    await fh.close()
+  }
+  return most || pages || null
+}
+
+async function info(vault: Vault, rel: string) {
+  let st: fs.BigIntStats
+  try {
+    st = fs.statSync(vault.abs(rel), { bigint: true })
+  } catch {
+    throw new HTTPError(404, `no file '${rel}'`)
+  }
+  const kind = kindOf(rel)
+  const out: Item = { path: rel, kind, size: Number(st.size), mtime: ms(st.mtimeNs), ctime: statFrom(st).born }
+  if (kind === "pdf") out.pages = await pdfPages(vault.abs(rel)).catch(() => null)
+  return out
+}
+
+function previews(vault: Vault, folder: string) {
+  const out: Record<string, string> = {}
+  for (const [rel, e] of vault.entries) {
+    if (rel.slice(0, Math.max(0, rel.lastIndexOf("/"))) !== folder) continue
+    const text = prose(e.body).trim()
+    if (text) out[rel] = chars(text, 400)
+  }
+  return { folder, previews: out }
+}
+
+function forget(vault: Vault, rel: string) {
+  for (const r of [...vault.entries.keys()]) if (r === rel || r.startsWith(rel + "/")) vault.drop(r)
+}
+
+function freeName(vault: Vault, rel: string) {
+  const [stem, ext] = splitext(rel)
+  let n = 1, out = rel
+  while (fs.existsSync(vault.abs(out))) out = `${stem} ${n++}${ext}`
+  return out
+}
+
+function newText(vault: Vault, rel: string, text: string) {
+  if (/\.md$/i.test(rel)) return vault.created(rel, text)
+  vault.fileCreated(rel, newFile(Buffer.from(text, "utf8")))
+  return text
+}
+
+function newEntry(b: Item): NewEntry {
+  const kind = timelineKind(b.kind)
+  if (!/^\d{4}-\d\d-\d\d$/.test(String(b.date ?? "")) || !kind) {
+    throw new HTTPError(400, "need a date (YYYY-MM-DD) and a kind, a word or two (call, hang out, coffee, note)")
+  }
+  const min = b.duration_min === null || b.duration_min === undefined || b.duration_min === "" ? null : Number(b.duration_min)
+  if (min !== null && !(Number.isFinite(min) && min > 0)) throw new HTTPError(400, "duration_min is a number of minutes, more than 0")
+  const text = (k: string) => (typeof b[k] === "string" ? b[k].trim() : "")
+  if (kind === "note" && !text("notes")) throw new HTTPError(400, "a note needs its text (notes)")
+  const e = { date: b.date, kind, duration_min: min, subject: text("subject"), notes: text("notes"), url: text("url") }
+  const why = entryProblem(e)
+  if (why) throw new HTTPError(400, why)
+  return e
+}
+
+function restore(vault: Vault, rel: string) {
+  if (!rel.startsWith(".trash/")) throw new HTTPError(400, "only things in .trash can be restored")
+  if (!fs.existsSync(vault.abs(rel))) throw new HTTPError(404, `${rel} isn't in the trash any more`)
+  let [stem, ext] = splitext(rel.slice(".trash/".length))
+  if (fs.statSync(vault.abs(rel)).isDirectory()) [stem, ext] = [stem + ext, ""]
+  const dst = freeName(vault, stem.replace(STAMP, "") + ext)
+  guard(vault.abs(dst))
+  fs.mkdirSync(path.dirname(vault.abs(dst)), { recursive: true })
+  renameFile(vault.abs(rel), vault.abs(dst))
+  return dst
+}
+
+const TRASH_DAYS = 30
+const TRASHED_AT = / (\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2})(?: \d+)?$/
+
+export async function emptyTrash(vault: Vault, now = Date.now()) {
+  const cutoff = now - TRASH_DAYS * 86_400_000, gone: string[] = []
+  const top = vault.abs(".trash")
+  try { if (!fs.lstatSync(top).isDirectory()) return gone } catch { return gone }
+  const sweep = async (dir: string): Promise<boolean> => {
+    let names: string[]
+    try { names = fs.readdirSync(path.join(top, dir)) } catch { return false }
+    let removed = false
+    for (const name of names) {
+      const rel = dir ? `${dir}/${name}` : name, abs = path.join(top, rel)
+      let st: fs.Stats
+      try { st = fs.lstatSync(abs) } catch { continue }
+      // (an iCloud placeholder: ".Name 2026-09-01 101500.md.icloud")
+      const real = name.replace(/^\.(.+)\.icloud$/, "$1")
+      const m = TRASHED_AT.exec(st.isDirectory() ? real : splitext(real)[0])
+      if (!m && st.isDirectory()) {
+        if (await sweep(rel) && !fs.readdirSync(abs).length) { try { fs.rmdirSync(abs); removed = true } catch { /* in use */ } }
+        continue
+      }
+      const at = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : st.ctimeMs
+      if (at > cutoff) continue
+      try { removeTree(abs); gone.push(`.trash/${rel}`); removed = true } catch (e) { log.error("couldn't empty an old file from the trash", e, { file: `.trash/${rel}` }) }
+      if (gone.length % 20 === 0) await turn()
+    }
+    return removed
+  }
+  await sweep("")
+  return gone
+}
+
+
+function copyName(vault: Vault, rel: string) {
+  const [stem, ext] = splitext(rel)
+  const m = / (\d+)$/.exec(stem)
+  const base = m ? stem.slice(0, -m[0].length) : stem
+  let n = m ? Number(m[1]) + 1 : 1, out = `${base} ${n}${ext}`
+  while (fs.existsSync(vault.abs(out))) out = `${base} ${++n}${ext}`
+  return out
+}
+
+const KEEP = 256 << 20
+/** Bigger than this, a file is read a piece at a time (one string can't hold much more): a query matches a piece. */
+const PIECE = 128 << 20
+export type Indexed = { ns: bigint; reader: Reader | null; text: string | "disk" | null }
+type Index = { files: Map<string, Indexed>; kept: number; version: string; busy: Promise<void> | null }
+export const indexes = new WeakMap<Vault, Index>()
+export const DISK = "disk"
+
+function readerPlugins(vault: Vault) {
+  const off = vault.switchedOff()
+  return LOADED.filter((p) => !off.has(p.id) && Object.keys(p.services).some((k) => k.startsWith("text:")))
+}
+
+type Reader = (b: Buffer, rel: string) => string
+const DATA = new Set(["json", "jsonl", "ndjson", "geojson", "map"])
+function searchFiles(vault: Vault) {
+  const readers = readerPlugins(vault)
+  const out = new Map<string, Reader | null>()
+  for (const rel of vault.others.keys()) {
+    const k = kindOf(rel)
+    if (k === "image" || k === "pdf" || k === "audio" || k === "video" || DATA.has(extOf(rel))) continue
+    const reader = k === "binary" ? serviceFor(readers, "text", rel) as Reader | null : null
+    if (k !== "binary" || reader) out.set(rel, reader)
+  }
+  return out
+}
+
+const DATA_URL = /(data:[\w.+-]+\/[\w.+-]+;base64,)[A-Za-z0-9+/=]{256,}/g
+const searchText = (t: string) => t.replace(DATA_URL, "$1…")
+
+const PAGE = new Set(["html", "htm"])
+const MARKUP = /<!--[\s\S]*?-->|<(script|style|template)\b[\s\S]*?<\/\1\s*>|<[^>]*>/gi
+/** A web page as search reads it: its words, not its markup, scripts or styles (an app's can be megabytes of code and
+ *  data), each on its line in the file (what's left out keeps its line breaks), entities decoded. */
+export function pageText(html: string): string {
+  return xmlDecode(html.replace(MARKUP, (m) => (m.includes("\n") ? m.replace(/[^\n]+/g, "") : " "))).replace(/[ \t\u00a0]+/g, " ")
+}
+
+async function readIndexed(abs: string, rel: string, reader: Reader | null, room: number): Promise<string | null | undefined> {
+  const st = await fs.promises.stat(abs)
+  if (iCloud.on && iCloud.evicted(abs, st)) { fetchFromICloud(abs, { errno: 11 }); return undefined }
+  if (reader) {
+    const text = String(reader(await fs.promises.readFile(abs), rel) ?? "")
+    return text.length > room ? DISK : text
+  }
+  const fh = await fs.promises.open(abs)
+  try {
+    const head = Buffer.alloc(Math.min(st.size, 8000))
+    await fh.read(head, 0, head.length, 0)
+    if (head.includes(0)) return null
+    const page = PAGE.has(extOf(rel))
+    if (st.size > PIECE || (!page && st.size > room)) return DISK
+    const text = textOf(await fh.readFile())
+    if (text === null) return null
+    if (!page) return searchText(text)
+    const words = searchText(pageText(text))
+    return words.length > room ? DISK : words
+  } finally {
+    await fh.close()
+  }
+}
+
+export function refresh(vault: Vault): Promise<void> {
+  let ix = indexes.get(vault)
+  if (!ix) indexes.set(vault, ix = { files: new Map(), kept: 0, version: "", busy: null })
+  const idx = ix
+  if (idx.busy) return idx.busy.then(() => refresh(vault))
+  const version = `${vault.version}:${LOADED.length}:${[...vault.switchedOff()].join(",")}`
+  if (idx.version === version) return Promise.resolve()
+  const want = searchFiles(vault)
+  const drop = (rel: string) => {
+    const had = idx.files.get(rel)
+    if (had && typeof had.text === "string" && had.text !== DISK) idx.kept -= had.text.length
+    idx.files.delete(rel)
+  }
+  for (const rel of [...idx.files.keys()]) if (!want.has(rel)) drop(rel)
+  const todo = [...want].filter(([rel, reader]) => { const f = idx.files.get(rel); return f?.ns !== vault.others.get(rel)?.ns || f?.reader !== reader })
+  let missed = false
+  const work = async () => {
+    while (todo.length) {
+      const [rel, reader] = todo.pop()!
+      const st = vault.others.get(rel)
+      if (!st) continue
+      let text: string | null | undefined = null
+      try { text = await readIndexed(vault.abs(rel), rel, reader, KEEP - idx.kept) } catch (e) { if (tooBig(e)) text = DISK }
+      drop(rel)
+      if (text === undefined) { missed = true; continue }
+      idx.files.set(rel, { ns: st.ns, reader, text })
+      if (text !== null && text !== DISK) idx.kept += text.length
+    }
+  }
+  idx.busy = Promise.all(Array.from({ length: 8 }, work)).then(() => { if (!missed) idx.version = version }).finally(() => { idx.busy = null })
+  return idx.busy
+}
+
+function warmSearch(vault: Vault) {
+  refresh(vault).catch((e) => log.error(`reading the search index ahead failed: ${messageOf(e)}`))
+}
+
+async function* pieces(abs: string): AsyncGenerator<string> {
+  const dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+  const crlf = (s: string) => s.replace(/\r\n?/g, "\n")
+  let carry = ""
+  try {
+    for await (const chunk of fs.createReadStream(abs, { highWaterMark: PIECE })) {
+      const text = carry + dec.decode(chunk as Buffer, { stream: true })
+      const cut = text.lastIndexOf("\n")
+      if (cut < 0 && text.length < PIECE) { carry = text; continue }
+      yield searchText(crlf(cut < 0 ? text : text.slice(0, cut)))
+      carry = cut < 0 ? "" : text.slice(cut + 1)
+    }
+    carry += dec.decode()
+  } catch { /* gone meanwhile, or not UTF-8 after all */ }
+  if (carry) yield searchText(crlf(carry))
+}
+
+export async function* textsOf(vault: Vault, rel: string, f: Indexed): AsyncGenerator<string> {
+  if (f.text === null) return
+  if (f.text !== DISK) { yield f.text; return }
+  if (!f.reader) {
+    const page = PAGE.has(extOf(rel))
+    for await (const piece of pieces(vault.abs(rel))) yield page ? pageText(piece) : piece
+    return
+  }
+  let text = ""
+  try { text = String(f.reader(await fs.promises.readFile(vault.abs(rel)), rel) ?? "") } catch { /* gone meanwhile */ }
+  if (text) yield text
+}
+
+let uploadN = 0
+export async function upload(vault: Vault, query: Record<string, string>, body: Item, http: IncomingMessage | undefined, hold: <T>(fn: () => Promise<T>) => Promise<T>) {
+  const rel = clean(query.path ?? body.path, false, vault)
+  if (locked(rel)) throw new HTTPError(403, `${rel} is read-only`)
+  const abs = vault.abs(rel)
+  if (fs.existsSync(abs)) throw new HTTPError(409, `${rel} already exists`)
+  const bytes = Buffer.isBuffer(body.bytes) ? body.bytes : null
+  const src = bytes ? null : body.bytes instanceof Readable ? body.bytes : http instanceof Readable && !http.readableEnded ? http : null
+  if (!bytes && !src) throw new HTTPError(400, "send the file's bytes as the request's body")
+  guard(abs)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  const tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.upload-${process.pid}-${++uploadN}`)
+  try {
+    if (bytes) fs.writeFileSync(tmp, bytes, { flag: "wx" })
+    else await pipeline(src!, fs.createWriteStream(tmp, { flags: "wx" }))
+    return await hold(async () => {
+      vault.fileCreated(rel, newFileAt(tmp))
+      if (fs.existsSync(abs)) throw new HTTPError(409, `${rel} already exists`)
+      renameFile(tmp, abs)
+      await vault.sync()
+      return reply(201, { path: rel })
+    })
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
+}
+
+type Linked = { version: number; resolve: (t: string, from?: string) => string | null
+  names: Map<string, string>
+  out: Map<string, { e: Entry; to: string[]; named: string[] }>
+  into: Map<string, Set<string>>; byName: Map<string, Set<string>> }
+const linkIndexes = new WeakMap<Vault, Linked>()
+const aliasesOf = (e: Entry) => { const a = e.fm.aliases; return (Array.isArray(a) ? a : a ? [a] : []).map(String) }
+const linkName = (t: string) => t.slice(t.lastIndexOf("/") + 1).trim().toLowerCase()
+const putIn = (m: Map<string, Set<string>>, k: string, v: string) => { let s = m.get(k); if (!s) m.set(k, s = new Set()); s.add(v) }
+const takeOut = (m: Map<string, Set<string>>, k: string, v: string) => { const s = m.get(k); if (s?.delete(v) && !s.size) m.delete(k) }
+
+function linkIndex(vault: Vault): Linked {
+  const ix = linkIndexes.get(vault)
+  if (ix?.version === vault.version) return ix
+  if (!ix) {
+    const made: Linked = { version: vault.version, resolve: linkResolver(vault.linkFiles()), names: new Map(), out: new Map(), into: new Map(), byName: new Map() }
+    for (const [rel, e] of vault.entries) { made.names.set(rel, linkKey(e)); add(made, rel, e) }
+    for (const rel of vault.others.keys()) made.names.set(rel, "")
+    linkIndexes.set(vault, made)
+    return made
+  }
+  const reread: string[] = [], named = new Set<string>(), nameOf = (rel: string, e?: Entry) => {
+    const n = rel.slice(rel.lastIndexOf("/") + 1).toLowerCase(), dot = n.lastIndexOf(".")
+    named.add(n)
+    if (dot > 0) named.add(n.slice(0, dot))
+    for (const a of e ? aliasesOf(e) : []) named.add(a.trim().toLowerCase())
+  }
+  for (const [rel, e] of vault.entries) {
+    const had = ix.out.get(rel)
+    if (had?.e === e) continue
+    reread.push(rel)
+    const key = linkKey(e)
+    if (!had || ix.names.get(rel) !== key) { if (had) nameOf(rel, had.e); nameOf(rel, e); ix.names.set(rel, key) }
+  }
+  for (const rel of vault.others.keys()) if (!ix.names.has(rel)) { nameOf(rel); ix.names.set(rel, "") }
+  const gone: string[] = []
+  for (const [rel] of ix.names) {
+    if (vault.entries.has(rel) || vault.others.has(rel)) continue
+    gone.push(rel)
+    nameOf(rel, ix.out.get(rel)?.e)
+  }
+  for (const rel of gone) { ix.names.delete(rel); drop(ix, rel); ix.out.delete(rel) }
+  const redo = new Set(reread)
+  if (named.size) {
+    ix.resolve = linkResolver(vault.linkFiles())
+    for (const n of named) for (const rel of ix.byName.get(n) ?? []) redo.add(rel)
+  }
+  for (const rel of redo) { drop(ix, rel); add(ix, rel, vault.entries.get(rel)!) }
+  ix.version = vault.version
+  return ix
+}
+function add(ix: Linked, rel: string, e: Entry) {
+  const written = linksOf(e).map(([t]) => t)
+  const to = [...new Set(written.map((t) => ix.resolve(t, rel)).filter((p): p is string => !!p && p !== rel))]
+  const named = [...new Set(written.map(linkName))]
+  ix.out.set(rel, { e, to, named })
+  for (const p of to) putIn(ix.into, p, rel)
+  for (const n of named) putIn(ix.byName, n, rel)
+}
+function drop(ix: Linked, rel: string) {
+  const had = ix.out.get(rel)
+  if (!had) return
+  for (const p of had.to) takeOut(ix.into, p, rel)
+  for (const n of had.named) takeOut(ix.byName, n, rel)
+}
+
+function linkedTo(vault: Vault, rel: string): { path: string; linked: { path: string; line: string }[]; links: string[] } {
+  const ix = linkIndex(vault), from = [...ix.into.get(rel) ?? []]
+  const at = (p: string) => vault.entries.get(p)!.stat.ns
+  from.sort((a, b) => (at(a) === at(b) ? cmp(a, b) : at(b) > at(a) ? 1 : -1))
+  const linked = from.map((p) => {
+    const hit = linksOf(vault.entries.get(p)!).find(([t]) => ix.resolve(t, p) === rel)
+    return { path: p, line: hit ? context(hit[1]) : "" }
+  })
+  const e = vault.entries.get(rel)
+  return { path: rel, linked, links: e ? linksOf(e).map(([t]) => t) : [] }
+}
+
+export async function handle(vault: Vault, method: string, parts: string[], query: Record<string, string>, body: Item): Promise<unknown> {
+  const route = parts.join("/")
+  if (route === "files" && method === "GET") { warmSearch(vault); return tree(vault) }
+  if (route === "search" && method === "GET") {
+    const n = (v: string | undefined, max: number) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)))
+    if (query.sort && !(query.sort in SORTS)) throw new HTTPError(400, `sort is one of ${Object.keys(SORTS).join(", ")}`)
+    const found = await searchAll(vault, query.q ?? "", n(query.limit, 500) || 60, { lines: n(query.lines, 100_000), folder: query.folder, path: query.path,
+      only: query.only !== undefined ? new Set(query.only.split("\n")) : undefined, matchCase: query.case === "1" || query.case === "true", sort: query.sort, context: n(query.context, 5), offset: n(query.offset, Infinity), total: query.total === "1" ? "lines" : query.total === "files" ? "files" : undefined })
+    return query.total === "1" || query.total === "files" ? found : found.results
+  }
+  if (route === "files/previews" && method === "GET") return previews(vault, query.folder ? clean(query.folder, false, vault, true) : "")
+  if (route === "file/info" && method === "GET") return info(vault, clean(query.path, true, vault, true))
+  if (route === "file/linked" && method === "GET") return linkedTo(vault, clean(query.path, false, vault, true))
+  if (route === "file") {
+    if (method === "GET") {
+      const p = String(query.path ?? "")
+      const rel = p.startsWith(SLIDE_THEMES) && p.endsWith(".css") ? SLIDE_THEMES + clean(p.slice(SLIDE_THEMES.length)) : clean(query.path, false, vault, true)
+      await downloaded(vault, rel)
+      return read(vault, rel)
+    }
+    if (method === "DELETE") {
+      const rel = clean(query.path || body.path, true, vault)
+      if (rel === ".vaultite" || rel === ".vaultite/generated" || rel.startsWith(".vaultite/generated/")) {
+        throw new HTTPError(403, `${rel} is the app's; it can't be deleted`)
+      }
+      let trashed: string | undefined
+      guard(vault.abs(rel))
+      if (rel === ".trash" || rel.startsWith(".trash/")) removeTree(vault.abs(rel))
+      else {
+        trashed = vault.toTrash(rel)
+        forget(vault, rel)
+        vault.moved(rel, null, trashed)
+      }
+      await vault.reread([rel])
+      return { ok: true, ...(trashed ? { trashed } : {}) }
+    }
+    const rel = clean(body.path, false, vault, method === "PUT" || (method === "POST" && !body.unique))
+    if (method === "PUT" && rel.startsWith(".") && !showHidden(vault) && !fs.existsSync(vault.abs(rel))) throw new HTTPError(404, `no file '${rel}'`)
+    if (!writable(vault, rel)) throw new HTTPError(400, `${rel} isn't a text file, so it can't be written here`)
+    if (locked(rel)) throw new HTTPError(403, `${rel} is read-only`)
+    const said = saveBody(body)
+    if (!said.ok) throw new HTTPError(400, said.why)
+    let text = said.body.text ?? ""
+    if (method === "POST") {
+      let target = rel
+      if (fs.existsSync(vault.abs(target))) {
+        if (!body.unique) throw new HTTPError(409, `${target} already exists`)
+        target = freeName(vault, target)
+      }
+      const why = byGuest() ? guestRefusal(vault, target, null, text) : ""
+      if (why) throw new HTTPError(403, why)
+      text = newText(vault, target, text)
+      writeAtomic(vault.abs(target), text)
+      await vault.reread([target])
+      await vault.fillIn(target, null)
+      return reply(201, read(vault, target))
+    }
+    if (method === "PUT") {
+      let cur: string | null
+      try {
+        cur = readText(vault.abs(rel))
+      } catch (e) {
+        if (notHereYet(e)) throw e
+        cur = null
+      }
+      const plan = planSave(cur, { ...said.body, text })
+      if (plan.kind === "gone") throw new HTTPError(404, `${rel} isn't in the vault any more (moved or deleted)`)
+      if (plan.kind === "changed") return reply(412, { error: "the file changed on disk: send its base to merge" })
+      if (plan.kind === "bad") throw new HTTPError(400, plan.why)
+      if (plan.kind === "conflict") return reply(409, { error: "the file changed on disk in the same place", ...read(vault, rel) })
+      const sent = plan.sent
+      text = plan.text
+      const why = byGuest() && cur !== text ? guestRefusal(vault, rel, cur, text) : ""
+      if (why) throw new HTTPError(403, why)
+      if (cur === null) text = newText(vault, rel, text)
+      else text = vault.saving(rel, cur, text)
+      const before = vault.entries.get(rel) ?? null
+      if (cur !== text) writeText(vault.abs(rel), text)
+      await vault.reread([rel])
+      if (cur !== text) await vault.fillIn(rel, before)
+      const f = read(vault, rel)
+      if (said.body.lean) { const { text: _, ...rest } = f; return f.text === sent ? { ...rest, same: true } : { ...rest, edit: editOf(sent, f.text) } }
+      return f
+    }
+  }
+  if (route === "timeline" && method === "POST") {
+    const rel = clean(body.path, true, vault)
+    if (!/\.md$/i.test(rel)) throw new HTTPError(400, "only a Markdown file has a timeline")
+    if (locked(rel)) throw new HTTPError(403, `${rel} is read-only`)
+    const e = newEntry(body)
+    const abs = vault.abs(rel), cur = readText(abs)
+    const text = addEntry(cur, e) ?? `${cur.replace(/\n*$/, "")}${cur.trim() ? "\n\n" : ""}## Timeline\n\n${entryLine(e)}\n`
+    writeText(abs, text)
+    await vault.sync()
+    return reply(201, read(vault, rel))
+  }
+  if (route === "file/move" && method === "POST") {
+    const src = clean(body.from, true, vault)
+    const dst = clean(body.to, false, vault)
+    for (const p of [src, dst]) {
+      if (p === ".vaultite" || p === ".trash" || locked(p)) throw new HTTPError(403, `${p} can't be moved (restore things from the trash instead)`)
+    }
+    if (src === dst) return { path: dst, updated: [] }
+    const same = fs.existsSync(vault.abs(dst)) && sameFile(vault.abs(src), vault.abs(dst))
+    if (fs.existsSync(vault.abs(dst)) && !same) throw new HTTPError(409, `${dst} already exists`)
+    if (dst.startsWith(src + "/")) throw new HTTPError(400, "can't move a folder into itself")
+    guard(vault.abs(src))
+    guard(vault.abs(dst))
+    const folder = fs.statSync(vault.abs(src)).isDirectory(), alone = !folder && await vault.caughtUp()
+    fs.mkdirSync(path.dirname(vault.abs(dst)), { recursive: true })
+    renameFile(vault.abs(src), vault.abs(dst))
+    forget(vault, src)
+    vault.moved(src, dst)
+    await (alone ? vault.reread([src, dst]) : vault.sync())
+    const moves: [string, string][] = !folder ? [[src, dst]]
+      : [...vault.entries.keys(), ...vault.others.keys()].filter((p) => p.startsWith(`${dst}/`)).map((p) => [src + p.slice(dst.length), p])
+    const updated = await vault.relink(moves)
+    if (updated.length) await vault.reread(updated)
+    return { path: dst, updated }
+  }
+  if (route === "file/copy" && method === "POST") {
+    const src = clean(body.path, true, vault)
+    if (fs.statSync(vault.abs(src)).isDirectory()) throw new HTTPError(400, `'${src}' is a folder; only files can be duplicated`)
+    const dst = copyName(vault, src)
+    if (locked(dst)) throw new HTTPError(403, `${dst} is read-only`)
+    if (!writeNew(vault.abs(dst), fs.readFileSync(vault.abs(src)))) throw new HTTPError(409, `${dst} already exists`)
+    await vault.sync()
+    return reply(201, { path: dst })
+  }
+  if (route === "file/restore" && method === "POST") {
+    const raw = String(body.path ?? "").replace(/^\/+/, "")
+    const rel = raw.startsWith(".trash/") ? `.trash/${clean(raw.slice(".trash/".length), false, vault)}` : clean(raw, true, vault)
+    const dst = restore(vault, rel)
+    vault.moved(rel, dst)
+    await vault.sync()
+    return { path: dst }
+  }
+  if (route === "upload/name" && method === "POST") {
+    const folder = body.folder ? clean(body.folder, true, vault) : ""
+    if (folder && locked(folder)) throw new HTTPError(403, `${folder} is read-only`)
+    const rel = clean(`${folder}/${String(body.name ?? "").replaceAll("/", " ")}`, false, vault)
+    return { path: freeName(vault, rel) }
+  }
+  if (route === "folder" && method === "POST") {
+    let rel = clean(body.path, false, vault)
+    if (locked(rel)) throw new HTTPError(403, `${rel} is read-only`)
+    if (fs.existsSync(vault.abs(rel))) {
+      if (!body.unique) throw new HTTPError(409, `${rel} already exists`)
+      rel = freeName(vault, rel)
+    }
+    guard(vault.abs(rel))
+    fs.mkdirSync(vault.abs(rel), { recursive: true })
+    await vault.sync()
+    return reply(201, { path: rel })
+  }
+  return undefined
+}

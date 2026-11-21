@@ -1,0 +1,29 @@
+{
+  "id": "web-viewer",
+  "icon": "globe",
+  "category": "navigation",
+  "offByDefault": true,
+  "name": "Browser",
+  "description": "A web browser in the desktop app's tabs, next to your notes: containers for several accounts side by side, Shields against ads and trackers, Chrome extensions, history and bookmarks, and agents working beside you. Links in notes and terminals open there, or in another browser with ⌘.",
+  "enhances": ["clipper"],
+  "requires": ["find"],
+  "exports": ["containers", "state"],
+  "runsOnServer": true,
+  "forAgents": "Browse with `web-viewer.open` (`vau docs browsing` first), no Chrome extension tools.",
+  "tint": "blue",
+  "settings": {
+    "pageBar": { "type": "enum", "values": ["shown", "hidden"], "default": "shown", "group": "Pages", "label": "Page bar", "labels": { "shown": "Always shown", "hidden": "Shown on hover" }, "description": "Back, the address and the page's buttons; hidden, the page fills its tab and the bar slides over it while the pointer rests at the page's top edge or its pane's (the gap above a card too), the address is focused (⌘L) or the tab is new. Right-click the bar to change it" },
+    "openLinks": { "type": "enum", "values": ["viewer", "browser"], "default": "viewer", "group": "Pages", "label": "Open web links", "labels": { "viewer": "In the viewer", "browser": "In the browser" }, "description": "from notes and terminals, in the desktop app; a tab of the viewer (⌘-click: the browser), or always the browser" },
+    "search": { "type": "string", "default": "https://duckduckgo.com/?q=%s", "values": ["https://duckduckgo.com/?q=%s", "https://www.google.com/search?q=%s", "https://kagi.com/search?q=%s", "https://search.brave.com/search?q=%s", "https://www.bing.com/search?q=%s"], "labels": { "https://duckduckgo.com/?q=%s": "DuckDuckGo", "https://www.google.com/search?q=%s": "Google", "https://kagi.com/search?q=%s": "Kagi", "https://search.brave.com/search?q=%s": "Brave Search", "https://www.bing.com/search?q=%s": "Bing" }, "group": "Pages", "label": "Search engine", "description": "for words typed in the address; one of these, or Custom, another's address with %s for the words" },
+    "notifications": { "type": "boolean", "default": true, "group": "Pages", "label": "Notifications from pages", "description": "through the Inbox; a page's notifications (a new message) and Cloud sessions' news (one finished or waiting for you), as a toast, the Mac's notification while the app isn't in front, and a click opens its tab. False drops them" },
+    "shields": { "type": "boolean", "default": true, "group": "Shields", "label": "Shields", "description": "blocks ads, trackers and malware sites; with uBlock Origin's default lists (updated daily), YouTube's video ads too, and a page's Shields button shows how many requests were blocked on it" },
+    "shieldsDown": { "type": "list", "group": "Shields", "when": "shields", "label": "Sites with Shields down", "description": "nothing blocked there, like example.com; a site's subdomains too, and a page's Shields menu adds and removes its site" },
+    "soundCard": { "type": "boolean", "default": true, "group": "Pages", "label": "Card for hidden tabs playing", "description": "names a page playing in a tab you can't see; while a page plays sound in the background, a folded group or a hidden pane, a card in a corner names it, to pause, mute or show it. Closed, it stays away for that page till it plays again" },
+    "playerFullScreen": { "type": "boolean", "default": false, "group": "Pages", "label": "Players open full screen", "description": "in a Space of their own; a page opened as a player (to watch it, or share its window in a call) fills a Space in full screen, and off: a window you can take full screen" },
+    "hide": { "type": "list", "group": "Shields", "when": "shields", "label": "Parts of sites hidden", "description": "ready-made rules, by name; turned on in a page's Shields menu: youtube-shorts (Shorts), youtube-recommendations (the home feed, Up next and end screens), youtube-comments. Your own are the blocked elements list (.vaultite/plugins/web-viewer/blocked-elements.md)" },
+    "unstyled": { "type": "list", "group": "Shields", "when": "shields", "label": "Sites without their style", "description": "their own CSS turned off for now; .vaultite/plugins/web-viewer/sites/<site>.css, in the vault's look, and a page's Shields menu turns it on and off" },
+    "darkPages": { "type": "boolean", "default": true, "group": "Dark pages", "label": "Dark pages", "description": "web pages follow the app's dark look; from their first frame: a site with a dark look of its own shows it, the rest are made dark, and a site with its own style keeps its style. Light, pages are as their sites make them" },
+    "darkPagesLook": { "type": "enum", "values": ["theme", "dark"], "default": "theme", "group": "Dark pages", "when": "darkPages", "label": "Dark pages look", "labels": { "theme": "In the theme's colours", "dark": "Plain dark" }, "description": "how a light site is made dark; in the colour scheme's background, text and accents (canvas-drawn pages like Google Docs too, pictures toned to match), or Chromium's plain dark, pictures as they are" },
+    "darkPagesOff": { "type": "list", "group": "Dark pages", "when": "darkPages", "label": "Sites without dark pages", "description": "left as they make themselves, like example.com; a site's subdomains too, and a page's Shields menu adds and removes its site" }
+  }
+}

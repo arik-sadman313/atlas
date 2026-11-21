@@ -1,0 +1,168 @@
+import { glide } from "@/core/animation"
+import { isNumber, isObj, isText } from "../../../core/values.ts"
+/** Scroll the page: on desktop the main area scrolls by itself (#main-scroll, below the tab bar), on phones the window. */
+export function scrollPage(top: number, smooth = false) {
+  const el = document.getElementById("main-scroll")
+  const target = el && getComputedStyle(el).overflowY === "auto" ? el : window
+  target.scrollTo({ top, behavior: smooth ? glide() : "auto" })
+}
+
+type Entry = { sheet?: number; prev?: string; pane?: string }
+export function historyEntry(): Entry {
+  const s: unknown = history.state
+  return isObj(s) ? { sheet: isNumber(s.sheet) ? s.sheet : undefined, prev: isText(s.prev) ? s.prev : undefined, pane: isText(s.pane) ? s.pane : undefined } : {}
+}
+const isNumbered = (s: unknown): s is { n: number } => isObj(s) && isNumber(s.n)
+
+export type Route = { tab: string; detail: string; depth: number; prev: string }
+
+export function route(): Route {
+  let [tab, ...rest] = location.hash.slice(1).split("/")
+  if ((tab === "file" || tab === "view") && rest.length) tab = `${tab}/${rest.shift()}`
+  const e = historyEntry()
+  return { tab, detail: rest.join("/"), depth: e.sheet ?? 0, prev: e.prev ?? "" }
+}
+
+let redirect: ((path: string) => string | null) | null = null
+export const setDetailRedirect = (fn: (path: string) => string | null) => { redirect = fn }
+let fileOpener: ((path: string) => void) | null = null
+export const setFileOpener = (fn: (path: string) => void) => { fileOpener = fn }
+
+// The browser restoring scroll on Back would fight the sheet, which locks the page and restores its scroll itself.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual"
+
+export const hashChanged = () => dispatchEvent(new HashChangeEvent("hashchange"))
+/** Change the address in place (no history entry, the entry's `state` given) and tell the app. */
+export function replaceHash(to: string, state: unknown = null) { history.replaceState(state, "", to.startsWith("#") ? to : `#${to}`); hashChanged() }
+
+export function openDetail(path: string) {
+  const file = redirect?.(path)
+  if (file && fileOpener) return fileOpener(file)
+  const { tab, detail, depth } = route()
+  if (detail === path) return
+  history.pushState({ sheet: depth + 1, prev: detail }, "", `#${tab}/${path}`)
+  hashChanged()
+}
+
+/** One sheet back (the Back button in a stacked sheet). */
+export function backDetail() {
+  if (route().depth) history.back()
+  else closeDetail()
+}
+
+let closing = false
+addEventListener("popstate", () => {
+  if (!closing) return
+  closing = false
+  if (route().detail) replaceHash(route().tab)
+})
+
+export function closeDetail() {
+  const { depth, tab } = route()
+  if (depth) { closing = true; history.go(-depth); setTimeout(() => { closing = false }, 1500) }
+  else replaceHash(tab)
+}
+
+/** Run `fn` once the open sheets have closed (their history entries popped), so what it shows isn't under a sheet. */
+export function afterSheets(fn: () => void) {
+  if (!route().detail) return fn()
+  if (route().depth) addEventListener("popstate", () => setTimeout(fn), { once: true })
+  closeDetail()
+  if (!route().depth) fn()
+}
+
+export function retargetDetail(from: string, to: string) {
+  const p = sheetFile()
+  if (from === to || p === null) return
+  if (p === from || p.startsWith(`${from}/`)) replaceDetail(`file/${encodeURIComponent(to + p.slice(from.length))}`)
+}
+export function closeDetailOf(path: string) {
+  const p = sheetFile()
+  if (p !== null && (p === path || p.startsWith(`${path}/`))) backDetail()
+}
+function sheetFile() {
+  const d = route().detail
+  if (!d?.startsWith("file/")) return null
+  try { return decodeURIComponent(d.slice(5)) } catch { return null }
+}
+
+/** Swap the open detail without adding a history entry (picking another note in the desktop reader pane). */
+export function replaceDetail(path: string) {
+  replaceHash(`${route().tab}/${path}`, history.state)
+}
+
+// The browser won't say whether Back stays in the app (from Safari's first entry it leaves): entries are numbered.
+const SEQ = "vaultite.history.n", FLOOR = "vaultite.history.floor", TOP = "vaultite.history.top"
+function session(key: string, v?: number) {
+  try {
+    if (v === undefined) return Number(sessionStorage.getItem(key)) || 0
+    sessionStorage.setItem(key, String(v))
+  } catch { /* private mode */ }
+  return v ?? 0
+}
+let seq = session(SEQ)
+let top = session(TOP)
+const nextN = () => { top = session(TOP, ++seq); return seq }
+const numberOf = () => { const s: unknown = history.state; return isNumbered(s) ? s.n : 0 }
+const rawReplace = history.replaceState.bind(history), rawPush = history.pushState.bind(history)
+const withN = (s: unknown, n: number) => ({ ...(s && typeof s === "object" ? s : {}), n })
+const BOOK = "vaultite.history.book"
+type Page = { b?: number; f?: number; t?: string }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- the parse at the boundary
+const readBook = (saved: unknown): Record<string, Page> => (!isObj(saved) ? {} : Object.fromEntries(Object.entries(saved).map(([k, v]) =>
+  [k, isObj(v) ? { b: isNumber(v.b) ? v.b : undefined, f: isNumber(v.f) ? v.f : undefined, t: isText(v.t) ? v.t : undefined } : {}])))
+const storedBook = () => { try { return readBook(JSON.parse(sessionStorage.getItem(BOOK) ?? "{}")) } catch { return {} } }
+const book = storedBook()
+const keep = () => {
+  const n = numberOf()
+  for (const k of Object.keys(book)) if (Number(k) < n - 100) delete book[k]
+  try { sessionStorage.setItem(BOOK, JSON.stringify(book)) } catch { return }
+}
+function follows(from: number, n: number) {
+  if (!from || from === n) return
+  book[from] = { ...book[from], f: n }
+  book[n] = { ...book[n], b: from }
+  keep()
+}
+export function nameEntry(title: string) {
+  const n = numberOf()
+  if (!n || !title || book[n]?.t === title) return
+  book[n] = { ...book[n], t: title }
+  keep()
+}
+export function entriesToward(dir: -1 | 1, most = 12): { steps: number; title: string }[] {
+  const out: { steps: number; title: string }[] = [], next = (k: number | undefined) => (k ? book[k]?.[dir < 0 ? "b" : "f"] : undefined)
+  for (let k = next(numberOf()), i = 1; k && (dir < 0 ? k >= floor : k <= top) && out.length < most; k = next(k), i++) {
+    out.push({ steps: dir * i, title: book[k]?.t ?? "Page" })
+  }
+  return out
+}
+
+history.replaceState = (s: unknown, unused: string, url?: string | URL | null) => {
+  const n = isNumbered(s) ? s.n : numberOf()
+  rawReplace(n ? withN(s, n) : s, unused, url)
+}
+history.pushState = (s: unknown, unused: string, url?: string | URL | null) => { const from = numberOf(), n = nextN(); rawPush(withN(s, n), unused, url); follows(from, n) }
+let shown = 0
+const numberHere = () => {
+  if (!numberOf()) { rawReplace(withN(history.state, nextN()), ""); follows(shown, numberOf()) }
+  shown = numberOf()
+}
+numberHere()
+let floor = session(FLOOR)
+if (!floor || floor > numberOf() || history.length === 1) { floor = session(FLOOR, numberOf()); top = session(TOP, numberOf()) }
+addEventListener("hashchange", numberHere)
+addEventListener("popstate", numberHere)
+export const canGoBack = () => numberOf() > floor
+export const canGoForward = () => numberOf() < top
+
+// Scrolls read as the entry comes back, before the browser clamps the scroll to the shorter page being swapped out.
+const scrolls = new Map<number, number>()
+let back: { n: number; y: number } | null = null
+addEventListener("scroll", () => { if (numberOf()) scrolls.set(numberOf(), scrollY) }, { passive: true })
+addEventListener("popstate", () => { const y = scrolls.get(numberOf()); back = y ? { n: numberOf(), y } : null })
+export function takeScroll() {
+  const b = back
+  back = null
+  return b && b.n === numberOf() ? b.y : null
+}

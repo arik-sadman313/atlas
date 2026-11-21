@@ -1,0 +1,147 @@
+import { lazy, useEffect, useSyncExternalStore } from "react"
+import { Crosshair, Play, MessageCircle, MessageCirclePlus, MessageSquarePlus, MessagesSquare, Power, Undo2 } from "lucide-react"
+import { answerPlaceAt, cn, currentEditor, definePlugin, menuAbove, notify, notifyError, op, share, useAgentChoices, useFocusedFile, type MenuItem } from "@vaultite"
+import { drawDriven } from "@plugins/claude-code/driven"
+import { askDrawing, watchCanvases } from "./canvas"
+import { ConversationsIcon, ConversationsPanel, ConversationsView } from "./Conversations"
+import { type Agent, canUndoEdit, connect, getState, liveAgents, type Note, setGuest, startComment, subscribe, undoEdit, unread, viewOf } from "./live"
+import { presence } from "../../../core/desktop/cursor"
+import { Arrow } from "./Cursor"
+import { follow } from "./spots"
+import { Overlay, showSaid } from "./Overlay"
+import { placeAt } from "./pointed"
+import { Presence } from "./Presence"
+import { followItems, modeItem, MODES, setMode, showSession } from "./session"
+import { checkUi, clickUi, readUi, watchPanes } from "./panes"
+import { doTask } from "./doit"
+import { ConversationBlock, UsageBlock } from "./Page"
+import { privateNote } from "./private"
+import { offerThreads } from "./threads"
+
+let loading: Promise<typeof import("./editor")> | null = null
+let loaded: typeof import("./editor") | null = null
+const load = () => (loading ??= import("./editor").then((m) => (loaded = m)))
+
+function ask(agent?: string) {
+  const ed = currentEditor()
+  if (!ed?.path || ed.kind !== "markdown") return void (askDrawing(agent) || notify(`Open a note to ask ${getState().name}`))
+  if (privateNote(ed.path)) return notify(`This note is private: ${agent ?? getState().name} doesn't see it`)
+  const v = ed.view, sel = v.state.selection.main, picked = v.state.sliceDoc(sel.from, sel.to)
+  const line = v.state.doc.lineAt(sel.from), find = (picked.trim() || line.text.trim()).slice(0, 200)
+  startComment({ path: ed.path, line: line.number, ...(find ? { find } : {}), text: `@${(agent ?? getState().name).toLowerCase()} `, ...(picked.trim() ? { selection: picked } : {}) })
+}
+
+setGuest(share)
+
+function PlaceAt() {
+  useEffect(() => (share ? undefined : answerPlaceAt(placeAt)), [])
+  return null
+}
+
+const timeline = () => import("./Timeline")
+drawDriven("companion", { name: "Timeline", title: "Companion", View: lazy(() => timeline().then((m) => ({ default: m.CompanionView }))),
+  Message: lazy(() => timeline().then((m) => ({ default: m.MomentMessage }))) })
+
+const comments = () => !share || share.role !== "read"
+const noteEditor = () => { const ed = currentEditor(); return ed?.path && ed.kind === "markdown" ? { ...ed, path: ed.path } : null }
+function addComment() {
+  const ed = noteEditor()
+  if (!ed) return
+  const v = ed.view, sel = v.state.selection.main, find = v.state.sliceDoc(sel.from, sel.to).trim().slice(0, 200)
+  startComment({ path: ed.path, line: v.state.doc.lineAt(sel.from).number, ...(find ? { find } : {}) })
+}
+const COMMENT = { id: "companion:comment", name: "Add comment", label: "Comment", keys: ["Mod+Alt+M"], when: () => !!noteEditor(), run: addComment, icon: MessageSquarePlus }
+
+function Status() {
+  const s = useSyncExternalStore(subscribe, getState)
+  const a = s.agents.find((x) => x.name.toLowerCase() === s.name.toLowerCase())
+  const tint = s.mode === "off" ? undefined : `var(--${a?.tint ?? "orange"})`
+  const word = s.mode === "off" ? "off" : !a || a.state === "away" ? "asleep" : a.state === "watching" ? null : a.state
+  const others = s.mode === "off" ? [] : liveAgents().filter((x) => x.name !== a?.name).slice(0, HOMES - 1)
+  const busy = (x?: Agent) => { const m = x && x.name !== s.riding && presence(x, { age: 3 }).mark; return m === "dots" || m === "wave" }
+  const arrows = [{ name: a?.name ?? s.name, tint, busy: busy(a) }, ...others.map((x) => ({ name: x.name, tint: `var(--${x.tint})`, busy: busy(x) }))]
+  const items = (): MenuItem[] => [
+    modeItem(true),
+    ...(s.mode !== "off" && a && s.said.some((n) => n.agent === a.name) ? [{ label: "What it said", icon: MessageCircle, hint: unread(a.name).length ? `${unread(a.name).length} new` : undefined, run: () => showSaid(a.name), sep: true }] : []),
+    ...(s.mode === "off" ? [] : liveAgents()).filter((x) => x.path || x.pane || x.ui).map((x, i) => ({ label: `Go to ${x.name}`, icon: Crosshair, run: () => follow(x), sep: i === 0 })),
+    ...(a ? followItems(a.name) : []),
+    { label: `Ask ${s.name}`, icon: MessageCirclePlus, run: () => ask(), sep: true },
+    { label: "Show its page", icon: MessagesSquare, run: () => op("companion.page").catch((e) => notifyError(e, "Couldn't open its page")) },
+    { label: "Show its chat", icon: MessagesSquare, run: () => showSession() },
+    { label: "Restart its session", icon: Power, run: () => op("companion.stop").then(() => setMode(s.mode === "off" ? "quiet" : s.mode)) },
+  ]
+  const unseen = s.mode === "off" ? 0 : unread(a?.name ?? s.name).length
+  const tip = [`${s.name}, companion${word ? `: ${word}` : ""}${unseen ? `, ${unseen} unread` : ""}`, ...others.map((x) => `${x.name}: ${x.state === "watching" ? "idle" : x.state}`)].join(", ")
+  return (
+    <button type="button" onClick={(e) => menuAbove(e, items())} aria-label={`${s.name}, companion`} data-tip={tip} data-tip-side="top"
+      data-companion-status className="relative size-6 shrink-0 cursor-pointer rounded-[5px] hover:bg-foreground/[0.06]">
+      {arrows.map((x, i) => (
+        <Arrow key={x.name} tint={x.tint} size={16} className={cn("absolute top-[4px]", x.busy && "animate-pulse")}
+          style={{ left: 4 + (i - (arrows.length - 1) / 2) * 5, zIndex: arrows.length - i }} />
+      ))}
+      {unseen > 0 && <span data-companion-unread aria-hidden className="absolute top-[3px] right-[3px] size-[6px] rounded-full ring-[1.5px] ring-background" style={{ background: tint }} />}
+    </button>
+  )
+}
+const HOMES = 3
+
+const isThread = (n: Note) => n.kind === "comment" || n.kind === "suggestion" || n.kind === "proposal"
+
+function useOffer() {
+  const { path } = useFocusedFile()
+  useEffect(() => { if (path && getState().mode !== "off" && getState().notes.some((n) => n.path === path && isThread(n))) offerThreads() }, [path])
+  useEffect(() => {
+    let known = new Set<string>()
+    return subscribe(() => {
+      const s = getState()
+      const fresh = s.mode !== "off" && s.notes.some((n) => isThread(n) && !known.has(n.id) && !!n.path && !!viewOf(n.path))
+      known = new Set(s.notes.map((n) => n.id))
+      if (fresh) offerThreads()
+    })
+  }, [])
+}
+
+function Background() {
+  useEffect(() => connect(), [])
+  useEffect(() => watchCanvases(), [])
+  useEffect(() => (share ? undefined : watchPanes()), [])
+  useOffer()
+  return <><PlaceAt /><Overlay /></>
+}
+
+const doItItem = (view: Parameters<NonNullable<typeof loaded>["taskHere"]>[0], path?: string): MenuItem[] => {
+  const task = path && !share ? loaded?.taskHere(view, path) : null
+  return task ? [{ label: "Do it", icon: Play, run: () => doTask(task) }] : []
+}
+
+const useAnyAgent = () => useAgentChoices()
+const useClaudeAccount = () => useAgentChoices("claude")
+
+export default definePlugin({
+  editor: async (ctx) => (ctx.kind === "markdown" && ctx.path ? [(await load()).companionExtension(ctx), ...(share ? [] : (await load()).doItEditor(ctx.path))] : []),
+  doTask: share ? undefined : doTask,
+  settingChoices: { agent: useAnyAgent, jobs_agent: useClaudeAccount },
+  background: () => <Background />,
+  answers: share ? undefined : { click: clickUi, read: readUi, check: checkUi },
+  blocks: { "companion-conversation": () => <ConversationBlock />, "companion-usage": () => <UsageBlock /> },
+  ambient: share ? undefined : { status: { title: "Companion", sort: 25, left: true, render: () => <Status /> } },
+  fileBar: { presence: { title: "Who's here", sort: 45, render: (file) => (file.path.endsWith(".md") ? <Presence file={file} /> : null) } },
+  sidebar: { conversations: { title: "Conversations", sort: 20, side: "right", view: "conversations", names: ["comments", "threads", "talk"], flyout: { icon: ConversationsIcon, width: 320 },
+    render: (ctx) => <ConversationsPanel {...ctx} /> } },
+  views: { conversations: { icon: MessagesSquare, full: true, title: () => "Conversations", render: () => <ConversationsView /> } },
+  commands: share ? (comments() ? [COMMENT] : []) : [
+    { id: "companion:ask", name: "Ask the companion", label: "Ask", keys: ["Mod+Shift+K"], run: () => ask(), icon: MessageCirclePlus },
+    COMMENT,
+    ...MODES.map((m) => ({ id: `companion:${m.mode}`, name: `Companion: ${m.label}`, when: () => getState().mode !== m.mode, run: () => setMode(m.mode) })),
+    { id: "companion:session", name: "Show the companion's chat", words: "session talk history conversations", run: () => showSession(), icon: MessagesSquare },
+    { id: "companion:page", name: "Show the companion's page", words: "conversation usage jobs", run: () => op("companion.page").catch((e) => notifyError(e, "Couldn't open its page")), icon: MessagesSquare },
+    { id: "companion:undo-edit", name: "Undo the companion's last edit", when: () => canUndoEdit(), run: () => undoEdit(), icon: Undo2 },
+  ],
+  editorMenu: ({ view, path }) => [
+    ...doItItem(view, path),
+    ...(path && !share && getState().mode !== "off" && loaded ? loaded.foldItems(view, path) : []),
+    ...(path && !share && !view.state.selection.main.empty && getState().mode !== "off" && !privateNote(path)
+      ? (liveAgents().length > 1 ? liveAgents().map((a) => a.name) : [getState().name]).map((n) => ({ label: `Ask ${n} about this`, icon: MessageCirclePlus, run: () => ask(n) })) : []),
+    ...(path && comments() ? [{ label: "Add comment", icon: MessageSquarePlus, run: addComment }] : []),
+  ],
+})

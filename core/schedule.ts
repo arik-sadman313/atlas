@@ -1,0 +1,245 @@
+// Jobs on a timer: plugin.every's and a vault plugin's manifest `schedule` (a command or any op: a note handed to
+// Claude each morning). One machine runs each (Machines' first unless it names one); when they last ran stays on it.
+import fs from "node:fs"
+import { setTimeout as sleep } from "node:timers/promises"
+import { defineOp, type Op, OpError } from "./ops.ts"
+import { writeAtomic } from "./vault.ts"
+import { errorContext } from "./serverlog.ts"
+import { logFailure, onItsOwn } from "./writegate.ts"
+import { logger } from "./log.ts"
+import { messageOf } from "./values.ts"
+
+const log = logger("schedule")
+
+type Item = Record<string, any>
+
+/** When a job runs: `every` "15m", "2h", "1d", "1w"; `at` "07:00" (local) with whole days, or a setting holding one
+ *  ("{morning}"); `machine` the Machines id that runs it. */
+export type When = { every: string; at?: string; machine?: string }
+export type Job = When & { name: string; run: () => unknown }
+export type Listed = { plugin: string; job: Job }
+/** A job that doesn't run now, and why (its plugin changed and waits to be allowed again). */
+export type Paused = { plugin: string; job: When & { name: string }; why: string }
+/** What the last run did, kept on this machine (`for`: the time it was due, an `at` job's slot). */
+type Last = { seen: number; ran?: number; for?: number; ms?: number; error?: string }
+
+const UNIT: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 }
+const DAY = UNIT.d, TICK = 30_000, SLACK = 3 * 3_600_000 // (a day's slot may move an hour with summer time)
+const AFTER_START_BURST = 60_000, JOBS_APART = 2000
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export const atSetting = (at: string | undefined) => (at === undefined ? null : /^\{(\w+)\}$/.exec(at)?.[1] ?? null)
+
+export function timed<J extends When>(job: J, value: (key: string) => string | undefined): { job: J } | { why: string } {
+  const key = atSetting(job.at)
+  if (!key) return { job }
+  const v = value(key)
+  return v !== undefined && TIME.test(v.trim()) ? { job: { ...job, at: v.trim() } }
+    : { why: `its time, the setting ${key}, is ${JSON.stringify(v ?? null)}, not a time of day (HH:MM)` }
+}
+
+export function resolvedAt(at: string, value: (key: string) => string | undefined) {
+  const t = timed({ every: "1d", at }, value)
+  return "job" in t && t.job.at ? t.job.at : at
+}
+
+function periodOf(every: unknown): number | null {
+  const m = typeof every === "string" ? /^(\d+)\s*([mhdw])$/.exec(every.trim()) : null
+  return m && Number(m[1]) > 0 ? Number(m[1]) * UNIT[m[2]] : null
+}
+
+export function whenProblems(w: Item, where = "schedule"): string[] {
+  const out: string[] = []
+  const ms = periodOf(w.every)
+  if (ms === null) out.push(`${where}: every is a number and a unit, m, h, d or w ("15m", "1d"), not ${JSON.stringify(w.every)}`)
+  if (w.at !== undefined) {
+    if (typeof w.at !== "string" || !(TIME.test(w.at) || atSetting(w.at))) out.push(`${where}: at is a time of day, HH:MM ("07:00"), or a setting holding one ("{morning}")`)
+    else if (ms !== null && ms % DAY) out.push(`${where}: at needs every in whole days ("1d", "1w")`)
+  }
+  if (w.machine !== undefined && (typeof w.machine !== "string" || !w.machine.trim())) out.push(`${where}: machine is a Machines id ("home")`)
+  return out
+}
+
+function slotAfter(t: number, at: string) {
+  const d = new Date(t)
+  d.setHours(Number(at.slice(0, 2)), Number(at.slice(3)), 0, 0)
+  while (d.getTime() <= t) d.setDate(d.getDate() + 1)
+  return d.getTime()
+}
+
+function slotBefore(t: number, at: string) {
+  const d = new Date(slotAfter(t, at))
+  d.setDate(d.getDate() - 1)
+  return d.getTime()
+}
+
+/** When a job is next due: an interval's after its last run (at once the first time), an `at` job's next slot. */
+export function nextRun(w: When, last: Last) {
+  const ms = periodOf(w.every)!
+  if (!w.at) return last.ran === undefined ? last.seen : last.ran + ms
+  return slotAfter(last.for === undefined ? last.seen : last.for + ms - SLACK, w.at)
+}
+
+export type Row = { id: string; plugin: string; name: string; every: string; at: string | null; machine: string | null
+  here: boolean; next: string | null; ran: string | null; ms: number | null; error: string | null; running: boolean; paused: string | null
+  missed: string | null }
+
+function missedRun(w: When, last: Last, now: number) {
+  const due = nextRun(w, last)
+  return now - due >= Math.max(periodOf(w.every)!, UNIT.h) ? due : null
+}
+
+export class Scheduler {
+  private file: string
+  private jobs: () => Listed[]
+  private paused: () => Paused[]
+  private here: (machine?: string) => Promise<boolean>
+  private before: () => Promise<unknown>
+  private state: Record<string, Last> = {}
+  private saved = ""
+  private running = new Set<string>()
+  private timer: ReturnType<typeof setInterval> | null = null
+  private first: ReturnType<typeof setTimeout> | null = null
+  private stops = 0
+  private missedTold = new Map<string, number>()
+
+  /** `file`: where last runs are kept on this machine; `jobs`: the ones of the plugins that are on; `here`: whether this
+   *  machine runs a job naming `machine`; `before`: run before each tick (load the vault's plugins); `paused`: listed only. */
+  constructor(o: { file: string; jobs: () => Listed[]; here: (machine?: string) => Promise<boolean>; before?: () => Promise<unknown>; paused?: () => Paused[] }) {
+    this.file = o.file; this.jobs = o.jobs; this.here = o.here; this.before = o.before ?? (async () => {}); this.paused = o.paused ?? (() => [])
+    try { this.state = JSON.parse(this.saved = fs.readFileSync(this.file, "utf8")) } catch { /* none yet */ }
+  }
+
+  start() {
+    if (this.timer || this.first) return
+    const tick = () => void this.tick(Date.now(), JOBS_APART).catch((e) => logFailure(log, "its tick failed", e))
+    this.first = setTimeout(() => {
+      this.first = null
+      tick()
+      this.timer = setInterval(tick, TICK)
+      this.timer.unref()
+    }, AFTER_START_BURST)
+    this.first.unref()
+  }
+
+  stop() {
+    if (this.first) clearTimeout(this.first)
+    if (this.timer) clearInterval(this.timer)
+    this.first = this.timer = null
+    this.stops++
+  }
+
+  private last(key: string, now: number) {
+    return (this.state[key] ??= { seen: now })
+  }
+
+  async tick(now = Date.now(), apart = 0) {
+    await this.before()
+    const due: Listed[] = []
+    for (const l of this.jobs()) {
+      const key = `${l.plugin}/${l.job.name}`
+      if (this.running.has(key) || nextRun(l.job, this.last(key, now)) > now || !(await this.here(l.job.machine)) || this.running.has(key)) continue
+      this.running.add(key)
+      due.push(l)
+    }
+    this.save()
+    this.tellMissed(now)
+    const runs: Promise<unknown>[] = [], stops = this.stops
+    for (const [i, { plugin, job }] of due.entries()) {
+      if (i && apart) await sleep(apart)
+      if (this.stops !== stops) { this.running.delete(`${plugin}/${job.name}`); continue }
+      runs.push(this.run(`${plugin}/${job.name}`, plugin, job, now))
+    }
+    await Promise.all(runs)
+  }
+
+  private tellMissed(now: number) {
+    for (const { plugin, job, why } of this.paused()) {
+      const key = `${plugin}/${job.name}`, last = this.state[key]
+      const missed = last ? missedRun(job, last, now) : null
+      if (missed === null || this.missedTold.get(key) === missed) continue
+      void this.here(job.machine).then((here) => {
+        if (!here || this.missedTold.get(key) === missed) return
+        this.missedTold.set(key, missed)
+        log.error(`${key} didn't run at ${new Date(missed).toLocaleString()}${last!.ran ? ` (last ran ${new Date(last!.ran).toLocaleString()})` : ""}: ${why}`)
+      }, () => {})
+    }
+  }
+
+  /** A job runs as its plugin acting on its own (run now too: it does what the schedule would), so its writes outside
+   *  .vaultite/ need the user's grant (core/writegate.ts). */
+  private async run(key: string, plugin: string, job: Job, now = Date.now()) {
+    this.running.add(key)
+    const t0 = performance.now()
+    let error: string | undefined
+    try {
+      await errorContext.run(`job ${key}`, () => onItsOwn(plugin, () => job.run()))
+    } catch (e) {
+      error = messageOf(e).slice(0, 500)
+      logFailure(log, key, e)
+    } finally {
+      this.running.delete(key)
+    }
+    this.state[key] = { seen: this.last(key, now).seen, ran: now, for: job.at ? slotBefore(now + 1, job.at) : now, ms: Math.round(performance.now() - t0), ...(error ? { error } : {}) }
+    this.save()
+    return error
+  }
+
+  /** Only what changed: every tick saved, an idle server rewrote it twice a minute. */
+  private save() {
+    const json = JSON.stringify(this.state)
+    if (json === this.saved) return
+    try {
+      writeAtomic(this.file, json)
+      this.saved = json
+    } catch (e) {
+      log.error("couldn't keep its last runs", e)
+    }
+  }
+
+  async list(now = Date.now()): Promise<Row[]> {
+    const iso = (t: number | undefined) => (t === undefined ? null : new Date(t).toISOString())
+    const rows: { plugin: string; job: When & { name: string }; why: string | null }[] = [...this.jobs().map((l) => ({ ...l, why: null })), ...this.paused()]
+    return Promise.all(rows.map(async ({ plugin, job, why }) => {
+      const key = `${plugin}/${job.name}`, last = this.state[key] ?? { seen: now }
+      const here = await this.here(job.machine)
+      return { id: key, plugin, name: job.name, every: job.every, at: job.at ?? null, machine: job.machine ?? null, here,
+        next: here && !why ? iso(Math.max(now, nextRun(job, last))) : null, ran: iso(last.ran), ms: last.ms ?? null, error: last.error ?? null,
+        running: this.running.has(key), paused: why, missed: why && here && this.state[key] ? iso(missedRun(job, last, now) ?? undefined) : null }
+    }))
+  }
+
+  /** Run a job now, wherever it's meant to run: its error, or null. */
+  async runNow(id: string) {
+    const hit = this.jobs().find(({ plugin, job }) => `${plugin}/${job.name}` === id)
+    if (!hit) throw new OpError(`no job '${id}' (vau schedule list)`, 404)
+    if (this.running.has(id)) throw new OpError(`${id} is running`, 409)
+    return (await this.run(id, hit.plugin, hit.job)) ?? null
+  }
+}
+
+export function scheduleOps(scheduler: () => Scheduler): Op[] {
+  const when = (r: Row) => `every ${r.every}${r.at ? ` at ${r.at}` : ""}`
+  return [defineOp({
+    id: "schedule.list",
+    cli: "schedule list",
+    summary: "The jobs on a timer (plugins' schedules): when each runs, on which machine, when it last ran and how, and why one is paused.",
+    kind: "read",
+    run: () => scheduler().list(),
+    text: (rows: Row[]) => rows.length ? rows.map((r) => `- ${r.id}: ${when(r)}${r.machine ? ` on ${r.machine}` : ""}; ${r.running ? "running"
+      : r.paused ? `paused${r.missed ? `, missed its run at ${r.missed}` : ""}: ${r.paused}` : r.here ? `next ${r.next}` : "another machine runs it"}${r.ran ? `; last ${r.ran} (${r.error ? `failed: ${r.error}` : `${r.ms} ms`})` : ""}`).join("\n")
+      : "No plugin has a schedule.",
+  }), defineOp({
+    id: "schedule.run",
+    cli: "schedule run",
+    summary: "Run a job of the schedule now, on this machine (to try it): its error, or null.",
+    kind: "write",
+    lock: false,
+    owner: "scheduled jobs",
+    params: { id: { type: "string", required: true, description: "the job, <plugin>/<name> (vau schedule list)" } },
+    args: ["id"],
+    run: ({ id }) => scheduler().runNow(id),
+    text: (error: string | null, { id }) => (error ? `${id} failed: ${error}` : `Ran ${id}.`),
+  })]
+}

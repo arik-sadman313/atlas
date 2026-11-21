@@ -1,0 +1,896 @@
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from "react"
+import {
+  Archive, ArrowUpNarrowWide, Bot, ChevronRight, ChevronsDownUp, ChevronsUpDown, Ellipsis, FileBraces, FileInput, FilePlus, FileText, Folder,
+  FolderInput, FolderOpen, FolderPlus, RotateCcw, SquareArrowOutUpRight, SquarePen, Trash2, type LucideIcon,
+} from "lucide-react"
+import { getStore, reload, type Store } from "@/core/data"
+import { HoverPreview } from "@/components/TabCard"
+import { edgeScroller, getDrag, startDrag, useDragItem, useDropHit, useDropTarget, type DragItem } from "@/core/drag"
+import { desktop, hasFiles } from "@/core/desktop"
+import { dropInto } from "@/core/desktopapp"
+import { isMac, isDesktop } from "@/core/platform"
+import { compare } from "@/core/filesort"
+import { cleanName, createFile, createFolder, folderList, folderOf, freeName, inArchive, inTrash, isDoc, isFolder, isHidden, isJson, isProtected, joinPath, moveFile, nameProblem, openFile, openFolder, openingSoon, openNew, openView, pathTarget, refuseName, restoreFile, shownName, stem, type VaultFile } from "@/core/files"
+import { currentFile, getWorkspace, onWorkspaceChange } from "@/core/workspace"
+import { allPanes, type Workspace } from "../../../core/layout.ts"
+import { useVirtual } from "@/core/virtual"
+import { openInSplit } from "@/core/splits"
+import { fileAt, iconOf, namedIcon, tintOf } from "@/core/pages"
+import { scopedState, subscribeScoped } from "@/core/scope"
+import { notify, notifyError } from "@/core/notify"
+import { newNoteFolder } from "@/core/conventions"
+import { ARCHIVE_DIR } from "../../../core/fileprops.ts"
+import { kindIcon } from "@/core/filekinds"
+import type { FileIcon, FileMark, FileRow, FileRowPart, NewFile } from "@/core/define"
+import { fileIcons, fileMarks, fileViewFor, formatFor, pluginNewFiles, useFileRows } from "@/core/plugins"
+import { showPanel } from "@/core/sidebarmode"
+import { getPrefs, setPrefs, usePrefs, type FileSort } from "@/core/prefs"
+import { commandItems, menuBelow, menuFor, type MenuItem } from "@/components/ContextMenu"
+import { changeIcon, copyPathItem, duplicate, duplicateItem, filesMenu, grouped, iconChangeable, moreItem, noGroups, openFolderItem, openItem, pluginFileGroups, remove, removeMany, renameItem, revealItem, topmost } from "@/components/FileActions"
+import { registerCommands } from "@/core/commands"
+import { currentRow } from "@/core/keylist"
+import { pickFolder } from "@/components/FolderPicker"
+import { ICON_BUTTON } from "@/components/FileTitle"
+import { SwipeRow, type SwipeAction } from "@/components/SwipeRow"
+import { capitalize, cn, scrollingBox, space } from "@/lib/utils"
+import { coarse } from "@/core/haptics"
+import { listOrders, rowMenu, selectClick, selectedAttr, selectionFor, useSelectable, useSelected } from "@/core/select"
+import { SidebarHeading } from "@/components/SidebarHeading"
+import { signal } from "@/core/signal"
+import { glide } from "@/core/animation"
+import { closestOf, nodeOf } from "@/core/dom"
+
+function openSet(key: string, fallback: string[]) {
+  const state = scopedState<string[]>(key, fallback, "workspace")
+  let seenList: string[] | null = null
+  let seenSet = new Set<string>()
+  const now = () => {
+    const l = state.get()
+    if (l !== seenList) { seenList = l; seenSet = new Set(Array.isArray(l) ? l : []) }
+    return seenSet
+  }
+  const set = (next: Set<string>) => state.set([...next].sort())
+  return {
+    now, set,
+    toggle: (p: string) => { const n = new Set(now()); if (n.has(p)) { n.delete(p); setShowingAll(p, false) } else n.add(p); set(n) },
+    useAll: () => useSyncExternalStore(subscribeScoped, now),
+  }
+}
+type OpenSet = ReturnType<typeof openSet>
+const treeOpen = openSet("files:open", ["Notes"])
+/** Pinned folders open in place (plugins/core/pages), and the folders open inside them: closed until opened. */
+export const pinsOpen = openSet("pins:open", [])
+
+const SLACK = 5
+let showingAll = new Set<string>()
+let revealedPath = ""
+const moreSubs = signal()
+function setShowingAll(p: string | null, all = false) {
+  if (p === null ? !showingAll.size : showingAll.has(p) === all) return
+  const n = new Set(p === null ? [] : showingAll)
+  if (p !== null) { if (all) n.add(p); else n.delete(p) }
+  showingAll = n
+  moreSubs.notify()
+}
+function capped(children: Node[], limit: number, all: boolean, keep: (string | undefined)[]) {
+  const files = children.reduce((k, c) => k + (c.folder ? 0 : 1), 0)
+  const long = limit > 0 && files > limit + SLACK
+  if (!long || all) return { shown: children, hidden: 0, long }
+  let i = 0
+  const shown = children.filter((c) => c.folder || i++ < limit || keep.includes(c.path))
+  return { shown, hidden: children.length - shown.length, long }
+}
+/** A file or folder in the file tree, flashed (hidden files turned on first when it's in a dot folder). */
+export async function showInTree(path: string) {
+  if (path.split("/").some((part) => part.startsWith(".")) && !getPrefs().showHidden) {
+    await setPrefs({ showHidden: true })
+    await reload()
+  }
+  revealInTree(path, { scroll: true, flash: true, open: true })
+}
+
+/** Open every folder above a file. `scroll`: scroll to it (an open folder to the top); `flash`: pulse its row once;
+ *  `open`: a folder opens too. */
+export function revealInTree(path: string, opts: { scroll?: boolean; flash?: boolean; open?: boolean } = {}) {
+  const parts = path.split("/").slice(0, opts.open ? undefined : -1)
+  if (revealedPath !== path) { revealedPath = path; moreSubs.notify() }
+  const n = new Set(treeOpen.now())
+  let changed = false
+  for (let i = 1; i <= parts.length; i++) { const f = parts.slice(0, i).join("/"); if (!n.has(f)) { n.add(f); changed = true } }
+  if (changed) treeOpen.set(n)
+  if (!opts.scroll && !opts.flash) return
+  const shown = [...document.querySelectorAll<HTMLElement>("[role=tree]")].some((t) => t.offsetParent && !t.closest("[data-flyout], [data-pin-tree], [data-peek=false]"))
+  if (opts.flash && !shown && !showPanel(FILES_PANEL)) openView("files", { newTab: true })
+  const find = () => [...document.querySelectorAll<HTMLElement>(`[data-tree-path="${CSS.escape(path)}"]`)].find((el) => el.offsetParent && !el.closest("[data-pin-tree]"))
+  const go = (tries: number) => {
+    const row = find()
+    if (!row) { if (tries) setTimeout(() => go(tries - 1), 60); return }
+    settled(row, () => place(row))
+  }
+  const place = (row: HTMLElement) => {
+    const r = row.getBoundingClientRect(), seen = seenArea(row)
+    const flash = () => { if (!opts.flash) return; row.classList.remove("reveal-flash"); void row.offsetWidth; row.classList.add("reveal-flash") }
+    const top = opts.open && row.hasAttribute("data-tree-folder")
+    const room = top ? Math.min(r.height * 4, (seen.bottom - seen.top) / 2) : 0
+    if (r.top >= seen.top && r.bottom + room <= seen.bottom) return flash()
+    const box = scrollingBox(row)
+    if (!box) return flash()
+    const by = top ? r.top - seen.top - r.height / 2 : opts.flash ? r.top + r.height / 2 - (seen.top + seen.bottom) / 2
+      : r.top < seen.top ? r.top - seen.top : r.bottom - seen.bottom
+    box.scrollBy({ top: by, behavior: opts.flash ? glide() : "auto" })
+    setTimeout(flash, opts.flash ? 350 : 0)
+  }
+  requestAnimationFrame(() => go(5))
+}
+
+function settled(row: HTMLElement, then: () => void) {
+  const at = () => { const box = scrollingBox(row); return row.getBoundingClientRect().top + (box?.scrollTop ?? 0) - (box?.getBoundingClientRect().top ?? 0) }
+  let last = at(), still = 0, frames = 30
+  const look = () => {
+    const now = at()
+    still = Math.abs(now - last) < 0.5 ? still + 1 : 0
+    last = now
+    if (still >= 2 || !--frames || !row.isConnected) return row.isConnected && then()
+    requestAnimationFrame(look)
+  }
+  requestAnimationFrame(look)
+}
+
+const EDGE_FADE = 24
+/** Where on screen a row can be seen: the window, cut by every box around it that clips, below the sticky heading of
+ *  its panel (rows pass under it), clear of a fading edge. The tree itself is as tall as its rows: it says nothing. */
+export function seenArea(el: HTMLElement) {
+  let top = 0, bottom = innerHeight, left = 0, right = innerWidth
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const st = getComputedStyle(p)
+    if (st.overflowY === "visible" && st.overflowX === "visible") continue
+    if (!/auto|scroll/.test(st.overflowY) && p.scrollHeight <= p.clientHeight + 1 && p.scrollWidth <= p.clientWidth + 1) continue
+    const b = p.getBoundingClientRect()
+    const fades = (c: string) => p.classList.contains(c) ? EDGE_FADE : 0
+    const below = p.scrollTop + p.clientHeight < p.scrollHeight - 1 ? Math.max(fades("edge-fade-b"), fades("edge-fade-y")) : 0
+    const above = p.scrollTop > 0 ? fades("edge-fade-y") : 0
+    top = Math.max(top, b.top + above); bottom = Math.min(bottom, b.bottom - below); left = Math.max(left, b.left); right = Math.min(right, b.right)
+  }
+  const head = el.closest("[data-panel]")?.querySelector<HTMLElement>("[data-panel-handle]")
+  if (head && getComputedStyle(head).position === "sticky") top = Math.max(top, head.getBoundingClientRect().bottom)
+  return { top, bottom, left, right }
+}
+
+const TREE = "tree"
+const FILES_PANEL = "files:files"
+
+export const fixed = (p: string) => p === ".trash" || inTrash(p) || isProtected(p)
+export const canMoveInto = (from: string, folder: string) =>
+  folder !== folderOf(from) && folder !== from && !folder.startsWith(`${from}/`) && !(folder && fixed(folder))
+
+const archives = (p: string) => inArchive(p) || p === ARCHIVE_DIR || p.endsWith(`/${ARCHIVE_DIR}`)
+
+/** The tree's panel, tab and empty-space menus: hidden files, archived ones when there are archive folders, and
+ *  revealing the open file (the heading's buttons have the rest: new, sort, collapse); `reveal` false: not that. */
+export function treeShownItems({ reveal = true } = {}): MenuItem[] {
+  const store = getStore(), { showArchived } = getPrefs()
+  const anyArchive = showArchived || (!!store && folderList(store.files).some(archives))
+  return [
+    ...commandItems("setting:show-hidden", ...(anyArchive ? ["setting:show-archived"] : [])),
+    ...(reveal ? commandItems("setting:auto-reveal").map((it) => ({ ...it, sep: true })) : []),
+  ]
+}
+
+const canDropIn = (folder: string) => !(folder && (fixed(folder) || isHidden(folder)))
+
+const moving = (e: DragEvent) => (isMac ? e.altKey : e.shiftKey)
+async function dropFrom(dt: DataTransfer, folder: string, move: boolean) {
+  try {
+    const made = await dropInto(dt, folder, move)
+    await reload()
+    if (made[0]) revealInTree(made[0], { scroll: true, flash: true })
+  } catch (e) { notifyError(e, "Couldn't add the files") }
+}
+
+async function moveInto(from: string, folder: string) {
+  if (!canMoveInto(from, folder)) return
+  try {
+    const r = await moveFile(from, joinPath(folder, from.split("/").pop()!))
+    revealInTree(r.path, { scroll: true, flash: true })
+  } catch (e) { notifyError(e, "Couldn't move") }
+}
+
+const SELECT = "files"
+
+const renamers = new Map<HTMLElement, (path: string) => void>()
+function keyedRow() {
+  const at = currentRow()?.closest<HTMLElement>("[data-tree-path]")
+  const tree = at && [...renamers.keys()].find((b) => b.contains(at))
+  return at && tree ? { at, path: at.dataset.treePath!, folder: "treeFolder" in at.dataset, rename: renamers.get(tree)!, tree } : null
+}
+const changeable = (p: string) => !!p && p !== ".trash" && !inTrash(p) && !isProtected(p)
+function deleteRow() {
+  const r = keyedRow()
+  if (!r) return
+  const many = selectionFor(SELECT, r.path, false)
+  const gone = (x: HTMLElement) => { const k = keyOfEl(x); return !!k && (k === r.path || k.startsWith(`${r.path}/`) || k.startsWith(moreKey(`${r.path}/`)) || k === moreKey(r.path)) }
+  const rows = [...r.tree.querySelectorAll<HTMLElement>("[data-keyrow]")].filter((x) => x.getClientRects().length > 0)
+  const i = rows.indexOf(currentRow()!)
+  const next = many ? null : rows.slice(i + 1).find((x) => !gone(x)) ?? rows.slice(0, i).reverse().find((x) => !gone(x))
+  void (many ? removeMany(many) : remove(r.path)).then(() => { if (next?.isConnected && !document.activeElement?.closest("dialog")) next.focus({ preventScroll: true }) })
+}
+registerCommands([
+  { id: "files:rename-row", name: "Rename the row", keys: ["F2"], when: () => { const r = keyedRow(); return !!r && changeable(r.path) },
+    run: () => { const r = keyedRow(); if (r) r.rename(r.path) }, icon: "pencil" },
+  { id: "files:duplicate-row", name: "Duplicate the row", keys: ["Mod+D"], when: () => { const r = keyedRow(); return !!r && !r.folder && changeable(r.path) },
+    run: () => { const r = keyedRow(); if (r) void duplicate(r.path) }, icon: "copy" },
+  { id: "files:delete-row", name: "Delete the row, or the selected rows", keys: isMac ? ["Mod+Backspace"] : ["Delete"],
+    when: () => { const r = keyedRow(); return !!r && !!r.path && !isProtected(r.path) }, run: deleteRow, icon: "trash-2" },
+])
+
+/** Move several files and folders into a folder, then one toast with Undo for all of them. `before` runs before each
+ *  moves (if it throws, that one doesn't); `reveal: false` leaves the tree as it is (a drop elsewhere shows where). */
+export async function moveManyInto(paths: string[], folder: string, { before, reveal = true }: { before?: (path: string, folder: string) => unknown; reveal?: boolean } = {}) {
+  const moved: { from: string; to: string }[] = []
+  for (const from of topmost(paths).filter((p) => canMoveInto(p, folder))) {
+    try { await before?.(from, folder); const r = await moveFile(from, joinPath(folder, from.split("/").pop()!), { undo: false }); moved.push({ from, to: r.path }) }
+    catch (e) { notifyError(e, "Couldn't move") }
+  }
+  if (!moved.length) return
+  if (reveal) revealInTree(moved[0].to, { scroll: true, flash: true })
+  notify(`Moved ${moved.length === 1 ? "it" : `${moved.length} items`} to ${folder || "the top of the vault"}`, { action: { label: "Undo", run: async () => {
+    for (const m of moved) await moveFile(m.to, m.from, { undo: false })
+  } } })
+}
+
+/** "Move to…" for several: one folder for them all (one none of them is, nor is inside). `before(path, folder)` runs
+ *  before each moves; if it throws, that one doesn't. */
+export function askMoveMany(paths: string[], opts: { before?: (path: string, folder: string) => unknown } = {}) {
+  const t = getStore()?.files
+  const roots = topmost(paths).filter((p) => !fixed(p))
+  if (!t || !roots.length) return
+  if (roots.length === 1) return askMove(roots[0], { before: opts.before && ((f) => opts.before!(roots[0], f)) })
+  const all = folderList(t)
+  const hidden = roots.every(isHidden), archived = roots.every(inArchive)
+  const folders = ["", ...all].filter((f) => roots.some((p) => canMoveInto(p, f)) && roots.every((p) => f !== p && !f.startsWith(`${p}/`))
+    && (!isHidden(f) || hidden) && (!archives(f) || archived))
+  pickFolder({ label: "Move to folder", placeholder: `Move ${roots.length} items to…`, verb: "move", not: roots[0], folders, all, onPick: (f) => void moveManyInto(roots, f, { before: opts.before }) })
+}
+
+/** "Move file to…": pick a folder (fuzzy, "/"
+ *  the top level), then move it there. `before(folder)` runs first; if it throws, nothing moves. */
+export function askMove(path: string, opts: { before?: (folder: string) => unknown } = {}) {
+  const t = getStore()?.files
+  if (!t || fixed(path)) return
+  const all = folderList(t)
+  const folders = ["", ...all].filter((f) => canMoveInto(path, f) && (!isHidden(f) || isHidden(path)) && (!archives(f) || inArchive(path)))
+  const pick = async (f: string) => {
+    if (opts.before && canMoveInto(path, f)) {
+      try { await opts.before(f) } catch (e) { return notifyError(e, "Couldn't move") }
+    }
+    await moveInto(path, f)
+  }
+  pickFolder({ label: "Move to folder", placeholder: `Move "${shownName(path)}" to…`, verb: "move", not: path, folders, all, onPick: (f) => void pick(f) })
+}
+
+export function fileIcon(path: string, type: string | null, disabled: string[], file?: VaultFile): { icon: LucideIcon; tint?: string } {
+  const own = file && (file.icon || file.plugin) ? iconOf(file) : null
+  if (own) return { icon: own, tint: tintOf(file!.tint) }
+  const s = getStore(), given = drawn(s ? fileIcons(s, disabled)[path] : undefined)
+  if (given) return given
+  if (path === "AGENTS.md" || path === "CLAUDE.md") return { icon: Bot }
+  if (isJson(path)) return { icon: FileBraces }
+  const format = formatFor(path, disabled)?.format
+  if (format) return { icon: format.icon, tint: format.tint }
+  if (!/\.md$/i.test(path)) return { icon: kindIcon(path) }
+  const v = fileViewFor({ path, type }, disabled)?.view
+  return v?.icon ? { icon: v.icon, tint: tintOf(file?.tint) ?? v.tint } : { icon: FileText, tint: tintOf(file?.tint) }
+}
+
+/** A vault file's icon as the tree draws it, by its path (a note, an image, a recording...). */
+export function iconAt(path: string) {
+  const s = getStore(), file = s ? fileAt(s.files.files, path) : undefined
+  return fileIcon(path, file?.type ?? null, getPrefs().disabled, file)
+}
+
+function drawn(g?: FileIcon): { icon: LucideIcon; tint?: string } | null {
+  const icon = g && namedIcon(g.icon)
+  return icon ? { icon, tint: tintOf(g.tint) } : null
+}
+
+type Node = { path: string; name: string; folder: boolean; file?: VaultFile; other?: boolean; mtime: number; ctime: number; children: Node[] }
+
+export const SORTS: { value: FileSort; label: string }[][] = [
+  [{ value: "name", label: "File name (A to Z)" }, { value: "name-desc", label: "File name (Z to A)" }],
+  [{ value: "modified", label: "Modified time (new to old)" }, { value: "modified-old", label: "Modified time (old to new)" }],
+  [{ value: "created", label: "Created time (new to old)" }, { value: "created-old", label: "Created time (old to new)" }],
+]
+const fileNodes = new WeakMap<VaultFile, Node>()
+function fileNode(f: VaultFile): Node {
+  let n = fileNodes.get(f)
+  if (!n) fileNodes.set(f, n = { path: f.path, name: stem(f.path), folder: false, file: f, mtime: f.mtime, ctime: f.ctime ?? f.mtime, children: [] })
+  return n
+}
+
+function build(files: FileTreeFiles, sort: FileSort, open: string[] = [], showArchived = false, prev: Node | null = null): Node {
+  const root: Node = { path: "", name: "", folder: true, mtime: 0, ctime: 0, children: [] }
+  const folders = new Map<string, Node>([["", root]])
+  const wanted = new Set(open)
+  const shown = (p: string) => showArchived || !archives(p) || wanted.has(p)
+  const listed = new Set([...files.files, ...files.others].map((f) => f.path))
+  const extra = open.filter((p) => !listed.has(p))
+  const all = new Set(folderList(files).filter((f) => showArchived || !archives(f)))
+  for (const p of open) { const parts = p.split("/"); for (let i = 1; i < parts.length; i++) all.add(parts.slice(0, i).join("/")) }
+  for (const f of [...all].sort()) {
+    const node: Node = { path: f, name: f.split("/").pop()!, folder: true, mtime: 0, ctime: 0, children: [] }
+    folders.set(f, node)
+  }
+  for (const [p, node] of folders) if (p) folders.get(folderOf(p))?.children.push(node)
+  for (const f of files.files) if (shown(f.path)) folders.get(folderOf(f.path))?.children.push(fileNode(f))
+  for (const o of files.others) {
+    if (shown(o.path)) folders.get(folderOf(o.path))?.children.push({ path: o.path, name: shownName(o.path), folder: false, other: !isDoc(o.path), mtime: o.mtime, ctime: o.ctime ?? o.mtime, children: [] })
+  }
+  for (const p of extra) folders.get(folderOf(p))?.children.push({ path: p, name: shownName(p), folder: false, other: !isDoc(p), mtime: 0, ctime: 0, children: [] })
+  const cmp = compare(sort)
+  const byName = sort === "name" || sort === "name-desc"
+  const order = (n: Node, was?: Node) => {
+    n.children = byName && was ? resorted(n.children, was.children, cmp) : n.children.sort(cmp)
+    if (!n.children.some((c) => c.folder)) return
+    const old = was && new Map(was.children.filter((c) => c.folder).map((c) => [c.path, c]))
+    for (const c of n.children) if (c.folder) order(c, old?.get(c.path))
+  }
+  order(root, prev && sorts.get(prev) === sort ? prev : undefined)
+  return root
+}
+const sorts = new WeakMap<Node, FileSort>()
+
+export type FolderItem = Node
+export function folderItems(files: FileTreeFiles, folder: string, sort: FileSort, showArchived: boolean): { items: Node[]; counts: Map<string, number> } | null {
+  const all = folderList(files)
+  if (folder && !isFolder(files, folder)) return null
+  const shown = (p: string) => showArchived || !archives(p) || archives(folder)
+  const items: Node[] = [], counts = new Map<string, number>()
+  const count = (p: string) => { const up = folderOf(p); if (up && folderOf(up) === folder && shown(p)) counts.set(up, (counts.get(up) ?? 0) + 1) }
+  for (const f of all) {
+    count(f)
+    if (f && folderOf(f) === folder && shown(f)) items.push({ path: f, name: f.split("/").pop()!, folder: true, mtime: 0, ctime: 0, children: [] })
+  }
+  for (const f of files.files) { count(f.path); if (folderOf(f.path) === folder && shown(f.path)) items.push(fileNode(f)) }
+  for (const o of files.others) {
+    count(o.path)
+    if (folderOf(o.path) === folder && shown(o.path)) items.push({ path: o.path, name: shownName(o.path), folder: false, other: !isDoc(o.path), mtime: o.mtime, ctime: o.ctime ?? o.mtime, children: [] })
+  }
+  return { items: items.sort(compare(sort)), counts }
+}
+
+export function folderIcon(path: string, open = false): { icon: LucideIcon; tint?: string } {
+  const s = getStore(), given = drawn(s ? fileIcons(s, getPrefs().disabled)[path] : undefined)
+  return path === ".trash" ? { icon: Trash2 } : given ?? { icon: path.split("/").pop() === ARCHIVE_DIR ? Archive : open ? FolderOpen : Folder }
+}
+
+function resorted(kids: Node[], had: Node[], cmp: (a: Node, b: Node) => number) {
+  const at = new Map(had.map((c, i) => [c.folder ? `/${c.path}` : c.path, i]))
+  const out: Node[] = [], fresh: Node[] = []
+  for (const k of kids) (at.has(k.folder ? `/${k.path}` : k.path) ? out : fresh).push(k)
+  out.sort((a, b) => at.get(a.folder ? `/${a.path}` : a.path)! - at.get(b.folder ? `/${b.path}` : b.path)!)
+  for (const f of fresh) {
+    let lo = 0, hi = out.length
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cmp(out[mid], f) <= 0) lo = mid + 1; else hi = mid }
+    out.splice(lo, 0, f)
+  }
+  return out
+}
+
+function keepSame(prev: Node | null, next: Node): Node {
+  if (!prev || prev === next) return next
+  let old: Map<string, Node> | null = null
+  const children = next.children.map((c, i) => {
+    const o = prev.children[i]?.path === c.path ? prev.children[i] : (old ??= new Map(prev.children.map((p) => [p.path, p]))).get(c.path)
+    return o ? keepSame(o, c) : c
+  })
+  const same = prev.name === next.name && prev.folder === next.folder && prev.other === next.other && looks(prev.file) === looks(next.file)
+    && children.length === prev.children.length && children.every((c, i) => c === prev.children[i])
+  return same ? prev : { ...next, children }
+}
+const looks = (f?: VaultFile) => (f ? `${f.type}\0${f.kind}\0${f.icon ?? ""}\0${f.tint ?? ""}\0${f.plugin ?? ""}\0${f.archived ? 1 : 0}` : "")
+
+function sameTree(a: FileTreeFiles, b: FileTreeFiles, sort: FileSort) {
+  if (a === b) return true
+  const byTime = sort !== "name" && sort !== "name-desc"
+  const same = <T extends { path: string; mtime: number; ctime: number }>(x: T[], y: T[], also: (p: T, q: T) => boolean) =>
+    x === y || (x.length === y.length && x.every((p, i) => { const q = y[i]; return p === q || (p.path === q.path && (!byTime || (p.mtime === q.mtime && p.ctime === q.ctime)) && also(p, q)) }))
+  return (a.folders === b.folders || (a.folders.length === b.folders.length && a.folders.every((f, i) => f === b.folders[i])))
+    && same(a.files, b.files, (p, q) => looks(p) === looks(q)) && same(a.others, b.others, (p, q) => !p.excluded === !q.excluded)
+}
+type FileTreeFiles = Store["files"]
+
+const openHiddenIn = (ws: Workspace, hidden: boolean) => hidden ? "" : [...new Set(allPanes(ws).map((p) => p.to)
+  .filter((to) => to.startsWith("file:") && isHidden(to.slice(5)) && !archives(to.slice(5))).map((to) => to.slice(5)))].sort().join("\n")
+
+export const FileTree = memo(function FileTree({ store, active, compact = true, header = true, title = "Files", pane, scroll = false, revealScroll = true, className, folder }: {
+  store: Store
+  /** Only what's in this folder, a level in, its folders opened apart from the tree's (a pinned folder, open in place:
+   *  plugins/core/pages). */
+  folder?: string
+  /** The file open in the current tab (highlighted). */
+  active?: string
+  /** The header's name ("Files" in the sidebar). */
+  title?: string
+  /** Open files in that pane (a tab group's id), not the focused one: the Files tab opens them beside itself. */
+  pane?: string
+  /** Desktop sidebar rows (26px in compact density); phones get 44px rows. */
+  compact?: boolean
+  header?: boolean
+  /** Rows scroll in their own box (a flyout of fixed height); left out, it's as tall as its rows. Never
+   *  a scroller where nothing bounds it: it couldn't scroll and would stop the wheel scrolling what's around it. */
+  scroll?: boolean
+  /** Auto-reveal scrolls to the open file; false only opens its folders (a phone's drawer: one scroller, drawn afresh
+   *  each time it's out, would jump past the panels above it). */
+  revealScroll?: boolean
+  className?: string
+}) {
+  const prefs = usePrefs(), { disabled, fileIcons, fileSort, folderLimit, autoReveal, showHidden } = prefs
+  const showArchived = prefs.showArchived
+  const openHidden = useSyncExternalStore(onWorkspaceChange, () => openHiddenIn(getWorkspace(), showHidden))
+  const openArchived = !showArchived && active && archives(active) ? active : ""
+  const shape = useRef(store.files)
+  if (!sameTree(shape.current, store.files, fileSort)) shape.current = store.files
+  const files = shape.current
+  const last = useRef<Node | null>(null)
+  const root = useMemo(() => {
+    last.current = keepSame(last.current, build(files, fileSort, [...(openHidden ? openHidden.split("\n") : []), ...(openArchived ? [openArchived] : [])], showArchived, last.current))
+    sorts.set(last.current, fileSort)
+    return last.current
+  },
+    [files, fileSort, openHidden, openArchived, showArchived])
+  const opened = folder === undefined ? treeOpen : pinsOpen
+  const open = opened.useAll()
+  const allFolders = useMemo(() => folderList(files), [files])
+  const anyOpen = allFolders.some((f) => open.has(f))
+  useEffect(() => { if (header && folder === undefined && autoReveal && active) revealInTree(active, { scroll: revealScroll }) }, [header, folder, autoReveal, active, revealScroll])
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const fresh = useRef<string | null>(null)
+  const item = useDragItem()
+  const dragging = item?.from === "tree" ? item.path! : null
+  const draggingMany = item?.from === "tree" && !!item.paths
+  const target = `${TREE}:${useId()}`
+  const hit = useDropHit<string>(target)
+  const [fromComputer, setFromComputer] = useState<string | null>(null)
+  const dropOn = hit ?? fromComputer
+
+  const newOf = async (nf: NewFile, folder: string) => {
+    const p = await nf.make(folder)
+    if (folder) revealInTree(`${folder}/x`)
+    openNew(p)
+  }
+  const newFolder = async (parent: string) => {
+    const p = await createFolder(parent, freeName(store.files, parent, "New folder", ""))
+    revealInTree(`${p}/x`)
+    fresh.current = p
+    setRenaming(p)
+  }
+  const restore = async (n: Node) => {
+    try { const to = await restoreFile(n.path); revealInTree(to, { scroll: true, flash: true }) } catch (e) { notifyError(e, "Couldn't restore") }
+  }
+  const renamingTo = (n: Node, typed: string) => {
+    const ext = n.folder || n.other ? "" : n.path.slice(n.path.lastIndexOf("."))
+    const to = joinPath(folderOf(n.path), cleanName(typed) + ext)
+    return { to, why: nameProblem(typed, n.path, to) }
+  }
+  const rename = async (n: Node, name: string) => {
+    setRenaming(null)
+    const { to, why } = renamingTo(n, name)
+    if (why) { refuseName(why); return focusRow(n.path) }
+    if (!cleanName(name) || to === n.path) return focusRow(n.path)
+    const naming = fresh.current === n.path
+    fresh.current = null
+    try { await moveFile(n.path, to, { undo: !naming }); focusRow(to) } catch (e) { notifyError(e, "Couldn't rename") }
+  }
+  const focusRow = (path: string) => requestAnimationFrame(() => {
+    const a = document.activeElement
+    if (!compact || (a && a !== document.body)) return
+    box.current?.querySelector<HTMLElement>(`[data-tree-path="${CSS.escape(path)}"] > button`)?.focus({ preventScroll: true })
+  })
+
+  const kindName = (label: string) => capitalize(label.replace(/^New /, ""))
+  const items = (n: Node): MenuItem[] => {
+    const here = n.folder ? n.path : folderOf(n.path)
+    const file = !n.folder
+    if (n.path === ".trash") return [{ label: "Empty trash", icon: Trash2, run: () => remove(n.path), danger: true, disabled: !n.children.length }]
+    if (inTrash(n.path)) {
+      return [
+        ...(file ? [{ label: "Open in new tab", icon: SquareArrowOutUpRight, run: () => openFile(n.path, { newTab: true }) }] : []),
+        { label: "Restore", icon: RotateCcw, run: () => restore(n), sep: file },
+        copyPathItem(n.path, { folder: n.folder }),
+        ...revealItem(n.path),
+        { label: "Delete permanently", icon: Trash2, run: () => remove(n.path), danger: true, sep: true },
+      ]
+    }
+    const locked = !n.path || isProtected(n.path)
+    const kinds = pluginNewFiles(disabled).map((nf): MenuItem => ({ label: nf.label, icon: nf.icon, run: () => newOf(nf, here).catch((e) => notifyError(e, `Couldn't make it`)) }))
+    const plug = n.path ? pluginFileGroups(n.path, undefined, n.folder) : noGroups
+    return grouped([
+      file ? [
+        openItem(() => openFile(n.path, { newTab: true, pane }), compact ? () => openInSplit(`file:${n.path}`, "right") : undefined),
+      ] : n.path ? [openFolderItem(n.path, { pane })] : [],
+      [
+        { label: "New note", icon: FilePlus, run: () => newNote(here),
+          ...(kinds.length ? { split: true, items: [{ label: "Note", icon: FilePlus, run: () => newNote(here) }, ...kinds.map((k) => ({ ...k, label: kindName(k.label) }))] } : {}) },
+        { label: "New folder", icon: FolderPlus, run: () => newFolder(here) },
+      ],
+      locked ? [] : [
+        renameItem(n.path, () => setRenaming(n.path)),
+        { label: n.folder ? "Move folder to…" : "Move file to…", icon: n.folder ? FolderInput : FileInput, run: () => askMove(n.path) },
+        ...(file ? [duplicateItem(n.path)] : []),
+      ],
+      plug.navigate,
+      plug.share,
+      ...plug.rest,
+      [...(n.path ? [copyPathItem(n.path, { folder: n.folder }), ...revealItem(n.path)] : []), ...moreItem(plug.more)],
+      [...plug.away, ...(locked ? [] : [{ label: "Delete", icon: Trash2, run: () => remove(n.path), danger: true }])],
+      n.path ? [] : treeShownItems(),
+    ])
+  }
+  useSelectable(SELECT, { menu: (keys) => filesMenu(keys, { newTab: (p) => openFile(p, { newTab: true, pane }) }), noun: ["item", "items"] })
+  const menuOf = (n: Node) => (n.path ? rowMenu(SELECT, n.path, () => items(n)) : () => items(n))
+  const onMenu = (e: MouseEvent, n: Node) => menuFor(menuOf(n))(e)
+  const swipe = (n: Node): SwipeAction[] => {
+    if (!n.path || n.path === ".trash" || isProtected(n.path)) return []
+    if (inTrash(n.path)) return [{ label: "Restore", icon: RotateCcw, run: () => restore(n), removes: true }, { label: "Delete", icon: Trash2, run: () => remove(n.path), danger: true }]
+    return [
+      { label: "Move", icon: n.folder ? FolderInput : FileInput, run: () => askMove(n.path) },
+      { label: "Delete", icon: Trash2, run: () => remove(n.path), danger: true, removes: true },
+    ]
+  }
+
+  const canDrag = (n: Node) => !!n.path && renaming !== n.path && !fixed(n.path)
+  const press = (e: PointerEvent<HTMLElement>, n: Node) => {
+    if (!canDrag(n)) return
+    const keys = selectionFor(SELECT, n.path, false)?.filter((p) => !fixed(p))
+    const item: DragItem = keys && keys.length > 1
+      ? { from: "tree", path: n.path, paths: keys, tos: keys.map(pathTarget), folder: n.folder || undefined, to: pathTarget(n.path), label: `${keys.length} items` }
+      : { from: "tree", path: n.path, folder: n.folder || undefined, to: pathTarget(n.path) }
+    startDrag(e, item, { touch: true })
+  }
+  const hover = useRef<{ path: string; timer: number } | null>(null)
+  const [edge] = useState(edgeScroller)
+  const box = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  useEffect(() => { const b = box.current; if (!b) return; renamers.set(b, setRenaming); return () => { renamers.delete(b) } })
+  const stopTimers = () => {
+    if (hover.current) clearTimeout(hover.current.timer)
+    hover.current = null
+    edge.stop()
+  }
+  const targetAt = (el: EventTarget | null) => {
+    const more = closestOf<HTMLElement>(el, "[data-tree-more]")
+    if (more) return { target: more.dataset.treeMore!, folder: null }
+    const row = closestOf<HTMLElement>(el, "[data-tree-path]")
+    if (!row) return { target: folder ?? "", folder: null }
+    const p = row.dataset.treePath!
+    return row.dataset.treeFolder ? { target: p, folder: p } : { target: folderOf(p), folder: null }
+  }
+  const scrollNear = (y: number, dragged: () => boolean) => {
+    let ul: HTMLElement | null = list.current
+    while (ul && !scroll && ul.parentElement && !/(auto|scroll)/.test(getComputedStyle(ul).overflowY)) ul = ul.parentElement
+    if (ul) edge.near(ul, y, dragged)
+  }
+  const openLater = (from: string, folder: string | null) => {
+    const want = folder && !opened.now().has(folder) && folder !== from && !folder.startsWith(`${from}/`) ? folder : null
+    if (hover.current?.path === want) return
+    if (hover.current) clearTimeout(hover.current.timer)
+    hover.current = want ? { path: want, timer: window.setTimeout(() => { if (!opened.now().has(want)) opened.toggle(want) }, 700) } : null
+  }
+  useDropTarget<string>(target, (item, _x, y, el) => {
+    const inside = !!el && !!box.current?.contains(el)
+    if (item.from !== "tree" || !item.path || !inside) { stopTimers(); return null }
+    scrollNear(y, () => getDrag()?.item.path === item.path)
+    const { target, folder } = targetAt(el)
+    openLater(item.path, folder)
+    const all = item.paths ?? [item.path]
+    return all.some((p) => canMoveInto(p, target)) && all.every((p) => target !== p && !target.startsWith(`${p}/`)) ? target : null
+  }, (item, folder) => { if (item.paths) void moveManyInto(item.paths, folder); else if (item.path) moveInto(item.path, folder) }, { end: stopTimers })
+
+  // dragenter decides too: Chrome sends dragover only once the pointer stays on a row.
+  const over = (e: DragEvent) => {
+    if (!hasFiles(e.dataTransfer)) return
+    scrollNear(e.clientY, () => true)
+    const { target, folder } = targetAt(e.target)
+    openLater("", folder)
+    if (!canDropIn(target)) { e.dataTransfer.dropEffect = "none"; setFromComputer(null); return }
+    e.preventDefault()
+    e.dataTransfer.dropEffect = desktop && moving(e) ? "move" : "copy"
+    setFromComputer(target)
+  }
+  const treeDrop = {
+    onDragEnter: over,
+    onDragOver: over,
+    onDragLeave: (e: DragEvent) => {
+      if (e.currentTarget.contains(nodeOf(e.relatedTarget))) return
+      setFromComputer(null); stopTimers()
+    },
+    onDrop: (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return
+      e.preventDefault()
+      const { target } = targetAt(e.target)
+      setFromComputer(null); stopTimers()
+      if (canDropIn(target)) dropFrom(e.dataTransfer, target, !!desktop && moving(e))
+    },
+  }
+
+  const on = useRef<RowHandlers>(null!)
+  on.current = { press, menu: onMenu, more: (e, n) => menuBelow(e, menuOf(n)()), rename, cancelRename: (n) => { setRenaming(null); focusRow(n.path) },
+    nameProblem: (n, name) => renamingTo(n, name).why, swipe }
+  const { marks, icons } = usePluginRows(store, disabled)
+  const decor = useFileRows(disabled)
+  const limit = Math.max(0, Math.floor(Number(folderLimit) || 0))
+  const rows = useMemo<Rows>(() => ({ compact, fileIcons, disabled, pane, on, marks, icons, decor, opened, pinned: folder !== undefined }), [compact, fileIcons, disabled, pane, marks, icons, decor, opened, folder])
+  const all = moreSubs.use(() => showingAll), revealed = moreSubs.use(() => revealedPath)
+  const sub = folder === undefined ? root : nodeAt(root, folder)
+  const shownRows = useMemo(() => (sub ? flatten(sub, folder === undefined ? 0 : 1, open, limit, all, [active, renaming ?? undefined, revealed]) : []),
+    [sub, folder, open, limit, all, active, renaming, revealed])
+  const [focused, setFocused] = useState<string | null>(null)
+  const kids = { items: shownRows, rows, list, active, renaming: renaming ?? undefined, revealed, dropOn: dropOn ?? undefined, dragging, draggingMany, open, focused }
+  const onFocus = (e: FocusEvent) => { const k = keyOfEl(e.target); if (k !== focused) setFocused(k) }
+
+  if (folder !== undefined) {
+    if (!sub?.children.length) return null
+    return (
+      <div ref={box} {...treeDrop} data-pin-tree={folder} className={className}>
+        <ul ref={list} role="tree" aria-label={folder} aria-multiselectable data-keylist data-select-list={SELECT} onFocus={onFocus} className="relative">
+          <TreeRows {...kids} />
+        </ul>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={box} {...treeDrop} data-file-drop className={cn("flex min-h-0 flex-col", className)}>
+      {header && (
+        <SidebarHeading title={title} open>
+          {([
+            { label: "New note", icon: SquarePen, run: () => newNote(newNoteFolder(getStore(), currentFile())) },
+            { label: "New folder", icon: FolderPlus, run: () => newFolder("") },
+            { label: "Change sort order", icon: ArrowUpNarrowWide, run: (e: MouseEvent) => menuBelow(e, SORTS.flatMap((group, g) => group.map((o, i) => ({
+              label: o.label, checked: fileSort === o.value, sep: g > 0 && i === 0, run: () => setPrefs({ fileSort: o.value }),
+            })))) },
+            ...(showArchived ? [{ label: "Hide archived files", icon: Archive, pressed: true, run: () => setPrefs({ showArchived: false }) }] : []),
+            anyOpen
+              ? { label: "Collapse all", icon: ChevronsDownUp, run: () => { treeOpen.set(new Set()); setShowingAll(null) } }
+              : { label: "Expand all", icon: ChevronsUpDown, run: () => treeOpen.set(new Set(allFolders)) },
+          ]).map((b: { label: string; icon: LucideIcon; pressed?: boolean; run: (e: MouseEvent) => void }) => (
+            <button key={b.label} type="button" onClick={b.run} data-tip={b.label} aria-label={b.label} aria-pressed={b.pressed}
+              className={cn("grid size-6 cursor-pointer place-items-center rounded-[4px] hover:bg-foreground/[0.06] hover:text-foreground",
+                b.pressed ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground")}>
+              <b.icon className="size-[15px]" strokeWidth={2} />
+            </button>
+          ))}
+        </SidebarHeading>
+      )}
+      <ul ref={list} role="tree" aria-label="Files" aria-multiselectable data-keylist data-select-list={SELECT} data-drop-root={dropOn === "" || undefined} onFocus={onFocus}
+        onContextMenu={(e) => { if (e.target === e.currentTarget) onMenu(e, root) }}
+        className={cn("relative flex-1 rounded-[8px] pb-6 transition-colors", scroll && "min-h-0 overflow-y-auto overscroll-contain", dropOn === "" && "drop-target bg-primary/10")}>
+        <TreeRows {...kids} />
+        {!shownRows.length && folder === undefined && <li role="none" className="h-7 truncate pl-1.5 text-[13px] leading-7 text-tertiary" data-tree-empty>No files yet.</li>}
+      </ul>
+    </div>
+  )
+})
+
+type RowHandlers = {
+  press: (e: PointerEvent<HTMLElement>, n: Node) => void; menu: (e: MouseEvent, n: Node) => void; more: (e: MouseEvent, n: Node) => void
+  rename: (n: Node, name: string) => void; cancelRename: (n: Node) => void; nameProblem: (n: Node, name: string) => string | null; swipe: (n: Node) => SwipeAction[]
+}
+type Rows = { compact: boolean; fileIcons: boolean; disabled: string[]; pane?: string; on: { current: RowHandlers }; marks: Record<string, FileMark>
+  icons: Record<string, FileIcon>; decor: Record<string, FileRow>; opened: OpenSet; pinned: boolean }
+
+function nodeAt(root: Node, path: string): Node | undefined {
+  let n: Node | undefined = root
+  for (const part of path.split("/")) n = n?.children.find((c) => c.folder && c.name === part)
+  return n
+}
+
+function styleOf(css?: string): CSSProperties | undefined {
+  if (!css) return undefined
+  const out: Record<string, string> = {}
+  for (const d of css.split(";")) {
+    const i = d.indexOf(":")
+    if (i < 0) continue
+    const k = d.slice(0, i).trim(), v = d.slice(i + 1).trim()
+    if (k) out[k.startsWith("--") ? k : k.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = v
+  }
+  return out
+}
+const partProps = (p?: FileRowPart) => ({ ...p?.attrs, ...(p?.style ? { style: styleOf(p.style) } : {}) })
+function RowNodes({ nodes }: { nodes: globalThis.Node[] }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => { ref.current?.replaceChildren(...nodes.map((n) => n.cloneNode(true))) }, [nodes])
+  return <span ref={ref} data-file-row-nodes className="contents" />
+}
+type Said = { marks: Record<string, FileMark>; icons: Record<string, FileIcon> }
+function usePluginRows(store: Store, disabled: string[]) {
+  const last = useRef<{ key: string; said: Said }>({ key: "", said: { marks: {}, icons: {} } })
+  return useMemo(() => {
+    const said = { marks: fileMarks(store, disabled), icons: fileIcons(store, disabled) }, key = JSON.stringify(said)
+    if (key !== last.current.key) last.current = { key, said }
+    return last.current.said
+  }, [store, disabled])
+}
+type Item = { key: string; n: Node; depth: number; pos: number; size: number; more?: { hidden: number; all: boolean } }
+function flatten(top: Node, depth: number, open: ReadonlySet<string>, limit: number, all: ReadonlySet<string>, keep: (string | undefined)[]) {
+  const out: Item[] = []
+  const walk = (n: Node, d: number) => {
+    const showsAll = all.has(n.path)
+    const { shown, hidden, long } = capped(n.children, limit, showsAll, keep)
+    shown.forEach((c, i) => {
+      out.push({ key: c.path, n: c, depth: d, pos: i + 1, size: shown.length })
+      if (c.folder && open.has(c.path) && c.children.length) walk(c, d + 1)
+    })
+    if (long && (showsAll || hidden > 0)) out.push({ key: moreKey(n.path), n, depth: d, pos: 0, size: 0, more: { hidden, all: showsAll } })
+  }
+  walk(top, depth)
+  return out
+}
+const moreKey = (folder: string) => `\0more:${folder}`
+function keyOfEl(el: EventTarget | null) {
+  const e = el instanceof Element ? el : null
+  const path = e?.closest<HTMLElement>("[data-tree-path]")?.dataset.treePath
+  if (path !== undefined) return path
+  const more = e?.closest<HTMLElement>("[data-tree-more]")?.dataset.treeMore
+  return more === undefined ? null : moreKey(more)
+}
+const above = (p: string) => { const parts = p.split("/"); return parts.slice(1).map((_, i) => parts.slice(0, i + 1).join("/")) }
+
+function Guides({ depth, rows }: { depth: number; rows: Rows }) {
+  const lines = []
+  for (let k = 0; k < depth; k++) {
+    const at = rows.pinned && k === 0 ? 3.5 : (rows.compact ? 1.5 : 1) + k * (rows.compact ? 3.5 : 4.5) + 1.75
+    lines.push(<span key={k} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-border" style={{ left: `calc(${space(at)} - 0.5px)` }} />)
+  }
+  return <>{lines}</>
+}
+
+const TreeRow = memo(function TreeRow({ n, depth, pos, size, index, rows, isOpen, selected, renaming, dropHere, dragging, draggingMany }: {
+  n: Node; depth: number; pos: number; size: number; index: number; rows: Rows; isOpen: boolean; selected: boolean; renaming: boolean; dropHere: boolean; dragging: string | null; draggingMany: boolean
+}) {
+  const picked = useSelected(SELECT, n.path)
+  const { compact, fileIcons, disabled, pane, on } = rows
+  const mark = n.folder ? undefined : rows.marks[n.path]
+  const decor = rows.decor[n.path]
+  const { icon: Icon, tint }: { icon: LucideIcon; tint?: string } =
+    n.path === ".trash" ? { icon: Trash2 } : n.folder ? drawn(rows.icons[n.path]) ?? { icon: n.name === ARCHIVE_DIR ? Archive : isOpen ? FolderOpen : Folder } : fileIcon(n.path, n.file?.type ?? null, disabled, n.file)
+  const rowH = compact ? "h-6.5 max-md:h-7 text-[13px]" : "min-h-11 text-[17px]"
+  const indent = compact ? 3.5 : 4.5
+  const faint = isHidden(n.path)
+  const archived = !!n.file?.archived || archives(n.path)
+  const pad = (compact ? 1.5 : 1) + depth * indent
+  const field = useRef<HTMLInputElement>(null), picking = useRef(false)
+  const renamingIcon = renaming && <Icon className={cn("shrink-0 text-muted-foreground", compact ? "size-[15px]" : "size-[18px]")} strokeWidth={2} />
+  const click = (e: MouseEvent) => {
+    if (selectClick(e, SELECT, n.path, currentFile())) return
+    if (n.folder) return rows.opened.toggle(n.path)
+    openFile(n.path, { newTab: e.metaKey || e.ctrlKey, pane })
+  }
+  return (
+    <li role="none" data-vi={index}
+      className={cn("relative scroll-mt-10 pb-px", dropHere && "drop-target")}>
+      {renaming ? (
+        <div data-tree-path={n.path} data-tree-folder={n.folder || undefined}
+          className={cn("flex items-center gap-1.5 rounded-[5px] bg-foreground/[0.06]", rowH)} style={{ paddingLeft: space(pad + 5) }}>
+          {fileIcons && (iconChangeable(n.path) ? (
+            <button type="button" aria-label="Change icon" data-tip="Change icon" className={ICON_BUTTON} onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { picking.current = true; changeIcon(n.path, undefined, () => field.current?.focus()) }}>{renamingIcon}</button>
+          ) : renamingIcon)}
+          <input ref={field} autoFocus defaultValue={n.name} aria-label="New name" spellCheck={false}
+            onFocus={(e) => { if (!picking.current) e.target.select(); picking.current = false }}
+            onBlur={(e) => { if (!picking.current) on.current.rename(n, e.target.value) }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { const why = on.current.nameProblem(n, e.currentTarget.value); if (why) refuseName(why, e.currentTarget); else e.currentTarget.blur() }
+              if (e.key === "Escape") on.current.cancelRename(n)
+            }}
+            className="h-6 min-w-0 flex-1 rounded-[4px] bg-card px-1 outline-none ring-1 ring-primary/60" />
+        </div>
+      ) : (
+        <HoverPreview to={n.folder ? null : `file:${n.path}`} info={{ label: stem(n.path), icon: Icon, tint }} off={selected || !!dragging}>
+        <SwipeRow actions={() => on.current.swipe(n)}>
+        <div onPointerDown={(e) => { if (!n.folder) openingSoon(n.path, true); on.current.press(e, n) }} onContextMenu={(e) => on.current.menu(e, n)}
+          onPointerEnter={n.folder ? undefined : () => openingSoon(n.path)} onPointerLeave={n.folder ? undefined : () => openingSoon(null)}
+          {...partProps(decor?.row)} data-tree-path={n.path} data-tree-folder={n.folder || undefined} data-select-key={n.path} {...selectedAttr(picked)}
+          className={cn(decor?.row?.className, "group relative flex items-center rounded-[5px] transition-colors", rowH,
+            selected ? "bg-foreground/[0.08] font-medium" : !dragging && "hover:bg-foreground/[0.04]",
+            (dragging === n.path || (picked && draggingMany)) && "opacity-50")}>
+          {/* aria-level, setsize and posinset: the tree is flat and virtual, so a screen reader can't count them. */}
+          <button type="button" data-keyrow role="treeitem" aria-level={depth + 1} aria-setsize={size} aria-posinset={pos}
+            aria-expanded={n.folder ? isOpen : undefined} aria-selected={selected || picked} aria-current={selected ? "page" : undefined} onClick={click} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); if (n.folder) openFolder(n.path, { newTab: true, pane }); else openFile(n.path, { newTab: true, pane }) } }}
+            data-tip={n.name} data-tip-side="right" data-tip-trunc data-archived={archived || undefined}
+            className={cn("flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left", compact ? "h-full pr-8" : coarse ? "min-h-11 self-stretch pr-11" : "min-h-11 self-stretch pr-8", archived && "opacity-50")} style={{ paddingLeft: space(pad) }}>
+            {n.folder
+              ? <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--motion-fast)", isOpen && "rotate-90")} strokeWidth={2.5} />
+              : <span className="w-3.5 shrink-0" />}
+            {decor?.before?.length ? <RowNodes nodes={decor.before} />
+              : fileIcons && <Icon className={cn("shrink-0", compact ? "size-[15px]" : "size-[18px]", !tint && "text-muted-foreground")} strokeWidth={2} style={tint ? { color: tint } : undefined} />}
+            <span {...partProps(decor?.name)} className={cn(decor?.name?.className, "min-w-0 flex-1", compact ? "truncate" : "py-2.5 leading-[22px] break-words", faint && "text-muted-foreground")}>{n.name}</span>
+            {!!decor?.after?.length && <RowNodes nodes={decor.after} />}
+            {mark && <span data-file-mark data-tip={mark.tip} className={cn("shrink-0 tabular-nums", compact ? "text-[11px]" : "text-[13px]",
+              mark.tone === "orange" ? "text-ink-(--orange)" : "text-ink-(--red)")}>{mark.text}</span>}
+          </button>
+          {/* Compact, mouse only: an ARIA tree may hold only its items; the keyboard opens this menu with Shift+F10. */}
+          <button type="button" data-no-drag aria-label={`More for ${n.name}`} tabIndex={compact ? -1 : undefined} aria-hidden={compact || undefined}
+            onClick={(e) => on.current.more(e, n)}
+            className={cn("absolute grid cursor-pointer place-items-center text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground",
+              compact ? "right-1 size-5 rounded-[4px] opacity-0 group-hover:opacity-100" : coarse ? "right-0 size-11 rounded-control active:bg-foreground/[0.08]" : "right-1 size-5 rounded-[4px]")}>
+            <Ellipsis className="size-4" strokeWidth={2.25} />
+          </button>
+        </div>
+        </SwipeRow>
+        </HoverPreview>
+      )}
+      <Guides depth={depth} rows={rows} />
+    </li>
+  )
+})
+
+function MoreRow({ item, index, rows }: { item: Item; index: number; rows: Rows }) {
+  const pad = (rows.compact ? 1.5 : 1) + item.depth * (rows.compact ? 3.5 : 4.5)
+  const { hidden, all } = item.more!
+  return (
+    <li role="none" data-tree-more={item.n.path} data-vi={index} className="relative pb-px">
+      <button type="button" data-keyrow onClick={() => setShowingAll(item.n.path, !all)}
+        className={cn("flex w-full cursor-pointer items-center gap-1.5 rounded-[5px] text-left text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
+          rows.compact ? "h-6.5 text-[12px]" : "min-h-11 text-[15px]")} style={{ paddingLeft: space(pad) }}>
+        <span className="w-3.5 shrink-0" />
+        {all ? "Show less" : `Show ${hidden} more`}
+      </button>
+      <Guides depth={item.depth} rows={rows} />
+    </li>
+  )
+}
+
+const TreeRows = memo(function TreeRows({ items, rows, list, active, renaming, revealed, dropOn, dragging, draggingMany, open, focused }: {
+  items: Item[]; rows: Rows; list: RefObject<HTMLUListElement | null>; active?: string; renaming?: string; revealed: string; dropOn?: string
+  dragging: string | null; draggingMany: boolean; open: ReadonlySet<string>; focused: string | null
+}) {
+  const keys = useMemo(() => items.map((it) => it.key), [items])
+  const index = useMemo(() => new Map(keys.map((k, i) => [k, i])), [keys])
+  const keep = useMemo(() => {
+    const k: (string | undefined)[] = [active, renaming, revealed, keys[0], keys[keys.length - 1]]
+    const i = focused === null ? undefined : index.get(focused)
+    if (i !== undefined) {
+      k.push(keys[i], keys[i - 1], keys[i + 1])
+      const p = items[i].n.path
+      k.push(...above(p), ...(items[i].more ? [p] : []))
+    }
+    return k
+  }, [keys, index, items, active, renaming, revealed, focused])
+  const v = useVirtual(list, keys, { estimate: rows.compact ? 27 : 45, keep })
+  useEffect(() => {
+    const el = list.current
+    if (!el) return
+    listOrders.set(el, () => items.filter((it) => !it.more).map((it) => it.key))
+    return () => { listOrders.delete(el) }
+  }, [list, items])
+  let drop: { top: number; height: number } | null = null
+  const d = dropOn ? index.get(dropOn) : undefined
+  if (d !== undefined) {
+    let e = d + 1
+    while (e < items.length && items[e].depth > items[d].depth) e++
+    drop = { top: v.top(d), height: v.top(e) - v.top(d) }
+  }
+  const out = []
+  for (const { index: i, gap } of v.slots) {
+    const it = items[i]
+    if (gap > 0.5) out.push(<li key={`gap:${i}`} role="none" aria-hidden className="pointer-events-none" style={{ height: gap }} />)
+    out.push(it.more ? <MoreRow key={it.key} item={it} index={i} rows={rows} /> : (
+      <TreeRow key={it.key} n={it.n} depth={it.depth} pos={it.pos} size={it.size} index={i} rows={rows} isOpen={it.n.folder && open.has(it.n.path)} selected={!it.n.folder && active === it.n.path}
+        renaming={renaming === it.n.path} dropHere={it.n.folder && dropOn === it.n.path} dragging={dragging} draggingMany={draggingMany} />
+    ))
+  }
+  if (v.rest > 0.5) out.push(<li key="rest" role="none" aria-hidden className="pointer-events-none" style={{ height: v.rest }} />)
+  if (drop) out.push(<li key="drop" role="none" aria-hidden className="pointer-events-none absolute inset-x-0 rounded-[7px] bg-primary/10" style={drop} />)
+  return <>{out}</>
+})
+
+export async function newNote(folder?: string) {
+  const s = getStore()
+  if (!s) return
+  folder ??= newNoteFolder(s, isDesktop() ? currentFile() : "")
+  const f = await createFile(folder, freeName(s.files, folder, "Untitled"))
+  revealInTree(f.path)
+  openNew(f.path)
+}
+

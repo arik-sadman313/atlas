@@ -1,0 +1,200 @@
+// Panes moving (core/panemotion.ts): a split grows in, another tab fades in, a closed pane collapses, panes zoom and
+// float (moved, resized, kept over a reload) and dock back, without remounting. WRITES: throwaway server only.
+//   node web/qa/panemotion.mjs <base url> <vault path> [out dir]
+import { mkdirSync, readdirSync } from "node:fs"
+import { apiAt, command, qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+const { args: [B, VAULT, OUT = "/tmp/panemotion-shots/"], browser, check, watch, done } = await qa(import.meta.url, { motion: true })
+mkdirSync(OUT, { recursive: true })
+const api = apiAt(B)
+const note = readdirSync(`${VAULT}/Notes`).filter((f) => f.endsWith(".md")).sort()[0]
+
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+await ctx.addInitScript(() => { if (!sessionStorage.getItem("qa")) { localStorage.clear(); sessionStorage.setItem("qa", "1") } })
+const page = watch(await ctx.newPage(), { console: true }), ui = app(page)
+const run = async (name) => { await command(page, name, 0); await ui.idle() }
+const frame = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())))
+const cdp = await ctx.newCDPSession(page)
+await cdp.send("Animation.enable")
+const slow = (rate) => cdp.send("Animation.setPlaybackRate", { playbackRate: rate })
+const shot = (name) => page.screenshot({ path: `${OUT}${name}.png` })
+const still = () => page.waitForFunction(() => !document.getAnimations().some((a) => a.id === "pane-motion"), null, { timeout: 10000 })
+/** Mid-move: every pane's motion running and `p` of its way along. */
+const partway = (p = 0.1) => page.waitForFunction((p) => { const as = document.getAnimations().filter((a) => a.id === "pane-motion"); return as.length > 0 && as.every((a) => a.playState === "running" && (a.effect?.getComputedTiming().progress ?? 0) >= p) }, p, { timeout: 10000 })
+/** Every pane on screen: its id, its box (with its move's transform) and whether it floats or is zoomed. */
+const ON = "[data-pane-area] > section[data-pane-frame]:not([data-away])"
+const panes = () => page.evaluate((ON) => [...document.querySelectorAll(ON)].map((s) => {
+  const r = s.getBoundingClientRect()
+  return { id: s.dataset.paneFrame, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), float: "floating" in s.dataset, zoomed: "zoomed" in s.dataset,
+    clip: s.getAnimations().length ? getComputedStyle(s).clipPath : "", opacity: Number(getComputedStyle(s).opacity) }
+}), ON)
+/** The tab on screen, as saved (its zoom). */
+const shown = () => page.evaluate(() => { const l = JSON.parse(localStorage.getItem("vaultite.tabs")); return l.tabs.find((t) => t.id === l.active) })
+const box = () => page.evaluate(() => { const r = document.querySelector("[data-pane-area]").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } })
+// What remounting would lose: a mark on each pane's body element.
+const mark = () => page.evaluate(() => { for (const b of document.querySelectorAll("[data-pane-body]")) b.qaMark = b.dataset.paneBody })
+const marked = () => page.evaluate(() => [...document.querySelectorAll("[data-pane-body]")].every((b) => b.qaMark === b.dataset.paneBody))
+
+await page.goto(`${B}#file/${encodeURIComponent(`Notes/${note}`)}`)
+await page.waitForSelector("[data-tab-strip] [data-tab-id]", { timeout: 30000 })
+await ui.idle()
+const W = await box()
+
+// A split pops in at its place while the pane it splits springs narrower; nothing reflows per frame.
+await slow(0.1)
+await command(page, "Split right", 0)
+await partway()
+const mid = await panes()
+await shot("split-mid")
+// (the split pane's bar comes in: what it shows slides down under it, not jumping)
+const slid = await page.evaluate((ON) => { const b = document.querySelector(`${ON} > [data-pane-body]`); return { top: b.offsetTop, drawn: b.getBoundingClientRect().top - b.parentElement.getBoundingClientRect().top } }, ON)
+check("split: mid-move the first pane's page slides down under its new bar", slid.top > 0 && slid.drawn < slid.top - 2, slid)
+check("split: mid-move the new pane pops in at its place (a little small and clear), the old one springing narrower", mid.length === 2
+  && mid[1].opacity < 0.95 && mid[1].w < W.w / 2 - 4 && mid[1].x > W.x + W.w / 2 && /inset/.test(mid[0].clip), mid)
+await slow(1); await still()
+const after = await panes()
+const left = after[0]?.id
+check("split: then two halves", after.length === 2 && Math.abs(after[0].w - after[1].w) < 12 && after[1].x > after[0].x, after)
+await mark()
+
+// Switching tabs: the other tab's panes fade in at their places, nothing sliding; back to the split, both halves do.
+await page.locator("[data-tab-strip] button[aria-label=\"New tab\"]").first().click(); await still()
+const chips = page.locator("[data-tab-strip] [data-tab-id]")
+await slow(0.1)
+await chips.first().click()
+await partway()
+const fading = await panes()
+check("switch: back to the split, both panes fade in at their places", fading.length === 2 && fading.every((p) => p.opacity < 0.95 && (!p.clip || p.clip === "none")) && Math.abs(fading[0].w - fading[1].w) < 12, fading)
+await slow(1); await still()
+check("switch: then fully there", (await panes()).every((p) => p.opacity === 1))
+await chips.last().click(); await still()
+await run("Close current tab"); await still()
+check("switch: the split is back on screen, kept", (await panes()).length === 2 && await marked(), await panes())
+
+// Zoom: the focused (new, right) pane fills the workspace, a badge says so and unzooms.
+await run("Zoom pane"); await still()
+let ps = await panes(), z = ps.find((p) => p.zoomed)
+check("zoom: the focused pane fills the workspace, the other still drawn under it", !!z && Math.abs(z.w - W.w) < 2 && Math.abs(z.x - W.x) < 2 && ps.length === 2 && (await shown()).zoom === z.id, ps)
+check("zoom: its bar shows it, the others are out of reach", await page.locator(`section[data-pane-frame="${z?.id}"] [data-pane-unzoom]`).isVisible()
+  && await page.evaluate((ON) => [...document.querySelectorAll(`${ON}:not([data-zoomed])`)].every((s) => s.inert), ON))
+await shot("zoomed")
+await page.locator("[data-pane-unzoom]").click(); await still()
+ps = await panes()
+check("zoom: the badge's click puts it back", !ps.some((p) => p.zoomed) && Math.abs(ps[0].w - ps[1].w) < 12 && !(await shown()).zoom, ps)
+// Interrupted: zoomed and back again mid-move, each move starting where the last one was.
+for (let i = 0; i < 5; i++) { await page.keyboard.press("ControlOrMeta+Shift+Enter"); await frame() }
+const midway = await panes()
+await still()
+ps = await panes()
+check("zoom: ⌘⇧↩ zooms; pressed again mid-move it turns back from where it is, and settles", ps.some((p) => p.zoomed) && Math.abs(ps.find((p) => p.zoomed).w - W.w) < 2
+  && midway.some((p) => p.zoomed && p.clip) && !(await page.locator("[data-moving]").count()), [midway, ps])
+await page.locator(`${ON}:not([data-zoomed])`).first().evaluate((s) => s.inert = false)
+await page.evaluate((ON) => document.querySelector(`${ON}:not([data-zoomed]) [data-pane-body]`).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })), ON)
+await still()
+check("zoom: another pane focused, it's back", !(await panes()).some((p) => p.zoomed) && !(await shown()).zoom)
+
+// Float: the focused pane lifts into a card over the workspace; the other fills the gap.
+await run("Float pane"); await still()
+ps = await panes()
+const card = ps.find((p) => p.float), tiled = ps.find((p) => !p.float)
+check("float: a card inside the workspace, the other pane full width", !!card && card.w < W.w * 0.7 && card.x >= W.x && card.x + card.w <= W.x + W.w + 1 && Math.abs(tiled.w - W.w) < 2, ps)
+check("float: nothing remounted", await marked())
+await shot("floating")
+// Moved by its bar's empty part, kept inside the workspace.
+const bar = await page.locator(`[data-pane-bar="${card.id}"]`).boundingBox()
+await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2); await page.mouse.down()
+await page.mouse.move(bar.x + bar.width / 2 - 100, bar.y + 140, { steps: 6 }); await page.mouse.move(bar.x - 2000, bar.y + 140, { steps: 6 }); await page.mouse.up()
+let moved = (await panes()).find((p) => p.id === card.id)
+check("float: dragged by its bar, it moves, stopping at the workspace's edge", Math.abs(moved.x - W.x) < 2 && moved.y > card.y + 100, moved)
+// Resized by its right edge.
+await page.mouse.move(moved.x + moved.w + 2, moved.y + moved.h / 2); await page.mouse.down()
+await page.mouse.move(moved.x + moved.w + 122, moved.y + moved.h / 2, { steps: 5 }); await page.mouse.up()
+const wider = (await panes()).find((p) => p.id === card.id)
+check("float: its edge resizes it", Math.abs(wider.w - moved.w - 120) < 4 && wider.x === moved.x, [moved, wider])
+// Kept over a reload.
+await page.reload(); await page.waitForSelector("section[data-floating]", { timeout: 30000 }); await ui.idle()
+const back = (await panes()).find((p) => p.float)
+check("float: kept over a reload", !!back && Math.abs(back.x - wider.x) < 2 && Math.abs(back.w - wider.w) < 2 && Math.abs(back.y - wider.y) < 2, [wider, back])
+await mark()
+// Docked by its button, back where it came from.
+await page.locator(`section[data-pane-frame="${back.id}"] [data-pane-dock]`).click(); await still()
+ps = await panes()
+check("dock: back in its place, halves again, nothing remounted", !ps.some((p) => p.float) && ps.length === 2 && Math.abs(ps[0].w - ps[1].w) < 12
+  && back.id === left && ps.find((p) => p.id === left).x < ps.find((p) => p.id !== left).x && await marked(), ps)
+
+// ⌥⌘↩ floats it (centred on the right) and, unmoved, docks it back where it was.
+const halves = await panes()
+await page.keyboard.press("ControlOrMeta+Alt+Enter"); await still()
+const right = (await panes()).find((p) => p.float)
+await page.keyboard.press("ControlOrMeta+Alt+Enter"); await still()
+check("float: ⌥⌘↩ floats it centred on the right; again, unmoved, it docks where it was", !!right && right.x + right.w / 2 > W.x + W.w / 2
+  && JSON.stringify(await panes()) === JSON.stringify(halves), [right, halves, await panes()])
+
+// Closing a pane: a still copy of it fades where it was while its neighbour takes the room.
+await slow(0.1)
+await command(page, "Close pane", 0)
+await partway()
+const gone = await page.evaluate(() => ({ copies: document.querySelectorAll("[data-pane-gone]").length, panes: document.querySelectorAll("[data-pane-area] > section[data-pane-frame]:not([data-away])").length,
+  frames: document.querySelectorAll("[data-pane-gone] iframe").length, ids: document.querySelectorAll("[data-pane-gone] [id]").length }))
+await shot("closing-mid")
+check("close: a copy of it fades out, a picture only (no ids, no frames), one pane left", gone.copies === 1 && gone.panes === 1 && !gone.frames && !gone.ids, gone)
+await slow(1); await still(); await ui.idle()
+check("close: then gone, the other pane full width", !(await page.locator("[data-pane-gone]").count()) && Math.abs((await panes())[0].w - W.w) < 2)
+
+// Panes as cards (appearance `paneCards`, from the palette): inset by a gap, rounded; the divider is the gap, still dragged.
+await run("Panes as cards")
+const gapOf = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-pane-area]")).getPropertyValue("--pane-gap")))
+const G = await gapOf()
+let cps = await panes()
+check("cards: on from the palette, the one pane inset by the gap on every side, rounded", G >= 4 && cps.length === 1 && Math.abs(cps[0].x - W.x - G) < 1.5
+  && Math.abs(cps[0].w - (W.w - 2 * G)) < 1.5 && Math.abs(cps[0].h - (W.h - 2 * G)) < 1.5
+  && await page.evaluate(() => getComputedStyle(document.querySelector("[data-pane-area] > section[data-pane-frame]:not([data-away])")).borderRadius) === "10px", { G, cps, W })
+await run("Split right"); await still()
+cps = await panes()
+const div = await page.locator("[data-pane-area] > [role=separator]").first().boundingBox()
+const between = cps.length === 2 ? cps[1].x - (cps[0].x + cps[0].w) : -1
+check("cards: split, a gap between the two as wide as the one around them, the divider in it", Math.abs(between - G) < 1.5
+  && Math.abs(div.x + div.width / 2 - (cps[0].x + cps[0].w + G / 2)) < 1.5 && Math.abs(cps[1].x + cps[1].w - (W.x + W.w - G)) < 1.5, { cps, div, G })
+await shot("cards-split")
+await page.mouse.move(div.x + div.width / 2, div.y + div.height / 2); await page.mouse.down()
+await page.mouse.move(div.x + div.width / 2 + 100, div.y + div.height / 2, { steps: 6 }); await page.mouse.up(); await still()
+const dragged = await panes()
+check("cards: dragging the gap moves it with the pointer", Math.abs(dragged[0].w - cps[0].w - 100) < 3 && Math.abs(dragged[1].x - (dragged[0].x + dragged[0].w) - G) < 1.5, [cps, dragged])
+await run("Zoom pane"); await still()
+const cz = (await panes()).find((p) => p.zoomed)
+check("cards: zoomed, a card filling the workspace less the gap", !!cz && Math.abs(cz.w - (W.w - 2 * G)) < 1.5 && Math.abs(cz.x - W.x - G) < 1.5, cz)
+await page.locator("[data-pane-unzoom]").click(); await still()
+await run("Close pane"); await still()
+await run("Panes as cards")
+cps = await panes()
+check("cards: off again, flat panes full width", (await gapOf()) === 0 && cps.length === 1 && Math.abs(cps[0].w - W.w) < 2, cps)
+
+// Without the tab bar, a pinned page opens as another of the pane's tabs: what it shows fades in, its bar stays put.
+const look = await api("GET", "config/appearance")
+await ui.sees(".vaultite/appearance.json", () => api("PUT", "config/appearance", { ...look, tabBar: false, paneTabBars: true }))
+await run("Split right"); await still()
+const ON1 = `${ON}[data-focused]`
+// (one open in no tab: one that is shows where it is)
+const pinKey = await page.evaluate(() => { const open = localStorage.getItem("vaultite.tabs") ?? ""; return [...document.querySelectorAll("[data-pin]")].map((e) => e.dataset.pin).find((k) => !open.includes(JSON.stringify(k).slice(1, -1))) })
+const before = await page.evaluate((s) => document.querySelector(s)?.dataset.paneFrame, ON1)
+await slow(0.1)
+await page.locator(`[data-pin="${pinKey}"]`).first().click()
+await partway()
+const swap = await page.evaluate((s) => { const f = document.querySelector(s); return { id: f.dataset.paneFrame, body: Number(getComputedStyle(f.querySelector(":scope > [data-pane-body]")).opacity), pane: Number(getComputedStyle(f).opacity) } }, ON1)
+check("open here: the pane's new tab fades in what it shows, the pane itself doesn't", swap.id !== before && swap.body < 0.95 && swap.pane === 1, { pinKey, before, ...swap })
+await slow(1); await still()
+await run("Close pane"); await still()
+await ui.sees(".vaultite/appearance.json", () => api("PUT", "config/appearance", { ...look, tabBar: look.tabBar ?? true }))
+
+// With animations off, a split is there at once.
+await page.evaluate(() => fetch("/api/prefs", { method: "GET" }).catch(() => {}))
+await page.evaluate(() => { document.documentElement.dataset.animation = "off" })
+await page.emulateMedia({ reducedMotion: "reduce" })
+await command(page, "Split right", 0)
+await until(async () => (await panes()).length === 2)
+check("reduced motion: a split moves nothing", await page.evaluate(() => !document.getAnimations().some((a) => a.id === "pane-motion")))
+await page.locator("[data-tab-strip] button[aria-label=\"New tab\"]").first().click(); await ui.idle()
+await page.locator("[data-tab-strip] [data-tab-id]").first().click()
+await until(async () => (await panes()).length === 2)
+check("reduced motion: switching tabs fades nothing", await page.evaluate(() => !document.getAnimations().some((a) => a.id === "pane-motion")))
+await done()

@@ -1,0 +1,307 @@
+import { nativeImage, type MenuItemConstructorOptions, type NativeImage } from "electron"
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const ICONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "menu-icons")
+const MAC = process.platform === "darwin"
+// (Electron's Cmd is the Super key on Linux)
+const MOD = MAC ? "Cmd" : "Ctrl"
+
+/** What a vault window tells the menu (web/src/core/desktop.ts). */
+export type MenuSnapshot = {
+  /** Its commands now, named as they are now ("Hide left sidebar"): keys in effect (`custom`: set in hotkeys.json, so
+   *  none means none), `on`: available now, `checked`: a setting's state (web/src/core/switches.ts). */
+  commands: { id: string; name: string; keys: string[]; custom?: boolean; on: boolean; checked?: boolean }[]
+  /** The current workspace's pinned pages and its files opened lately (vault paths, with a title). */
+  pinned: { path: string; title: string }[]
+  recent: { path: string; title: string }[]
+}
+
+export type MenuContext = {
+  snap: MenuSnapshot | null
+  run: (id: string) => MenuItemConstructorOptions["click"]
+  go: (path: string) => void
+  update: MenuItemConstructorOptions | null
+  vaults: MenuItemConstructorOptions[]
+  manageVaults: () => void
+  setup: () => void
+  pickOutside: () => void
+  openDoc: (name: string) => void
+  issues: string | null
+  openExternal: (url: string) => void
+  showLogs: () => void
+  maximize: () => void
+  onTop: MenuItemConstructorOptions["click"]
+  sandbox?: () => void
+}
+
+const icons = new Map<string, NativeImage | null>()
+export function icon(name: string | undefined) {
+  // Template images are a Mac's: GTK menus draw them black, unseen on a dark theme, and don't tint them.
+  if (!name || !MAC) return undefined
+  if (!icons.has(name)) {
+    const file = path.join(ICONS, `${name}.png`)
+    let img: NativeImage | null = null
+    if (fs.existsSync(file)) {
+      img = nativeImage.createFromPath(file) // (picks up <name>@2x.png)
+      img.setTemplateImage(true)
+      if (img.isEmpty()) img = null
+    }
+    icons.set(name, img)
+  }
+  return icons.get(name) ?? undefined
+}
+
+const KEY: Record<string, string> = {
+  ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Enter: "Return", Escape: "Esc", Space: "Space",
+  Backspace: "Backspace", Delete: "Delete", Tab: "Tab", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+  "+": "Plus",
+}
+function accelerator(keys: string): string | null {
+  const k = keys.trim()
+  if (!k || /\s/.test(k)) return null
+  const parts = k.split(/\+(?!$)/)
+  const key = parts.pop()!
+  const mods = new Set(parts.map((m) => m.toLowerCase()))
+  if (![...mods].some((m) => /^(mod|cmd|command|meta|ctrl|control|alt|option|opt)$/.test(m))) return null
+  const name = KEY[key] ?? (key.length === 1 ? key.toUpperCase() : /^F\d{1,2}$/.test(key) ? key : null)
+  if (!name) return null
+  const out: string[] = []
+  if (mods.has("mod") || mods.has("cmd") || mods.has("command") || mods.has("meta")) out.push(MOD)
+  if ((mods.has("ctrl") || mods.has("control")) && !out.includes("Ctrl")) out.push("Ctrl")
+  if (mods.has("alt") || mods.has("option") || mods.has("opt")) out.push("Alt")
+  if (mods.has("shift")) out.push("Shift")
+  return [...out, name].join("+")
+}
+const SYSTEM_KEYS = new Set(MAC
+  ? ["Cmd+Q", "Cmd+H", "Cmd+Alt+H", "Cmd+M", "Cmd+Z", "Cmd+Shift+Z", "Cmd+X", "Cmd+C", "Cmd+V", "Cmd+Alt+Shift+V", "Cmd+A",
+    "Cmd+Plus", "Cmd+Ctrl+F", "Cmd+R", "Cmd+Shift+R", "Cmd+Alt+I", "Cmd+Shift+W"]
+  : ["Ctrl+Q", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y", "Ctrl+X", "Ctrl+C", "Ctrl+V", "Ctrl+Shift+V", "Ctrl+A",
+    "Ctrl+Plus", "F11", "Ctrl+R", "Ctrl+Shift+R", "Ctrl+Shift+I", "Ctrl+Shift+W"])
+
+export function menuTemplate(ctx: MenuContext): MenuItemConstructorOptions[] {
+  const { snap } = ctx
+  const byId = new Map((snap?.commands ?? []).map((c) => [c.id, c]))
+  const used = new Set(SYSTEM_KEYS)
+
+  const cmd = (id: string, label: string, ico?: string, o: { key?: string; always?: boolean; named?: boolean } = {}): MenuItemConstructorOptions | null => {
+    const c = byId.get(id)
+    if (!c && !(o.always && CORE.has(id))) return null
+    const keys = c && (c.custom || c.keys.length) ? c.keys : o.key ? [o.key] : []
+    let accel: string | undefined
+    for (const k of keys) {
+      const a = accelerator(k)
+      if (a && !used.has(a)) { accel = a; used.add(a); break }
+    }
+    const text = o.named && c ? c.name : label
+    if (c?.checked !== undefined) return { label: text, type: "checkbox", checked: c.checked, accelerator: accel, enabled: c.on, click: ctx.run(id) }
+    return { label: text, icon: icon(ico), accelerator: accel, enabled: !!c?.on, click: ctx.run(id) }
+  }
+  const all = (re: RegExp, ico?: string) => (snap?.commands ?? []).filter((c) => re.test(c.id)).map((c) => cmd(c.id, c.name, ico))
+  const radio = (id: string, label: string) => {
+    const c = byId.get(id)
+    return c ? { label, type: "radio" as const, checked: !c.on, click: ctx.run(id) } : null
+  }
+  const sep: MenuItemConstructorOptions = { type: "separator" }
+  const items = (...xs: (MenuItemConstructorOptions | null | false | undefined)[]) => {
+    const out: MenuItemConstructorOptions[] = []
+    for (const x of xs) {
+      if (!x) continue
+      if (x.type === "separator" && (!out.length || out[out.length - 1].type === "separator")) continue
+      out.push(x)
+    }
+    while (out.length && out[out.length - 1].type === "separator") out.pop()
+    return out
+  }
+  const sub = (label: string, ico: string | undefined, xs: MenuItemConstructorOptions[]) => (xs.length ? { label, icon: icon(ico), submenu: xs } : null)
+  const files = (list: { path: string; title: string }[]) =>
+    list.map((f) => ({ label: f.title, sublabel: f.path, icon: icon("file-text"), click: () => ctx.go(f.path) }))
+
+  const settings = () => [
+    cmd("page:settings", "Settings…", "settings", { key: "Mod+,", always: true }),
+    cmd("hotkeys:open", "Hotkeys", "keyboard", { always: true }),
+    cmd("page:setup", "Plugins", "puzzle", { always: true }),
+    { label: "Set up Vaultite", icon: icon("circle-play"), click: ctx.setup },
+  ]
+
+  const bar: (MenuItemConstructorOptions | false)[] = [
+    MAC && { role: "appMenu", submenu: items(
+      { role: "about" },
+      ctx.update && { ...ctx.update, icon: icon("refresh-cw") },
+      sep,
+      ...settings(),
+      sep, { role: "services" }, sep, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, sep, { role: "quit" },
+    ) },
+    { label: "File", submenu: items(
+      cmd("file:new", "New note", "file-plus", { key: "Mod+N", always: true }),
+      cmd("templates:new", "New note from template", "file-stack"),
+      cmd("canvas:new", "New canvas", "layout-dashboard"),
+      cmd("query:new-base", "New base", "table"),
+      cmd("tab:new", "New tab", "square-plus", { key: "Mod+T", always: true }),
+      cmd("tab:reopen", "Reopen closed tab", "rotate-ccw", { key: "Mod+Shift+T", always: true }),
+      sep,
+      cmd("terminal:open", "New terminal", "square-terminal"),
+      cmd("terminal:claude", "New Claude Code session", "bot"),
+      sep,
+      cmd("switcher:open", "Open quick switcher", "search", { key: "Mod+O", always: true }),
+      { label: "Open file from outside the vault…", icon: icon("folder-open"), click: ctx.pickOutside },
+      { label: "Open vault", icon: icon("stone"), submenu: ctx.vaults.length ? ctx.vaults : [{ label: "No vaults yet", enabled: false }] },
+      { label: "Manage vaults", icon: icon("library"), click: ctx.manageVaults },
+      sep,
+      cmd("file:rename", "Rename", "pencil", { always: true }),
+      cmd("file:duplicate", "Duplicate", "copy", { always: true }),
+      cmd("file:move", "Move to folder…", "folder-input"),
+      cmd("file:pin", "Pin current file to the sidebar", "pin", { named: true }),
+      cmd("file:reveal-finder", MAC ? "Reveal in Finder" : "Show in folder", "folder-search", { always: true }),
+      cmd("file:reveal", "Reveal in file tree", "list-tree"),
+      cmd("history:open", "Version history", "history"),
+      sep,
+      cmd("export-pdf:pdf", "Export to PDF…", "file-down"),
+      cmd("export-pdf:print", "Print…", "printer"),
+      sep,
+      cmd("tab:close", "Close tab", "x", { key: "Mod+W", always: true }),
+      cmd("tab:close-others", "Close other tabs", undefined, { always: true }),
+      cmd("split:close", "Close split", "square-x", { key: "Mod+Alt+Shift+W", always: true }),
+      { label: "Close window", accelerator: `Shift+${MOD}+W`, role: "close" },
+      !MAC && sep, ...(MAC ? [] : settings()),
+      !MAC && sep, !MAC && { role: "quit", accelerator: "Ctrl+Q" },
+    ) },
+    { label: "Edit", submenu: items(
+      { role: "undo" }, { role: "redo" }, sep,
+      { role: "cut" }, { role: "copy" }, { role: "paste" },
+      { role: "pasteAndMatchStyle", label: "Paste as plain text" },
+      { role: "delete" }, { role: "selectAll" },
+      sep,
+      cmd("find:open", "Find", "search", { always: true }),
+      cmd("find:replace", "Find and replace", "replace", { always: true }),
+      cmd("search:open-tab", "Search the vault", "text-search"),
+      sep,
+      cmd("templates:insert", "Insert template", "file-stack"),
+      cmd("file:copy-link", "Copy link to note", "link", { always: true }),
+      cmd("file:copy-path", "Copy file path", "clipboard-copy", { always: true }),
+      sub("Folding", "chevrons-down-up", items(
+        cmd("folding:toggle", "Fold or unfold line"),
+        cmd("folding:fold-all", "Fold all"),
+        cmd("folding:unfold-all", "Unfold all"),
+      )),
+      sub("Origin", "bot", items(
+        cmd("provenance:choose", "Label…"),
+        cmd("provenance:human", "Written by you"),
+        cmd("provenance:reviewed", "Reviewed"),
+        cmd("provenance:mixed", "Written by you and AI"),
+        cmd("provenance:ai", "Written by AI"),
+        cmd("provenance:clear", "Remove the label"),
+      )),
+      sep,
+      MAC && { label: "Speech", submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }] },
+    ) },
+    { label: "View", submenu: items(
+      cmd("palette:open", "Command palette", "command", { key: "Mod+P", always: true }),
+      sep,
+      cmd("sidebar:toggle", "Show left sidebar", "panel-left", { key: "Mod+\\", always: true, named: true }),
+      cmd("sidebar:toggle-right", "Show right sidebar", "panel-right", { always: true, named: true }),
+      cmd("view:toggle", "Switch to reading view", "book-open", { key: "Mod+E", always: true, named: true }),
+      cmd("setting:line-numbers", "Line numbers", undefined, { always: true }),
+      cmd("setting:tab-bar", "Tab bar"),
+      sep,
+      cmd("graph:open", "Graph view", "waypoints"),
+      cmd("graph:local", "Local graph", "git-fork"),
+      cmd("slides:start", "Start presentation", "presentation"),
+      sep,
+      cmd("split:right", "Split right", "columns-2", { always: true }),
+      cmd("split:down", "Split down", "rows-2", { always: true }),
+      sep,
+      sub("Appearance", "palette", items(
+        radio("theme:light", "Light"), radio("theme:dark", "Dark"), radio("theme:system", "Match the system"),
+        sep,
+        radio("scheme:default", "Default colours"), radio("scheme:gruvbox", "Gruvbox"),
+        cmd("scheme:choose", "More colour schemes…"),
+        sep,
+        radio("density:compact", "Compact"), radio("density:comfortable", "Comfortable"),
+        sep,
+        cmd("setting:file-icons", "File icons"),
+        cmd("setting:dim-panes", "Dim inactive panes"),
+        cmd("setting:panel-dividers", "Lines between sidebar panels"),
+      )),
+      sub("Text size", "type", items(...all(/^text-size:/), sep, cmd("setting:quick-text-size", "Pinch to resize text"))),
+      sub("Interface size", "app-window", items(
+        cmd("interface-size:increase", "Bigger", "zoom-in", { key: "Mod+Alt+=", always: true }),
+        cmd("interface-size:decrease", "Smaller", "zoom-out", { key: "Mod+Alt+-", always: true }),
+        cmd("interface-size:reset", "Actual size", "scan", { key: "Mod+Alt+0", always: true }),
+      )),
+      sep,
+      cmd("zoom:reset", "Actual size", "scan", { key: "Mod+0", always: true }),
+      cmd("zoom:in", "Zoom in", "zoom-in", { key: "Mod+=", always: true }),
+      { label: "Zoom in", accelerator: `${MOD}+Plus`, click: ctx.run("zoom:in"), visible: false, acceleratorWorksWhenHidden: true },
+      { label: "Zoom in", accelerator: `${MOD}+numadd`, click: ctx.run("zoom:in"), visible: false, acceleratorWorksWhenHidden: true },
+      cmd("zoom:out", "Zoom out", "zoom-out", { key: "Mod+-", always: true }),
+      { label: "Zoom out", accelerator: `${MOD}+numsub`, click: ctx.run("zoom:out"), visible: false, acceleratorWorksWhenHidden: true },
+      sep,
+      { role: "togglefullscreen" },
+      { label: "Developer", icon: icon("code"), submenu: items(
+        { role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" },
+        sep,
+        cmd("vault:reload", "Reload the vault", "refresh-cw", { always: true }),
+      ) },
+    ) },
+    { label: "Go", submenu: items(
+      cmd("nav:back", "Back", "arrow-left", { always: true }),
+      cmd("nav:forward", "Forward", "arrow-right", { always: true }),
+      sep,
+      cmd("daily-notes:today", "Today's daily note", "calendar"),
+      cmd("inbox:open", "Inbox", "inbox"),
+      cmd("activity:open", "Activity", "activity"),
+      cmd("web:open", "Web page…", "globe"),
+      sep,
+      sub("Pinned", "pin", files(snap?.pinned ?? [])),
+      sub("Recent files", "clock", files(snap?.recent ?? [])),
+    ) },
+    { label: "Window", role: "window", submenu: items(
+      { role: "minimize" }, MAC ? { role: "zoom" } : { label: "Maximize", click: ctx.maximize },
+      { id: "on-top", label: "Keep window on top", type: "checkbox", click: ctx.onTop },
+      sep,
+      cmd("tab:next", "Next tab", "chevron-right", { key: "Ctrl+Tab", always: true }),
+      cmd("tab:previous", "Previous tab", "chevron-left", { key: "Ctrl+Shift+Tab", always: true }),
+      cmd("tab:search", "Search tabs…", "search", { key: "Mod+Shift+A", always: true }),
+      cmd("tab:toggle-pin", "Pin tab", "pin", { always: true, named: true }),
+      cmd("pane:to-tab", "Move pane to new tab"),
+      sub("Panes", "columns-2", items(
+        cmd("pane:focus-next", "Focus next pane"), cmd("pane:focus-previous", "Focus previous pane"), cmd("pane:focus-last", "Focus last pane"),
+        sep,
+        cmd("split:focus-left", "Focus pane to the left"), cmd("split:focus-right", "Focus pane to the right"),
+        cmd("split:focus-top", "Focus pane above"), cmd("split:focus-bottom", "Focus pane below"),
+        sep,
+        cmd("pane:move-left", "Move pane left"), cmd("pane:move-right", "Move pane right"),
+        cmd("pane:move-up", "Move pane up"), cmd("pane:move-down", "Move pane down"),
+        sep,
+        cmd("pane:even-out", "Even out panes"),
+      )),
+      sep,
+      cmd("workspace:next", "Next workspace", "layers"),
+      cmd("workspace:previous", "Previous workspace", "layers"),
+      MAC && sep,
+      MAC && { role: "front" },
+    ) },
+    { label: "Help", role: "help", submenu: items(
+      !MAC && { role: "about" },
+      !MAC && ctx.update,
+      !MAC && sep,
+      { label: "Vaultite help", icon: icon("circle-help"), click: () => ctx.openDoc("README.md") },
+      { label: "Release notes", icon: icon("scroll-text"), click: () => ctx.openDoc("CHANGELOG.md") },
+      cmd("hotkeys:open", "Keyboard shortcuts", "keyboard", { always: true }),
+      !!ctx.sandbox && { label: "Open the playground", icon: icon("flask-conical"), click: ctx.sandbox! },
+      sep,
+      !!ctx.issues && { label: "Report an issue", icon: icon("bug"), click: () => ctx.openExternal(ctx.issues!) },
+      { label: "Show logs", icon: icon("file-terminal"), click: ctx.showLogs },
+    ) },
+  ]
+  return bar.filter((x): x is MenuItemConstructorOptions => !!x)
+}
+
+const CORE = new Set(["page:settings", "page:setup", "hotkeys:open", "file:new", "tab:new", "switcher:open",
+  "file:rename", "file:duplicate", "file:reveal-finder", "tab:close", "tab:close-others", "split:close", "tab:reopen", "find:open", "find:replace",
+  "file:copy-link", "file:copy-path", "palette:open", "sidebar:toggle", "sidebar:toggle-right", "view:toggle",
+  "setting:line-numbers", "split:right", "split:down", "vault:reload", "nav:back", "nav:forward", "tab:next", "tab:previous",
+  "tab:toggle-pin", "tab:search", "zoom:in", "zoom:out", "zoom:reset", "interface-size:increase", "interface-size:decrease",
+  "interface-size:reset"])

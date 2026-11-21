@@ -1,0 +1,32 @@
+## Coming from another Markdown app
+A vault another Markdown app made (an Obsidian vault) opens as it is (both apps can share a folder; the app never writes
+`.obsidian/`). What carries over:
+- Markdown: wikilinks and Markdown links to notes (`[text](Some%20Note.md)`), heading and block links and embeds,
+  `#tags` and `#nested/tags` (with frontmatter `tags`), `==highlights==`, `%%comments%%`, callouts, footnotes, math,
+  mermaid, `![[image.png|300]]`, and `[[file.pdf]]` / `![[file.pdf]]` finding attachments by name anywhere.
+- Sidebar: Outline and Tags panels (shown from the sidebar's right-click menu, or as tabs), next to Files and Links
+  (backlinks).
+- Bases: `.base` files open as their views, embedded or inline (`vau docs query`).
+- `.obsidian/app.json`: where new notes and pasted images go, excluded files, and Markdown links; `daily-notes.json`
+  and `templates.json`: daily notes' folder, name format and template, the templates folder and formats;
+  `.obsidian/types.json`: property types (`vau docs other-apps`, `vau docs properties`). They're the defaults of the
+  app's own settings: set one here and it wins.
+- Themes and CSS snippets, copied into `.vaultite/themes/` and `.vaultite/snippets/` (`vau docs app`).
+- Its notes stay plain notes: a file is a person, a log, a book... by its `type:` only, so a `People/` folder brought
+  over is still notes until `vau type People --apply` gives its files `type: person` (`vau type` lists such folders).
+  A plugin's mark on its files (`kanban-plugin: board`) types them when the plugin standing in for it says so
+  (its manifest's `marks`).
+- Its plugins: offered once when the vault opens. Each runs as it is (the original, through a plugin that
+  runs them: `replaces: {"obsidian": ["*"]}`) or with what stands in for it here; `vau other-apps plugins`, `vau
+  other-apps use <id> original|<plugin>`, `vau other-apps run-all`, or the sheet of Vaults from other apps. Never both:
+  turning one on turns the other off. More are in Plugins ▸ Get, under that app's source.
+- Renames and moves update links to the file: wikilinks, embeds and Markdown links (relative, from the vault's top or
+  by name alone, as Obsidian's shortest path writes them).
+- `.obsidian/hotkeys.json`: the keys of the commands the app has too (its core ones matched by id, its plugins' kept
+  under their own ids), under `.vaultite/hotkeys.json`'s; Settings ▸ Hotkeys marks them Obsidian's keys.
+- Citations: Obsidian's Citations, Zotero Integration, ZotLit and Pandoc Reference List users get the References plugin
+  (the Research layout turns it on): the same Pandoc citations (`[@key, p. 33]`), the same Better BibTeX export or the
+  Zotero app itself as the library, `bibliography:` and `csl:` in a note's frontmatter, and literature notes as notes
+  with `type: reference` and a `citekey` (`vau docs references`).
+- Not read: `workspace.json` (a layout, not settings).
+- Obsidian is a trademark of Dynalist Inc.; Vaultite is not affiliated with or endorsed by it.

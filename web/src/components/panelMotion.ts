@@ -1,0 +1,225 @@
+import { flushSync } from "react-dom"
+import { timing } from "@/core/animation"
+import { getDrag, onDrag, type Drag } from "@/core/drag"
+import { PANES } from "@/core/drop"
+
+const SHADOW = "0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent), 0 14px 36px rgb(0 0 0 / 0.2), 0 3px 8px rgb(0 0 0 / 0.1)"
+const FLAT = "0 0 0 1px transparent, 0 0 0 rgb(0 0 0 / 0), 0 0 0 rgb(0 0 0 / 0)"
+const LIFT = 1.02
+const FOLD = "panel-fold"
+
+const panelEl = (key: string, root: ParentNode = document) =>
+  root.querySelector<HTMLElement>(`${root === document ? "[data-sidebar-body]" : ":scope"} > [data-panel="${CSS.escape(key)}"]`)
+
+function copyOf(el: HTMLElement) {
+  const c = el.cloneNode(true)
+  c.dataset.panel = ""
+  c.removeAttribute("data-slide")
+  c.classList.remove("invisible")
+  c.style.transform = ""; c.style.opacity = ""; c.style.visibility = ""
+  for (const e of c.querySelectorAll("[id], [data-keyrow], [data-tip]")) { e.removeAttribute("id"); e.removeAttribute("data-keyrow"); e.removeAttribute("data-tip") }
+  return c
+}
+function entered(el: HTMLElement) {
+  for (const a of el.getAnimations({ subtree: true })) {
+    if (a instanceof CSSAnimation && a.timeline === document.timeline && Number.isFinite(a.effect?.getComputedTiming().endTime)) a.finish()
+  }
+}
+
+function likeIt(c: HTMLElement, el: HTMLElement) {
+  entered(c)
+  const from = [el, ...el.querySelectorAll("*")], to = [c, ...c.querySelectorAll("*")]
+  if (from.length !== to.length) return
+  from.forEach((f, i) => {
+    const t = to[i]
+    if (f.scrollTop || f.scrollLeft) { t.scrollTop = f.scrollTop; t.scrollLeft = f.scrollLeft }
+    if (f instanceof HTMLCanvasElement && t instanceof HTMLCanvasElement) try { t.getContext("2d")?.drawImage(f, 0, 0) } catch {}
+  })
+}
+
+type Lift = { key: string; el: HTMLElement; ghost: HTMLElement; card: HTMLElement; clip: HTMLElement; tag: HTMLElement; dx: number; dy: number; h: number
+  over: string | null; to?: DOMRect; fading?: boolean; cancelled?: boolean }
+let lift: Lift | null = null
+let settling: Lift | null = null
+
+export const liftedHeight = () => lift?.h
+
+function start(d: Drag) {
+  finish()
+  const key = d.item.panel!, el = panelEl(key), body = el?.parentElement
+  if (!el || !body) return
+  const r = el.getBoundingClientRect(), b = body.getBoundingClientRect()
+  const top = Math.max(r.top, b.top), seen = Math.min(r.bottom, b.bottom) - top
+  const h = Math.round(Math.min(seen, Math.max(160, innerHeight * 0.4)))
+  const ghost = document.createElement("div")
+  ghost.inert = true
+  ghost.setAttribute("aria-hidden", "true")
+  ghost.dataset.panelGhost = key
+  ghost.className = "pointer-events-none fixed top-0 left-0 z-50 will-change-transform"
+  ghost.style.width = `${r.width}px`
+  const card = document.createElement("div")
+  card.className = "rounded-[14px] bg-sidebar/85 text-foreground backdrop-blur-md transition-opacity duration-(--motion-fast) ease-(--ease-out)"
+  card.style.boxShadow = SHADOW
+  const clip = document.createElement("div")
+  clip.dataset.scroll = body.dataset.scroll
+  clip.className = "overflow-hidden rounded-[14px]"
+  clip.style.height = `${h}px`
+  if (seen > h + 1) clip.style.maskImage = "linear-gradient(to bottom, #000 calc(100% - 48px), transparent)"
+  const copy = copyOf(el)
+  copy.style.marginTop = `${r.top - top}px`
+  clip.append(copy); card.append(clip)
+  const tag = document.createElement("span")
+  tag.hidden = true
+  tag.className = "absolute -top-2.5 right-2 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow-sm"
+  ghost.append(card, tag)
+  document.body.append(ghost)
+  likeIt(copy, el)
+  lift = { key, el, ghost, card, clip, tag, dx: d.x - r.left, dy: d.y - top, h, over: null }
+  follow(d)
+  card.style.transformOrigin = `${lift.dx}px ${lift.dy}px`
+  card.style.transform = `scale(${LIFT})`
+  const t = timing("spring")
+  if (t.duration) card.animate([{ transform: "none", boxShadow: FLAT }, { transform: `scale(${LIFT})`, boxShadow: SHADOW }], t)
+}
+
+function follow(d: Drag) {
+  const l = lift!
+  l.ghost.style.transform = `translate(${d.x - l.dx}px, ${d.y - l.dy}px)`
+  l.over = d.hit?.target ?? null
+  const away = (l.over === PANES && !!d.item.to) || !!l.over?.startsWith("bar:")
+  l.card.style.opacity = away ? "0" : ""
+  l.ghost.toggleAttribute("data-drag-ghost", !away)
+  const hint = l.over === PANES ? "" : d.hit?.hint ?? ""
+  if (l.tag.textContent !== hint) { l.tag.textContent = hint; l.tag.hidden = !hint }
+}
+
+function end() {
+  const l = lift!
+  lift = null
+  settling = l
+  l.tag.hidden = true
+  const into = l.cancelled || !l.over || l.over.startsWith("panels:") || l.over.startsWith("toggle:")
+  if (!into || !timing().duration) return fade(l)
+  requestAnimationFrame(() => requestAnimationFrame(() => { if (settling === l && !l.to) fade(l) }))
+}
+
+type Arrival = { keys: string[]; x: number; y: number; tops: Map<string, number>; until: number }
+let arrival: Arrival | null = null
+export function arrive(body: HTMLElement | null, keys: string[], x: number, y: number) {
+  if (!body || !timing("spring").duration) return
+  const tops = new Map([...body.querySelectorAll<HTMLElement>(":scope > [data-panel]")].map((e) => [e.dataset.panel!, e.getBoundingClientRect().top]))
+  arrival = { keys, x, y, tops, until: performance.now() + 1000 }
+}
+function land(a: Arrival) {
+  const els = a.keys.flatMap((k) => panelEl(k) ?? [])
+  if (!els.length) { if (performance.now() > a.until) arrival = null; return }
+  arrival = null
+  const t = timing("spring")
+  for (const el of els) {
+    const r = el.getBoundingClientRect(), origin = `${a.x - r.left}px ${Math.max(0, a.y - r.top)}px`
+    el.animate([{ transformOrigin: origin, transform: "scale(0.92)", opacity: 0, boxShadow: SHADOW, borderRadius: "14px" },
+      { transformOrigin: origin, transform: "none", opacity: 1, boxShadow: FLAT, borderRadius: "0px" }], t)
+  }
+  for (const el of els[0].parentElement?.querySelectorAll<HTMLElement>(":scope > [data-panel]") ?? []) {
+    const was = a.tops.get(el.dataset.panel!), dy = was === undefined ? 0 : was - el.getBoundingClientRect().top
+    if (Math.abs(dy) > 0.5 && !els.includes(el)) el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], t)
+  }
+}
+
+export function settle() {
+  if (arrival) land(arrival)
+  const l = settling
+  if (!l || l.fading) return
+  const el = panelEl(l.key)
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  if (l.to && el === l.el && Math.abs(r.top - l.to.top) < 0.5 && Math.abs(r.left - l.to.left) < 0.5) return
+  if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth || !r.width) return fade(l)
+  if (el !== l.el) l.el.style.opacity = ""
+  l.el = el
+  el.style.opacity = "0"
+  l.to = r
+  const g = new DOMMatrixReadOnly(getComputedStyle(l.ghost).transform), c = getComputedStyle(l.card)
+  const scale = new DOMMatrixReadOnly(c.transform).a || 1, shadow = c.boxShadow
+  for (const a of [...l.ghost.getAnimations(), ...l.card.getAnimations()]) a.cancel()
+  const to = `translate(${r.left}px, ${r.top}px)`
+  l.ghost.style.transform = to
+  l.card.style.transform = ""; l.card.style.boxShadow = FLAT
+  const t = timing("spring")
+  const fly = l.ghost.animate([{ transform: `translate(${g.m41}px, ${g.m42}px)` }, { transform: to }], t)
+  l.card.animate([{ transform: `scale(${scale})`, boxShadow: shadow, borderRadius: "14px", backdropFilter: "blur(12px)" },
+    { transform: "none", boxShadow: FLAT, borderRadius: "0px", backdropFilter: "blur(0px)" }], t)
+  const cut = Math.max(0, l.h - r.height)
+  l.clip.animate([{ clipPath: "inset(0 0 0 0)", borderRadius: "14px" }, { clipPath: `inset(0 0 ${cut}px 0)`, borderRadius: "0px" }], { ...t, fill: "forwards" })
+  fly.finished.then(() => { if (settling === l && l.to === r) finish() }, () => {})
+}
+
+function fade(l: Lift) {
+  l.el.style.opacity = ""
+  l.fading = true
+  const t = timing("fast")
+  if (!t.duration) return finish()
+  for (const a of l.card.getAnimations()) a.cancel()
+  l.card.animate([{ opacity: getComputedStyle(l.card).opacity, transform: `scale(${LIFT})` }, { opacity: 0, transform: "scale(0.96)" }], { ...t, fill: "forwards" })
+    .finished.then(() => { if (settling === l) finish() }, () => {})
+}
+
+function finish() {
+  const l = settling
+  settling = null
+  if (!l) return
+  l.el.style.opacity = ""
+  l.ghost.remove()
+}
+
+if (typeof window !== "undefined") {
+  onDrag(() => {
+    const d = getDrag()
+    if (d && d.item.from === "panel" && d.item.drawn) { if (!lift) start(d); if (lift) follow(d) }
+    else if (!d && lift) end()
+  })
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && lift) lift.cancelled = true }, true)
+}
+
+function shown(e: HTMLElement) {
+  const h = e.getBoundingClientRect().height
+  const m = /inset\(\S+ \S+ ([\d.]+)px/.exec(getComputedStyle(e).clipPath)
+  return m ? h - parseFloat(m[1]) : h
+}
+
+export function foldPanel(body: HTMLElement | null, key: string, toggle: () => void) {
+  const el = body && panelEl(key, body)
+  const t = timing("spring")
+  if (!body || !el || !t.duration) return toggle()
+  const old = body.querySelector<HTMLElement>(":scope > [data-fold-shade]")
+  const kids = [...body.children].filter((e): e is HTMLElement => e instanceof HTMLElement && e !== old)
+  const before = new Map(kids.map((k) => [k, k.getBoundingClientRect().top]))
+  const from = old ?? el, top0 = from.getBoundingClientRect().top, seen = shown(from)
+  for (const k of kids) for (const a of k.getAnimations()) if (a.id === FOLD) a.cancel()
+  old?.remove()
+  el.style.opacity = ""
+  const folding = el.dataset.collapsed === undefined
+  const shade = folding ? copyOf(el) : null
+  const full = el.offsetHeight
+  if (shade) {
+    const b = body.getBoundingClientRect()
+    shade.dataset.foldShade = ""
+    shade.setAttribute("aria-hidden", "true"); shade.inert = true
+    Object.assign(shade.style, { position: "absolute", left: `${el.offsetLeft}px`, width: `${el.offsetWidth}px`, height: `${full}px`, margin: "0",
+      top: `${top0 - b.top - body.clientTop + body.scrollTop}px`, pointerEvents: "none" })
+    body.append(shade)
+    likeIt(shade, el)
+  }
+  flushSync(toggle)
+  const top1 = el.getBoundingClientRect().top
+  const moving = (k: HTMLElement, dy: number) => { if (Math.abs(dy) > 0.5) k.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { ...t, id: FOLD }) }
+  for (const k of kids) if (k !== el && k.isConnected) moving(k, before.get(k)! - k.getBoundingClientRect().top)
+  if (shade) {
+    const h1 = el.offsetHeight
+    const a = shade.animate([{ transform: "none", clipPath: `inset(0 0 ${full - seen}px 0)`, opacity: 1 }, { transform: `translateY(${top1 - top0}px)`, clipPath: `inset(0 0 ${full - h1}px 0)`, opacity: 0 }], { ...t, id: FOLD, fill: "forwards" })
+    a.finished.then(() => shade.remove(), () => {})
+  } else {
+    entered(el)
+    el.animate([{ transform: `translateY(${top0 - top1}px)`, clipPath: `inset(0 0 ${Math.max(0, el.offsetHeight - seen)}px 0)` }, { transform: "none", clipPath: "inset(0 0 0 0)" }], { ...t, id: FOLD })
+  }
+}

@@ -1,0 +1,341 @@
+import { execFile } from "node:child_process"
+import crypto from "node:crypto"
+import fs from "node:fs"
+import type { IncomingMessage } from "node:http"
+import os from "node:os"
+import path from "node:path"
+import { pipeline } from "node:stream/promises"
+import { z } from "zod"
+import { HTTPError, LOCAL, Plugin, reply, type Who, whoOf } from "../../../core/plugins.ts"
+import { writeAtomic } from "../../../core/vault.ts"
+import { winCommand } from "../../../core/agents.ts"
+import { embedsAudio, paragraphs, textParagraphs, withTranscript } from "./transcript.ts"
+
+export const plugin = new Plugin(import.meta.url)
+
+const Saved = z.object({ path: z.string() })
+const AUDIO = /\.(mp3|m4a|m4b|aac|wav|ogg|oga|opus|flac|webm|weba|mp4|m4v|mov|aiff?|caf)$/i
+const HOME = os.homedir()
+
+type Transcriber =
+  | { kind: "command"; name: string; argv: string[] }
+  | { kind: "apple"; name: string; bin: string; language: string }
+  | { kind: "whisper"; name: string; bin: string; ffmpeg: string; model: string; language: string }
+  | { kind: "whispercpp"; name: string; bin: string; ffmpeg: string; model: string; language: string }
+type Found = { available: boolean; name?: string; why?: string; t?: Transcriber }
+
+/** launchd's PATH is short. */
+const dirs = () => [...new Set([...(process.env.PATH ?? "").split(path.delimiter), "/opt/homebrew/bin", "/usr/local/bin", `${HOME}/.local/bin`,
+  `${HOME}/miniforge3/bin`, `${HOME}/mambaforge/bin`, `${HOME}/miniconda3/bin`, `${HOME}/anaconda3/bin`, "/usr/bin"].filter(Boolean))]
+const runnable = (p: string) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile() } catch { return false } }
+/** Windows' programs end in one of PATHEXT's. */
+const EXTS = process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean)] : [""]
+const which = (name: string) => dirs().flatMap((d) => EXTS.map((x) => path.join(d, name + x))).find(runnable) ?? null
+
+function outsideVault(p: string) {
+  let real = p, root = plugin.vault.path
+  try { real = fs.realpathSync(p) } catch { /* checked by runnable */ }
+  try { root = fs.realpathSync(root) } catch { /* not there */ }
+  return real !== root && !real.startsWith(root + path.sep)
+}
+
+function splitCommand(cmd: string): string[] {
+  const out: string[] = []
+  for (const m of cmd.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) out.push(m[1] ?? m[2] ?? m[3])
+  return out
+}
+
+const MODELS = ["small", "base", "tiny"]
+function defaultModel() {
+  const dir = path.join(process.env.XDG_CACHE_HOME || path.join(HOME, ".cache"), "whisper")
+  return MODELS.find((m) => fs.existsSync(path.join(dir, `${m}.pt`))) ?? "base"
+}
+
+const GGML = () => path.join(process.env.XDG_CACHE_HOME || path.join(HOME, ".cache"), "whisper.cpp")
+function ggml(model: string | null) {
+  const names = (m: string) => { const b = m === "turbo" ? "large-v3-turbo" : m; return [b, `${b}-q8_0`, `${b}-q5_0`, `${b}-q5_1`] }
+  return (model ? [model] : ["turbo", "medium", "small", "base", "tiny"]).flatMap(names).map((n) => path.join(GGML(), `ggml-${n}.bin`))
+    .find((f) => fs.existsSync(f)) ?? null
+}
+
+const SWIFT = path.join(import.meta.dirname, "transcribe.swift")
+const helperName = () => `transcribe-${crypto.createHash("sha1").update(fs.readFileSync(SWIFT)).digest("hex").slice(0, 12)}`
+const quiet = (bin: string, args: string[], timeout = 120_000) => new Promise<{ ok: boolean; out: string; err: string }>((done) =>
+  execFile(bin, args, { timeout }, (e, out, err) => done({ ok: !e, out: String(out).trim(), err: String(err).trim() })))
+
+/** /usr/bin/swiftc without Xcode's Command Line Tools asks to install them. */
+export async function buildHelper(dir: string, archs: string[] = []): Promise<string> {
+  const out = path.join(dir, helperName())
+  if (runnable(out)) {
+    const built = (await quiet("/usr/bin/lipo", ["-archs", out])).out.split(" ")
+    if (archs.every((a) => built.includes(a))) return out
+  }
+  if (!(await quiet("/usr/bin/xcode-select", ["-p"])).ok) throw new Error("it needs Xcode's Command Line Tools to be built here")
+  fs.mkdirSync(dir, { recursive: true })
+  const tmp = `${out}.${process.pid}`
+  const slices = archs.map((a) => [`${tmp}-${a}`, "-target", `${a}-apple-macos26`])
+  try {
+    for (const [file, ...target] of slices.length ? slices : [[tmp]]) {
+      const r = await quiet("/usr/bin/xcrun", ["swiftc", "-O", ...target, SWIFT, "-o", file], 300_000)
+      if (!r.ok) throw new Error(`it didn't build: ${r.err.split("\n").slice(-2).join(" ")}`)
+    }
+    if (slices.length) {
+      const r = await quiet("/usr/bin/xcrun", ["lipo", "-create", ...slices.map((s) => s[0]), "-output", tmp])
+      if (!r.ok) throw new Error(`lipo: ${r.err}`)
+    }
+    fs.renameSync(tmp, out)
+  } finally { for (const f of [tmp, ...slices.map((s) => s[0])]) fs.rmSync(f, { force: true }) }
+  return out
+}
+
+/** Apple's on-device transcriber is macOS 26's. */
+async function apple(language: string): Promise<{ bin: string } | { why: string }> {
+  if (process.platform !== "darwin" || Number(os.release().split(".")[0]) < 25) return { why: "Apple's speech recognition needs macOS 26." }
+  let bin = path.join(import.meta.dirname, "bin", helperName())
+  if (!runnable(bin)) {
+    try { bin = await buildHelper(path.join(LOCAL, "bin")) } catch (e) { return { why: `Apple's speech recognition: ${e instanceof Error ? e.message : String(e)}.` } }
+  }
+  const r = await quiet(bin, ["--check", ...(language ? ["--language", language] : [])], 30_000)
+  return r.ok ? { bin } : { why: r.err || "Apple's speech recognition isn't available here." }
+}
+
+const SETTING = z.string().trim().catch("")
+const SECRETS = z.object({ command: SETTING, whisper: SETTING }).catch({ command: "", whisper: "" })
+const WHISPERCPP = z.object({
+  result: z.object({ language: z.string().optional() }).optional(),
+  transcription: z.array(z.object({ offsets: z.object({ from: z.number(), to: z.number() }), text: z.string() })).optional(),
+})
+const WHISPER = z.object({
+  text: z.string().optional(),
+  segments: z.array(z.object({ start: z.number(), end: z.number(), text: z.string() })).optional(),
+  language: z.string().optional(),
+})
+
+async function find(_key: string): Promise<Found> {
+  const s = plugin.settings()
+  const local = SECRETS.parse(plugin.secrets()[plugin.id] ?? {})
+  if (s.transcribe === false) return { available: false, why: "Transcription is off (transcribe: false in its settings)." }
+  if (local.command) {
+    const argv = splitCommand(local.command)
+    const bin = argv[0].includes("/") || path.isAbsolute(argv[0]) ? argv[0].replace(/^~(?=\/)/, HOME) : which(argv[0])
+    if (!bin || !runnable(bin)) return { available: false, why: `Can't run ${argv[0]} (its command setting).` }
+    if (!outsideVault(bin)) return { available: false, why: "A transcriber inside the vault isn't run." }
+    const name = path.basename(bin)
+    return { available: true, name, t: { kind: "command", name, argv: [bin, ...argv.slice(1)] } }
+  }
+  const language = typeof s.language === "string" ? s.language.trim() : ""
+  if (language && !/^[a-z]{2,3}([-_][a-z0-9]{2,8})*$|^[a-z]+( [a-z]+)?$/i.test(language)) return { available: false, why: `"${language}" isn't a language.` }
+  const named = local.whisper ? local.whisper.replace(/^~(?=\/)/, HOME) : null
+  const engine = s.engine === "whisper" || s.engine === "apple" ? s.engine : named ? "whisper" : "auto"
+  let why = ""
+  if (engine !== "whisper" && (process.platform === "darwin" || engine === "apple")) {
+    const a = await apple(/^[a-z]{2,3}([-_][a-z0-9]{2,8})*$/i.test(language) ? language : "")
+    if ("bin" in a) return { available: true, name: "Apple's speech recognition", t: { kind: "apple", name: "Apple's speech recognition", bin: a.bin, language } }
+    why = a.why
+    if (engine === "apple") return { available: false, why }
+  }
+  const model = typeof s.model === "string" && s.model.trim() ? s.model.trim() : null
+  if (model && !/^[a-z0-9][a-z0-9.-]*$/i.test(model)) return { available: false, why: `"${model}" isn't a whisper model's name.` }
+  const ffmpeg = which("ffmpeg")
+  const cpp = named ? null : which("whisper-cli"), file = cpp && ffmpeg ? ggml(model) : null
+  if (cpp && ffmpeg && file && outsideVault(cpp)) {
+    const name = `whisper.cpp ${path.basename(file).replace(/^ggml-|\.bin$/g, "")}`
+    return { available: true, name, t: { kind: "whispercpp", name, bin: cpp, ffmpeg, model: file, language } }
+  }
+  const bin = named ?? which("whisper")
+  if (!bin || !runnable(bin)) {
+    const how = process.platform === "darwin" ? why || "no transcriber." : "install ffmpeg and whisper (pipx install openai-whisper, or whisper.cpp with a model in ~/.cache/whisper.cpp), or set its command to another transcriber."
+    return { available: false, why: bin ? `Can't run ${bin} (its whisper setting).` : `This machine can't transcribe: ${how}` }
+  }
+  if (!outsideVault(bin)) return { available: false, why: "A transcriber inside the vault isn't run." }
+  if (!ffmpeg) return { available: false, why: `Whisper needs ffmpeg, which isn't installed${process.platform === "linux" ? " (sudo apt install ffmpeg)" : ""}.` }
+  const name = `whisper ${model ?? defaultModel()}`
+  return { available: true, name, t: { kind: "whisper", name, bin, ffmpeg, model: model ?? defaultModel(), language } }
+}
+const transcriber = () => plugin.memo(30, find, JSON.stringify([plugin.settings(), plugin.secrets()[plugin.id] ?? null]))
+
+const run = (bin: string, args: string[], env: NodeJS.ProcessEnv, timeout: number) =>
+  new Promise<string>((ok, fail) => {
+    // (Windows runs a .cmd only through cmd)
+    const [file, argv, verbatim] = (process.platform === "win32" && winCommand([bin, ...args], env)) || [bin, args, false]
+    execFile(file, argv, { env, timeout, maxBuffer: 64 << 20, killSignal: "SIGKILL", windowsHide: true, windowsVerbatimArguments: verbatim }, (err, stdout, stderr) => {
+      if (!err) return ok(stdout)
+      // (a progress bar redraws itself with \r: its lines are never the reason)
+      const said = String(stderr || "").trim().split(/[\r\n]+/).filter((l) => !/^\s*\d+%\|/.test(l)).slice(-3).join(" ")
+      fail(new Error(err.killed ? "it took too long" : said || err.message))
+    })
+  })
+
+async function transcribe(t: Transcriber, abs: string): Promise<{ paras: string[]; language?: string }> {
+  const timeout = 3 * 3600_000
+  if (t.kind === "apple") {
+    const lang = /^[a-z]{2,3}([-_][a-z0-9]{2,8})*$/i.test(t.language) ? ["--language", t.language] : []
+    return { paras: textParagraphs(await run(t.bin, [abs, ...lang], process.env, timeout)), ...(t.language ? { language: t.language } : {}) }
+  }
+  if (t.kind === "command") {
+    const args = t.argv.slice(1)
+    const at = args.findIndex((a) => a.includes("{file}"))
+    const argv = at < 0 ? [...args, abs] : args.map((a) => a.replaceAll("{file}", abs))
+    return { paras: textParagraphs(await run(t.argv[0], argv, process.env, timeout)) }
+  }
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "vaultite-transcribe-"))
+  const lang = /^[a-z]{2,3}[-_]/i.test(t.language) ? t.language.split(/[-_]/)[0] : t.language
+  if (t.kind === "whispercpp") {
+    try {
+      // (whisper.cpp reads only 16 kHz WAV; without a language it assumes English)
+      const wav = path.join(out, "audio.wav")
+      await run(t.ffmpeg, ["-nostdin", "-loglevel", "error", "-i", abs, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], process.env, timeout)
+      await run(t.bin, ["-m", t.model, "-f", wav, "-l", lang || "auto", "-oj", "-of", path.join(out, "transcript"), "-np"], process.env, timeout)
+      const j = WHISPERCPP.parse(JSON.parse(fs.readFileSync(path.join(out, "transcript.json"), "utf8")))
+      const segments = (j.transcription ?? []).map((x) => ({ start: x.offsets.from / 1000, end: x.offsets.to / 1000, text: x.text }))
+      return { paras: paragraphs(segments), language: j.result?.language }
+    } finally {
+      fs.rmSync(out, { recursive: true, force: true })
+    }
+  }
+  try {
+    const env = { ...process.env, PATH: [path.dirname(t.ffmpeg), path.dirname(t.bin), process.env.PATH].filter(Boolean).join(":"), PYTHONWARNINGS: "ignore" }
+    const args = [abs, "--model", t.model, "--output_format", "json", "--output_dir", out, "--verbose", "False",
+      ...(lang ? ["--language", lang] : [])]
+    await run(t.bin, args, env, timeout)
+    const file = fs.readdirSync(out).find((f) => f.endsWith(".json"))
+    if (!file) throw new Error("whisper wrote no transcript")
+    const j = WHISPER.parse(JSON.parse(fs.readFileSync(path.join(out, file), "utf8")))
+    const paras = j.segments?.length ? paragraphs(j.segments) : textParagraphs(j.text ?? "")
+    return { paras, language: j.language }
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true })
+  }
+}
+
+type Job = { id: string; path: string; note: string; state: "queued" | "running" | "done" | "failed"; error?: string
+  language?: string; started: number; finished?: number; kept?: string }
+const jobs: Job[] = []
+let queue: Promise<unknown> = Promise.resolve()
+let n = 0
+
+function notesEmbedding(rel: string) {
+  return [...plugin.vault.entries.values()].filter((e) => e.body.split("\n").some((l) => embedsAudio(l, rel)))
+    .sort((a, b) => Number(b.stat.ns - a.stat.ns)).map((e) => e.rel)
+}
+
+async function work(job: Job) {
+  job.state = "running"
+  try {
+    const found = await transcriber()
+    if (!found.t) throw new Error(found.why ?? "no transcriber")
+    const vault = plugin.vault
+    const abs = vault.abs(job.path)
+    if (!fs.existsSync(abs)) throw new Error(`${job.path} isn't there any more`)
+    const { paras, language } = await transcribe(found.t, abs)
+    job.language = language
+    await vault.lock(async () => {
+      await vault.sync()
+      const note = vault.abs(job.note)
+      if (!fs.existsSync(note)) throw new Error(`${job.note} isn't there any more`)
+      const text = fs.readFileSync(note, "utf8")
+      const next = withTranscript(text, job.path, paras)
+      if (next !== text) writeAtomic(note, next)
+      await vault.sync()
+    })
+    job.state = "done"
+  } catch (e) {
+    job.state = "failed"
+    job.error = String(e instanceof Error ? e.message : e)
+  }
+  job.finished = Date.now()
+}
+
+const clean = (p: unknown) => String(p ?? "").replace(/^\/+/, "")
+
+plugin.route("GET", "audio-recorder/transcriber", async () => {
+  const { available, name, why } = await transcriber()
+  return { available, name, why, auto: plugin.settings().auto !== false }
+})
+
+plugin.route("POST", "audio-recorder/transcribe", async (req) => {
+  const rel = clean(req.body.path)
+  if (!rel || rel.split("/").some((p) => p === ".." || p.startsWith("."))) throw new HTTPError(400, "path must be a file in the vault")
+  if (!AUDIO.test(rel)) throw new HTTPError(400, `${rel} isn't an audio file`)
+  if (!fs.existsSync(plugin.vault.abs(rel))) throw new HTTPError(404, `no file ${rel}`)
+  const found = await transcriber()
+  if (!found.available) throw new HTTPError(409, found.why ?? "no transcriber here")
+  let note = clean(req.body.note)
+  if (note) {
+    if (!plugin.vault.entries.has(note)) throw new HTTPError(404, `no note ${note}`)
+  } else {
+    note = notesEmbedding(rel)[0] ?? ""
+    if (!note) throw new HTTPError(400, `no note embeds ${rel.split("/").pop()}: say which (note)`)
+  }
+  const job: Job = { id: `${Date.now().toString(36)}-${++n}`, path: rel, note, state: "queued", started: Date.now() }
+  jobs.unshift(job)
+  jobs.splice(50)
+  queue = queue.then(() => work(job))
+  return reply(202, job)
+})
+
+async function voice(job: Job, dir: string, file: string, from: string, who: Who, http: IncomingMessage | undefined) {
+  job.state = "running"
+  let why = ""
+  try {
+    const found = await transcriber()
+    if (!found.t) why = found.why ?? "no transcriber"
+    else {
+      try {
+        const { paras, language } = await transcribe(found.t, file)
+        job.language = language
+        const text = paras.join("\n\n").trim()
+        if (!text) throw new Error("nothing was heard")
+        const r = await plugin.host.call("inbox.voice", { text, from, ext: path.extname(file).slice(1) }, who, { http, input: fs.createReadStream(file) })
+        job.note = Saved.safeParse(r.result).data?.path ?? ""
+      } catch (e) {
+        if (job.note) throw e
+        why = `${found.name} couldn't: ${String(e instanceof Error ? e.message : e).replace(/\.$/, "")}.`
+      }
+    }
+    if (why) {
+      const d = new Date(), p2 = (n: number) => String(n).padStart(2, "0")
+      const when = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}.${p2(d.getMinutes())}.${p2(d.getSeconds())}`
+      const up = await plugin.host.call("file.upload", { name: `Voice note ${when}${path.extname(file)}` }, who, { http, input: fs.createReadStream(file) })
+      const saved = Saved.safeParse(up.result).data?.path ?? ""
+      const r = await plugin.runOp("inbox.add", { title: `Voice note ${when}`, from, body: `![[${path.posix.basename(saved)}]]\n\n_Not transcribed: ${why}_` }, who, http)
+      job.note = Saved.safeParse(r.result).data?.path ?? ""
+      job.kept = why
+    }
+    job.state = "done"
+  } catch (e) {
+    job.state = "failed"
+    job.error = String(e instanceof Error ? e.message : e)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  job.finished = Date.now()
+}
+
+plugin.route("POST", "audio-recorder/voice", async (req) => {
+  if (!req.http) throw new HTTPError(400, "the recording comes over HTTP, as the body")
+  const ext = /^[a-z0-9]{1,5}$/i.test(String(req.query.ext ?? "")) ? String(req.query.ext) : "webm"
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vaultite-voice-"))
+  const file = path.join(dir, `voice.${ext}`)
+  try {
+    await pipeline(req.http, fs.createWriteStream(file))
+    if (!fs.statSync(file).size) throw new HTTPError(400, "the body is empty: send the recording")
+  } catch (e) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    throw e instanceof HTTPError ? e : new HTTPError(400, `the recording broke off: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  const h = (k: string) => { const v = req.http?.headers[k]; return typeof v === "string" ? v : null }
+  const who = whoOf(h("x-vaultite-client"), h("x-vaultite-agent"))
+  const job: Job = { id: `${Date.now().toString(36)}-${++n}`, path: "", note: "", state: "queued", started: Date.now() }
+  jobs.unshift(job)
+  jobs.splice(50)
+  queue = queue.then(() => voice(job, dir, file, String(req.query.from ?? "").trim(), who, req.http))
+  return reply(202, job)
+}, { lock: false, stream: true })
+
+plugin.route("GET", "audio-recorder/jobs", () => jobs)
+plugin.route("GET", "audio-recorder/jobs/*", (req) => {
+  const job = jobs.find((j) => j.id === req.arg(0))
+  if (!job) throw new HTTPError(404, `no job ${req.arg(0)}`)
+  return job
+})

@@ -1,0 +1,97 @@
+import type { Any, VaultTest } from "./harness.ts"
+import { highlighter, lineFinder, parse } from "../../../core/searchquery.ts"
+
+const marked = (q: string, t: string, matchCase = false) => highlighter(parse(q, { matchCase }))(t).map(([a, b]) => t.slice(a, b)).join("|")
+const MARKED: [q: string, text: string, marked: string, matchCase?: boolean][] = [
+  ["cafe", "a café, a cafe\u0301, a CAFE", "café|cafe\u0301|CAFE"], ["café", "cafe", "cafe"], ["strasse", "Straße", "Straße"], ["gros", "groß", "groß"],
+  ["aesir oresund", "Æsir, Øresund", "Æsir|Øresund"], ["lodz", "Łódź", "Łódź"], ["Cafe", "café Café", "Café", true],
+]
+
+async function paging({ api, check }: VaultTest) {
+  for (const name of ["Mossy note", "b", "c", "d"]) await api("POST", "file", { path: `Searchy/Paging/${name}.md`, text: "about Moss and moss\n" })
+  const titles = async (more: string) => { const [, r] = await api("GET", `search?q=moss&folder=Searchy/Paging${more}`); return (Array.isArray(r) ? r : r.results).map((x: Any) => x.title).join(",") }
+  const titles2 = async (q: string) => { const [, r] = await api("GET", `search?q=${q}&case=1&folder=Searchy/Paging&limit=4`); return r.map((x: Any) => x.title).join(",") }
+  const pages = [await titles("&limit=2"), await titles("&limit=2&offset=2")].join(","), all = await titles("&limit=4")
+  check("search: a name that matches comes first; pages in the same order as one", all.startsWith("Mossy note,") && all.split(",").length === 4 && pages === all, [pages, all])
+  const other = await titles2("moss -zzz"), same = await titles2("Moss -zzz")
+  check("search: with match case, only a name in the query's case counts as a name match", !other.startsWith("Mossy note") && same.startsWith("Mossy note") && other.split(",").length === 4, [other, same])
+  const [, total] = await api("GET", "search?q=moss&folder=Searchy/Paging&limit=1&total=1&lines=5")
+  check("search: the total counts past the page", total.files === 4 && total.lines === 4 && total.results.length === 1, total)
+  await api("DELETE", "file?path=Searchy/Paging")
+}
+
+async function folding({ api, check }: VaultTest, paths: (q: string) => Promise<string>) {
+  for (const [q, text, want, matchCase] of MARKED) check(`searchquery: accents folded, the text's own letters marked: ${q}${matchCase ? " (match case)" : ""}`, marked(q, text, matchCase) === want, marked(q, text, matchCase))
+  const before = await paths("cafe")
+  await api("POST", "file", { path: "Searchy/Café.md", text: "Coffee at the Café Ørsted in Łódź, Straße 4\nand a cafe on the corner\n" })
+  for (const q of ["cafe", "café", "orsted", "lodz", "strasse", "STRASSE", "ørsted łódź"]) check(`search: accents and folded letters don't matter: ${q}`, (await paths(q)) === "Café.md", await paths(q))
+  const [, res] = await api("GET", "search?q=cafe lodz&folder=Searchy&lines=5&total=1")
+  check("search: what matches without its accents is what it marks, both lines counted", res.lines === 2 && res.results[0]?.matches?.map((m: Any) => m.text).join("|") === "Coffee at the Café Ørsted in Łódź, Straße 4|and a cafe on the corner", res)
+  check("search: the same search again sees a file written since", before === "" && (await paths("cafe")) === "Café.md", before)
+  const [, files] = await api("GET", "search?q=cafe&folder=Searchy&lines=5&total=files")
+  check("search: total=files says how many files, not lines", files.files === 1 && files.lines === undefined && files.results.length === 1, files)
+  await api("DELETE", "file?path=Searchy/Café.md")
+  const lf = lineFinder(parse("rent OR food")), text = "rent\nnone\nfood and rent\n\nFOOD"
+  check("searchquery: the lines a query marks, and how many", JSON.stringify(lf.lines(text)) === "[0,2,4]" && lf.count(text) === 3, lf.lines(text))
+}
+
+export default async ($: VaultTest) => {
+  const { api, check } = $
+  let res: Any
+  // Search syntax (core/searchquery.ts): operators, properties, tags, scopes, sorting, errors.
+  let [code] = await api("POST", "file", { path: "Searchy/Budget plan.md", text: "---\nstatus: seed\ntags: [finance]\n---\n# Rent\nPay the rent and buy food\n- [ ] call the landlord about rent\n- [x] buy food for the week\n\n## Trips\nA trip to Lisbon #travel/europe\n" })
+  ;[code] = await api("POST", "file", { path: "Searchy/Other.md", text: "---\nstatus: exploring\n---\nRent elsewhere, food later.\nRENT in capitals\n" })
+  // (this helper passes the query string as it is: no encoding)
+  const paths = async (q: string, more = "") => { const [c, r] = await api("GET", `search?q=${q}&folder=Searchy${more}`); return c === 200 ? (r as Any[]).map((x) => x.path.slice(8)).sort().join(",") : `${c} ${r.error}` }
+  for (const [q, want] of [
+    ["rent food", "Budget plan.md,Other.md"], ['"rent and buy"', "Budget plan.md"], ["rent -lisbon", "Other.md"], ["lisbon OR elsewhere", "Budget plan.md,Other.md"],
+    ["file:budget", "Budget plan.md"], ["path:searchy rent", "Budget plan.md,Other.md"], ["searchy", ""], ["content:budget", ""],
+    ["tag:#travel", "Budget plan.md"], ["tag:travel/europe", "Budget plan.md"], ["tag:trav", ""], ["tag:finance", "Budget plan.md"],
+    ["line:(rent food)", "Budget plan.md,Other.md"], ["line:(landlord food)", ""], ["block:(landlord food)", "Budget plan.md"], ["section:(rent lisbon)", ""],
+    ["section:(trip lisbon)", "Budget plan.md"], ["task-todo:landlord", "Budget plan.md"], ["task-done:landlord", ""], ["task-done:", "Budget plan.md"],
+    ["match-case:RENT", "Other.md"], ["[status]", "Budget plan.md,Other.md"], ["[status:seed]", "Budget plan.md"], ["[status:seed OR exploring]", "Budget plan.md,Other.md"],
+    ["[nope]", ""], ["/l[a-z]+d/", "Budget plan.md"], ["(lisbon OR elsewhere) -[status:seed]", "Other.md"],
+  ]) check(`search: ${q}`, (await paths(q)) === want, await paths(q))
+  await folding($, paths)
+  await paging($)
+  check("search: case=1 matches in case", (await paths("RENT", "&case=1")) === "Other.md", await paths("RENT", "&case=1"))
+  check("search: a query it can't read is a 400 saying why", (await paths('"open')).startsWith("400 A quote isn't closed"), await paths('"open'))
+  check("search: a bad regex too", (await paths("/(/")).startsWith("400 /(/ isn't a regular expression"), await paths("/(/"))
+  ;[code, res] = await api("GET", "search?q=rent&folder=Searchy&sort=name-desc")
+  check("search: sorted by name, Z to A", code === 200 && res.map((r: Any) => r.title).join() === "Other,Budget plan", res)
+  ;[code] = await api("GET", "search?q=rent&sort=nope")
+  check("search: an unknown sort is a 400", code === 400, code)
+  ;[, res] = await api("GET", "search?q=landlord&folder=Searchy&lines=5&context=1")
+  check("search: lines with context around them, numbered as the file's (frontmatter counted)", res[0]?.matches?.map((m: Any) => `${m.line}${m.ctx ? "c" : ""}`).join() === "6c,7,8c" && res[0].count === 1, res[0]?.matches)
+  ;[, res] = await api("GET", "search?q=rent&folder=Searchy&sort=name&lines=1&total=1&limit=1")
+  check("search: total=1 says how many files and lines matched in all, past the page", res.files === 2 && res.results.length === 1 && res.results[0].title === "Budget plan" && res.lines >= 3, res)
+  ;[, res] = await api("GET", "search?q=rent&folder=Searchy&sort=name&limit=1&offset=1")
+  check("search: offset gives the next page", res.length === 1 && res[0].title === "Other", res)
+  ;[, res] = await api("GET", "search?q=rent&path=Searchy/Budget plan.md&lines=100")
+  check("search: path= only that file, every line", res.length === 1 && res[0].matches.length === res[0].count, res)
+  ;[, res] = await api("GET", "search?q=tag:travel&folder=Searchy&lines=5")
+  check("search: a tag marks its line", res[0]?.matches?.length === 1 && res[0].matches[0].text.includes("#travel/europe"), res[0])
+  ;[, res] = await api("GET", "search?q=[status:seed]&folder=Searchy&lines=5")
+  check("search: a property alone lists no lines", res[0]?.count === 0, res[0])
+  {
+    const sq = await import("../../../core/searchquery.ts")
+    const n = sq.parse('budget (rent OR "buy food") -tag:done')
+    check("searchquery: explain", sq.explain(n) === 'Files where the name or text has "budget", and (either the name or text has "rent", or the name or text has "buy food"), and not (it\'s tagged #done)', sq.explain(n))
+    const doc = { name: "Plan", file: "Plan.md", path: "Work/Deep/Plan.md", text: "", type: "project" }
+    check("searchquery: type: is the whole type, folder: the folder or one above it", sq.matches(sq.parse("type:Project folder:work"), doc) && sq.matches(sq.parse("folder:Work/Deep"), doc) &&
+      !sq.matches(sq.parse("type:proj"), doc) && !sq.matches(sq.parse("folder:Wor"), doc) && !sq.matches(sq.parse("folder:Deep"), doc) && sq.matches(sq.parse("type:(note OR project)"), doc) &&
+      sq.explain(sq.parse("type:person folder:People")) === "Files where its type is person, and it's in the folder People", sq.explain(sq.parse("type:person folder:People")))
+    check("searchquery: plain words", sq.isPlain(sq.parse("budget rent")) && !sq.isPlain(n) && !sq.isPlain(sq.parse("a OR b")), null)
+    check("searchquery: marks what matched, not what's excluded", JSON.stringify(sq.highlighter(n)("buy food, rent, done")) === "[[0,8],[10,14]]", sq.highlighter(n)("buy food, rent, done"))
+    const ex = sq.excerpt("one two three four five six seven eight nine ten budget eleven", sq.wordRanges("one two three four five six seven eight nine ten budget eleven", ["budget"]), 30, 10)
+    check("searchquery: an excerpt around the match", ex.text.startsWith("…") && ex.text.slice(ex.ranges[0][0], ex.ranges[0][1]) === "budget", ex)
+  }
+  await api("POST", "file", { path: "Searchy/Queries.md", text: "Rent:\n\n```query\nline:(rent food)\n-file:queries\n```\n\n```query\n\"open\n```\n\n```query\n```\n" })
+  ;[code, res] = await api("GET", "render?path=Searchy/Queries.md")
+  check("query fence: render lists the files the search finds, linked, with their matching lines", code === 200 && res.includes("Search `line:(rent food) -file:queries`: 2 files") &&
+    res.includes("- [[Searchy/Budget plan|Budget plan]]\n  - line 5: # Rent\n  - line 6: Pay the rent and buy food") && res.includes("[[Searchy/Other|Other]]") && !res.includes("```query"), res)
+  check("query fence: one that can't be read says why, an empty one says so", res.includes("can't be searched: A quote isn't closed") && res.includes("an empty query"), res)
+  ;[, res] = await api("GET", "blocks/sources?path=Searchy/Queries.md")
+  check("query fence: Show source names the files it found", JSON.stringify(res).includes("Searchy/Budget plan.md"), res)
+  await api("DELETE", "file?path=Searchy")
+}

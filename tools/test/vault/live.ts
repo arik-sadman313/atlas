@@ -1,0 +1,274 @@
+import fs from "node:fs"
+import path from "node:path"
+import { mock } from "node:test"
+import type { Any, VaultTest } from "./harness.ts"
+
+export default async ($: VaultTest) => {
+  const { VAULT, api, check, read, vault, write } = $
+  // Live updates (core/live.ts): changes on disk reach the index and the listeners, coalesced, without a request.
+  const { Live, ignored } = await import("../../../core/live.ts")
+  const live = new Live(vault).start()
+  const heard: Any[] = []
+  live.listen((c) => heard.push(c))
+  const wait = async (ok: () => boolean, ms = 3000) => {
+    for (const t = Date.now(); Date.now() - t < ms && !ok();) await new Promise((r) => setTimeout(r, 25))
+    return ok()
+  }
+  const touched = (p: string) => heard.some((c) => c.paths === null || c.paths.includes(p))
+  // FSEvents starts a moment after the watch: a probe is written until it's heard.
+  for (let i = 0; i < 25 && !touched("Notes/Live probe.md"); i++) { write("Notes/Live probe.md", `probe ${i}\n`); await wait(() => touched("Notes/Live probe.md"), 200) }
+  fs.rmSync(path.join(VAULT, "Notes/Live probe.md"))
+  await wait(() => !vault.entries.has("Notes/Live probe.md"))
+  heard.length = 0
+  write("Notes/Live one.md", "---\ntype: note\ntitle: Live one\n---\n\nFrom disk.\n")
+  check("live: a file written on disk is heard", await wait(() => touched("Notes/Live one.md")), heard)
+  check("live: and indexed before the event goes out", vault.entries.has("Notes/Live one.md"))
+  heard.length = 0
+  const began = Date.now()
+  for (let i = 0; i < 20; i++) write(`Notes/Burst ${i}.md`, `burst ${i}\n`)
+  const writing = Date.now() - began
+  await wait(() => touched("Notes/Burst 19.md"))
+  await new Promise((r) => setTimeout(r, 300))
+  // (a change goes out at most 100 ms after the last: a burst slower to write (Windows CI) is one more event each
+  // 100 ms; a late echo of the write before isn't the burst's)
+  const burst = heard.filter((c) => c.paths === null || c.paths.some((p: string) => p.startsWith("Notes/Burst "))).length
+  check("live: a burst of writes is one or two events", burst >= 1 && burst <= 2 + Math.floor(writing / 100), { burst, writing })
+  heard.length = 0
+  fs.renameSync(path.join(VAULT, "Notes/Live one.md"), path.join(VAULT, "Notes/Live two.md"))
+  check("live: a rename is heard as both names", await wait(() => touched("Notes/Live one.md") && touched("Notes/Live two.md")), heard)
+  check("live: and the index follows it", vault.entries.has("Notes/Live two.md") && !vault.entries.has("Notes/Live one.md"))
+  heard.length = 0
+  await api("PUT", "file", { path: "Notes/Live two.md", text: "From the app.\n", base: read("Notes/Live two.md") })
+  check("live: the app's own writes are heard too", await wait(() => touched("Notes/Live two.md")), heard)
+  {
+    // (told as they're written, not when the watcher says: one that isn't watching hears them too)
+    const deaf = new Live(vault), got: Any[] = []
+    deaf.listen((c) => got.push(c))
+    await api("PUT", "file", { path: "Notes/Live two.md", text: "Again from the app.\n", base: read("Notes/Live two.md") })
+    check("live: the app's own writes are told without the watcher", await wait(() => got.some((c) => c.paths?.includes("Notes/Live two.md")), 1000), got)
+    deaf.close()
+  }
+  {
+    // While the watcher hears nothing, the app's reads don't walk the vault; an agent's always do (it may have just
+    // written a file the watcher hasn't told of yet).
+    await wait(() => !vault.waiting(), 10_000) // (a folder an area before deleted is let go of seconds later, walking)
+    const sync = vault.sync
+    let walks = 0
+    vault.sync = function (...a) { walks++; return sync.apply(this, a) }
+    await new Promise((r) => setTimeout(r, 300))
+    await vault.synced()
+    walks = 0
+    await vault.synced({ trusting: true })
+    check("live: the app's read, nothing heard since the last walk, doesn't walk", walks === 0 && vault.vouched(), walks)
+    await vault.synced()
+    check("live: an agent's read walks anyway", walks === 1, walks)
+    vault.heard("Notes/Live two.md")
+    check("live: hearing a file indexed as it is on disk (the server's own write) keeps the index vouched for", vault.vouched())
+    write("Notes/Live four.md", "From disk, unasked.\n")
+    check("live: a file written behind the app's back is heard and indexed", await wait(() => vault.entries.has("Notes/Live four.md")))
+    walks = 0
+    await vault.synced({ trusting: true })
+    check("live: then the app's reads trust the watcher again", walks === 0, walks)
+    write("Notes/Live four.md", "Edited on disk.\n")
+    check("live: a note edited on disk is read again", await wait(() => !!vault.entries.get("Notes/Live four.md")?.body.includes("Edited")))
+    check("live: on its own, without a walk", walks === 0 && vault.vouched(), walks)
+    fs.mkdirSync(path.join(VAULT, ".trash"), { recursive: true })
+    fs.writeFileSync(path.join(VAULT, ".trash/Deleted 1.md"), "Trashed.\n")
+    await new Promise((r) => setTimeout(r, 300))
+    check("live: what no walk sees (the trash) doesn't walk", walks === 0 && vault.vouched(), walks)
+    await $.app.callOp("plugin.list", {})
+    check("live: nor does a read op the server runs itself (a plugin's timer), nothing heard since", walks === 0, walks)
+    vault.heard("Notes/Live five.md")
+    check("live: a change not in the index isn't vouched for", !vault.vouched())
+    await vault.synced({ trusting: true })
+    check("live: so the app's next read walks", walks >= 1, walks)
+    await vault.synced()
+    const settingsWere = vault.settingsVersion
+    vault.setConfig("live-check", { on: true })
+    check("live: a settings file the server writes isn't vouched for either (its state is old)", !vault.vouched())
+    walks = 0
+    await vault.synced({ trusting: true })
+    check("live: so after it, the app's next read reads the settings again, not every note", vault.settingsVersion > settingsWere && walks === 0, walks)
+    vault.removeConfig("live-check")
+    await new Promise((r) => setTimeout(r, 400)) // (what the watcher heard of that, passed on)
+    await vault.synced()
+    vault.walked = Date.now() - 60_000
+    walks = 0
+    await vault.synced({ trusting: true })
+    const answered = walks
+    await wait(() => walks === 1)
+    check("live: past that, the app's read is answered at once and a walk follows it", answered === 0 && walks === 1, [answered, walks])
+    {
+      const order: string[] = []
+      const look = vault.looked().then((l) => { order.push("look"); return l })
+      await vault.lock(() => { order.push("write") })
+      const pre = await look
+      check("live: a write goes ahead while a walk looks at the disk", order.join() === "write,look" && pre !== null, order)
+      write("Notes/Live early.md", "Seen by the look.\n")
+      const stale = await vault.looked()
+      await api("PUT", "file", { path: "Notes/Live late.md", text: "Written after the look.\n" })
+      await vault.lock(() => vault.sync(stale))
+      check("live: a look a write came after isn't used: what it wrote stays", vault.entries.has("Notes/Live late.md") && vault.entries.has("Notes/Live early.md"))
+      await new Promise((r) => setTimeout(r, 300))
+      await vault.synced()
+      const fresh = await vault.looked()
+      await vault.lock(() => vault.sync(fresh))
+      check("live: one nothing came after is used as it was", vault.walked === fresh?.t0, [vault.walked, fresh?.t0])
+      for (const f of ["early", "late"]) fs.rmSync(path.join(VAULT, `Notes/Live ${f}.md`))
+      await new Promise((r) => setTimeout(r, 300))
+      await vault.synced()
+    }
+    {
+      await vault.synced()
+      vault.downloading = ["Notes/Away.md"]
+      check("live: files iCloud is bringing down keep the index vouched for, and walked again on its own", vault.vouched() && vault.waiting())
+      vault.downloading = []
+    }
+    {
+      let saw = ""
+      const off = vault.afterSync((v) => { saw = v.doing }, "live-probe")
+      await vault.synced()
+      off()
+      check("live: what the vault's holder is doing is known, down to a plugin's hook", saw === "after a sync: live-probe" && vault.doing === "", [saw, vault.doing])
+    }
+    write(".vaultite/live-hand.json", '{"n":1}\n')
+    await vault.synced()
+    check("live: a settings file written by hand is read at the next walk", vault.config("live-hand").n === 1, vault.config("live-hand"))
+    await vault.synced()
+    const reads = mock.method(fs, "readFileSync")
+    vault.config("live-hand")
+    reads.mock.restore()
+    check("live: a walk that finds the settings as they were keeps what it read of them", reads.mock.callCount() === 0, reads.mock.callCount())
+    write(".vaultite/live-hand.json", '{"n":2, "more": true}\n')
+    await vault.synced()
+    check("live: and one changed by hand is read again", vault.config("live-hand").n === 2, vault.config("live-hand"))
+    vault.removeConfig("live-hand")
+    await new Promise((r) => setTimeout(r, 400))
+    await vault.synced()
+    await vault.synced()
+    if (process.platform === "linux") {
+      // Linux's watcher hears each change as it's made: an agent's read waits for what it heard, not for a walk.
+      await vault.synced()
+      walks = 0
+      await vault.synced({ drained: true })
+      check("live: on Linux, an agent's read with nothing heard doesn't walk", walks === 0, walks)
+      fs.writeFileSync(path.join(VAULT, "Notes/Live four.md"), "Edited by an agent, then read at once.\n")
+      await vault.synced({ drained: true })
+      check("live: ...and one right after its write sees it, without a walk", walks === 0 && !!vault.entries.get("Notes/Live four.md")?.body.includes("then read at once"), walks)
+    }
+    vault.sync = sync
+  }
+  {
+    // A write the API indexed itself, heard after another change was told at that index: still told (once).
+    const own = new Live(vault), got: Any[] = []
+    own.listen((c) => got.push(c))
+    // (written behind Live's back and indexed, as by a writer that doesn't tell it)
+    fs.writeFileSync(path.join(VAULT, "Notes/Live three.md"), "Indexed by the API.\n")
+    await vault.reread(["Notes/Live three.md"])
+    own.add(".vaultite/live-probe.json")
+    await wait(() => got.length === 1)
+    own.add("Notes/Live three.md")
+    check("live: a file indexed before another change was told is told of too", await wait(() => got.some((c) => c.paths?.includes("Notes/Live three.md"))), got)
+    own.add("Notes/Live three.md")
+    await new Promise((r) => setTimeout(r, 300))
+    check("live: the same file again, nothing new since, isn't", got.length === 2, got)
+    own.close()
+  }
+  {
+    // FSEvents tells of the folders above a write (iCloud touches them) and of the vault's own folder, by its name.
+    fs.mkdirSync(path.join(VAULT, ".vaultite/plugins/tabs"), { recursive: true })
+    const own = new Live(vault), got: Any[] = []
+    own.listen((c) => got.push(c))
+    for (const p of [".vaultite", ".vaultite/plugins", ".vaultite/plugins/tabs", ".vaultite/plugins/tabs/device-x.json", path.basename(fs.realpathSync(VAULT))]) own.add(p)
+    await wait(() => got.length > 0)
+    check("live: folders told beside what changed in them, and the vault's own, aren't told", JSON.stringify(got[0]?.paths) === '[".vaultite/plugins/tabs/device-x.json"]', got)
+    got.length = 0
+    own.add("Notes")
+    await wait(() => got.length > 0)
+    check("live: a folder told alone is", JSON.stringify(got[0]?.paths) === '["Notes"]', got)
+    own.close()
+  }
+  {
+    // A window back after a while says where its changes ended: it hears only what changed since.
+    const own = new Live(vault), got: Any[] = []
+    own.listen((c) => got.push(c))
+    const hello = (at?: string) => {
+      const ws: Any = { readyState: 1, OPEN: 1, on() {}, close() {}, sent: [] as Any[], send(t: string) { ws.sent.push(JSON.parse(t)) } }
+      own.client(ws, at)
+      return ws.sent[0]
+    }
+    const at = hello().at
+    own.add("Notes/Away one.md")
+    await wait(() => got.length === 1)
+    own.add("Notes/Away two.md")
+    await wait(() => got.length === 2)
+    check("live: back, a window hears what changed while it was away", JSON.stringify(hello(at).paths) === '["Notes/Away one.md","Notes/Away two.md"]', hello(at))
+    check("live: and nothing when nothing did", JSON.stringify(hello(hello().at).paths) === "[]")
+    check("live: from another server (restarted), anything may have", hello("other:0").paths === null && !("paths" in hello()))
+    // The state says where the events stood as it was read: a socket connecting from there hears what changed since.
+    const was = $.app.liveMark
+    $.app.liveMark = () => own.mark()
+    const [, raw] = await api("GET", "state?since=0")
+    const said = (typeof raw === "string" || Buffer.isBuffer(raw) ? JSON.parse(String(raw)) : raw).live
+    check("live: the state says where the events stood", said?.at === own.at && typeof said?.kept === "string" && typeof said?.state === "number", said)
+    own.add("Notes/Between.md")
+    await wait(() => got.some((c) => c.paths?.includes("Notes/Between.md")))
+    check("live: a socket connecting after the state's read hears what changed in between", JSON.stringify(hello(said?.at).paths) === '["Notes/Between.md"]', hello(said?.at))
+    $.app.liveMark = was
+    own.close()
+  }
+  check("live: .git, .DS_Store, iCloud placeholders and temp files are ignored",
+    ignored(".git/index") && ignored("Notes/.DS_Store") && ignored("Notes/.a.md.icloud") && ignored("Notes/a.md.tmp-1-2") &&
+    ignored(".vaultite/artifacts/x.html.json") && !ignored(".vaultite/cache/github.json") && !ignored("Notes/a.md"))
+  // The user's window: a command it couldn't run says so; a window from before answers is sent it and not waited on.
+  {
+    const win = (answers: boolean, ran: boolean | null, notices?: Any[]) => {
+      const on: Record<string, (d: unknown) => void> = {}
+      const ws: Any = { readyState: 1, OPEN: 1, close() {}, on: (k: string, f: (d: unknown) => void) => { on[k] = f }, sent: [] as Any[],
+        send(t: string) {
+          const m = JSON.parse(t); ws.sent.push(m)
+          if (m.rid && ran !== null) setTimeout(() => on.message(JSON.stringify({ type: "ui-done", rid: m.rid, ran, ...(notices ? { notices } : {}) })), 5)
+        } }
+      live.client(ws)
+      on.message(JSON.stringify({ type: "active", ...(answers ? { answers: true } : {}) }))
+      return ws
+    }
+    win(true, false)
+    const refused = await live.drive({ action: "command", id: "dispatch:claude" }).then(() => null, (e: Any) => e)
+    check("ui: a command the window couldn't run is an error saying so", refused?.status === 422 && /isn't available/.test(refused.message), refused)
+    win(true, true)
+    check("ui: one it ran is sent", ((await live.drive({ action: "command", id: "theme:dark" })) as Any)?.ok === true)
+    const textOf = (id: string) => $.app.ops().find((o: Any) => o.op.id === id)!.op.text as (r: Any, p: Any) => string
+    win(true, true, [{ text: "Claude isn't running", at: 1 }, { text: "x".repeat(900), kind: "error" }])
+    const told = await live.drive({ action: "command", id: "companion:session" }) as Any
+    const said = textOf("ui.command")(told, { id: "companion:session" })
+    check("ui: one that showed a toast as it ran says so, so an agent doesn't take it as done", told.ran === true && told.notices?.length === 2 && told.notices[1].text.length === 300 &&
+      told.notices[1].kind === "error" && /^Ran companion:session\. The app then showed: "Claude isn't running", "x+" \(an error\)\.$/.test(said), [told, said])
+    win(true, true, [])
+    check("ui: one that showed nothing says it ran", textOf("ui.command")(await live.drive({ action: "command", id: "theme:dark" }), { id: "theme:dark" }) === "Ran theme:dark.")
+    const old = win(false, null), t0 = Date.now()
+    await live.drive({ action: "command", id: "theme:dark" })
+    check("ui: a window that never answers isn't waited on", Date.now() - t0 < 500 && old.sent.at(-1)?.id === "theme:dark" && !old.sent.at(-1)?.rid)
+  }
+  // Which devices are open (each window says its app's device id as it connects): another device's tabs close there.
+  {
+    const own = new Live(vault)
+    const win = (device?: string) => {
+      const on: Record<string, () => void> = {}
+      const ws: Any = { readyState: 1, OPEN: 1, close() {}, on: (k: string, f: () => void) => { on[k] = f }, sent: [] as Any[], send(t: string) { ws.sent.push(JSON.parse(t)) } }
+      own.client(ws, undefined, device)
+      return { ws, gone: () => { ws.readyState = 3; on.close?.() } }
+    }
+    const a1 = win("devicea1b2c3"), a2 = win("devicea1b2c3"), b = win("deviceb4d5e6"), none = win(), bad = win("../x")
+    const present = own.present()
+    check("live: the devices open, each with its windows", present.length === 2 && present.find((p) => p.id === "devicea1b2c3")?.windows === 2 &&
+      present.find((p) => p.id === "deviceb4d5e6")?.windows === 1, present)
+    check("live: a message for one device goes to each of its windows, and no other", own.tell("devicea1b2c3", { action: "tabs", do: "close" }) === 2 &&
+      a1.ws.sent.at(-1)?.type === "ui" && a2.ws.sent.at(-1)?.do === "close" && b.ws.sent.length === 1 && none.ws.sent.length === 1 && bad.ws.sent.length === 1)
+    a1.gone(); a2.gone()
+    check("live: a device whose windows all closed isn't open", !own.present().some((p) => p.id === "devicea1b2c3") && own.tell("devicea1b2c3", {}) === 0)
+    own.close()
+  }
+  live.close()
+  Object.assign($.vars, { Live })
+}

@@ -1,0 +1,194 @@
+// Interaction consistency on a desktop: tabs reused, focus returned, drops and menus' order alike everywhere.
+// Runs a shell, WRITES "Qa interact", tabs and workspaces 1 and 3 (removed after): throwaway server only.
+//   node web/qa/interact.mjs <base url> [out dir]
+import { execFileSync } from "node:child_process"
+import { mkdirSync } from "node:fs"
+import path from "node:path"
+import { apiAt, command, qa, until } from "./lib/qa.mjs"
+import { app } from "./lib/app.mjs"
+const { args: [B, OUT = "/tmp/interact-shots/"], browser, check, watch, done } = await qa(import.meta.url)
+mkdirSync(OUT, { recursive: true })
+const api = apiAt(B)
+const vaultPath = (await (await fetch(new URL("api/vault", B))).json()).path
+const vau = (...a) => execFileSync(process.execPath, [path.resolve(import.meta.dirname, "../../bin/vau"), "--url", B, ...a],
+  { encoding: "utf8", env: { ...process.env, VAULTITE_URL: B, VAULTITE_VAULT: vaultPath } })
+vau("plugin", "on", "workspaces")
+for (const where of [[], ["--vault"]]) if (!vau("panels", ...where).match(/sidebar:\n(?:\s+\d+\. .*\n)*?\s+\d+\. terminal:sessions/)) vau("panels", "show", "terminals", ...where)
+const DIR = "Qa interact"
+await fetch(`${B}api/file?path=${encodeURIComponent(DIR)}`, { method: "DELETE" })
+await api("POST", "folder", { path: DIR })
+for (const n of ["One", "Two"]) await api("POST", "file", { path: `${DIR}/${n}.md`, text: `${n}.\n` })
+
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+await ctx.addInitScript(() => { if (!sessionStorage.getItem("qa")) { localStorage.clear(); sessionStorage.setItem("qa", "1") } })
+const page = watch(await ctx.newPage(), { console: true, ignore: /favicon|Failed to load resource|WebSocket/ }), ui = app(page)
+const shot = (name) => page.screenshot({ path: `${OUT}interact-${name}.png` })
+const panes = () => page.evaluate(() => [...document.querySelectorAll("[data-pane-area] > section[data-pane-frame]:not([data-away])")].map((s) => ({
+  id: s.dataset.paneFrame, x: s.getBoundingClientRect().x, tabs: [s.getAttribute("aria-label")],
+})).sort((a, b) => a.x - b.x))
+const tabs = () => page.evaluate(() => [...document.querySelectorAll("[data-tab-strip] [data-tab-id]")].flatMap((c) => {
+  const halves = [...c.querySelectorAll("[data-pane-half]")]
+  return halves.length ? halves.map((h) => h.innerText.trim()) : [c.querySelector("[role=tab]").innerText.trim()]
+}))
+const count = async (label) => (await tabs()).filter((t) => t === label).length
+const cmd = async (name) => { await command(page, name, 0); await ui.idle() }
+const focus = () => page.evaluate(() => {
+  const a = document.activeElement
+  if (!a || a === document.body) return "body"
+  if (a.matches(".cm-content")) return `editor:${a.closest("[data-pane]")?.dataset.pane}`
+  if (a.closest("[role=dialog][aria-modal]")) return "palette"
+  if (a.dataset.workspace) return `ws:${a.dataset.workspace}`
+  if (a.hasAttribute("data-workspace-switcher")) return "switcher"
+  if (a.closest("[data-tab-id]")) return "tab"
+  return a.tagName.toLowerCase()
+})
+const focusedPane = () => page.evaluate(() => document.querySelector("#main-scroll")?.dataset.pane)
+
+await page.goto(`${B}#file/${encodeURIComponent(`${DIR}/One.md`)}`); await page.locator(".cm-content").first().waitFor(); await ui.idle()
+
+await cmd("Open tags in a tab"); await cmd("Open tags in a tab")
+check("Open tags in a tab, twice: one Tags tab", (await count("Tags")) === 1, await tabs())
+await cmd("Open outline in right split"); await cmd("Open outline in right split"); await cmd("Open outline in a tab")
+check("Open outline in right split twice, then in a tab: one Outline tab", (await count("Outline")) === 1, await tabs())
+await cmd("Open links in a tab"); await cmd("Open links in right split")
+check("Open links in a tab, then in right split: one Links tab", (await count("Links")) === 1, await tabs())
+const fresh = async () => {
+  const shape = (l) => JSON.stringify(l ?? null, (k, v) => (["back", "fwd", "from", "active", "focus"].includes(k) ? undefined : v))
+  const mine = () => page.evaluate(() => JSON.parse(localStorage.getItem("vaultite.tabs") ?? "null")?.tabs)
+  await until(async () => shape((await api("GET", "workspaces")).workspaces?.[0]?.layout?.tabs) === shape(await mine()), 10000); await ui.idle()
+  await page.goto(`${B}api/state`)
+  await api("PUT", "workspaces/1", { layout: { root: { id: "g0", tabs: [{ id: "t1", to: `file:${DIR}/One.md` }], active: "t1" }, focus: "g0" }, state: { "files:open": [DIR] } })
+  await page.goto(`${B}#file/${encodeURIComponent(`${DIR}/One.md`)}`); await page.locator(".cm-content").first().waitFor(); await ui.idle()
+}
+await fresh()
+
+async function dragTo(from, x, y) {
+  await from.scrollIntoViewIfNeeded()
+  const b = await from.boundingBox()
+  const [fx, fy] = [b.x + Math.min(40, b.width / 2), b.y + b.height / 2]
+  await page.mouse.move(fx, fy); await page.mouse.down()
+  await page.mouse.move(fx + 8, fy + 4, { steps: 2 }); await page.mouse.move(x, y, { steps: 10 }); await ui.idle()
+  const ghost = await page.evaluate(() => ({ text: document.querySelector("[data-drag-ghost]")?.textContent ?? null, line: !!document.querySelector("[data-drop-preview]") }))
+  await page.mouse.up(); await ui.idle()
+  return ghost
+}
+await page.locator(`aside [data-tree-path="${DIR}/Two.md"] > button`).first().click({ button: "middle" }); await ui.idle()
+const two = await page.locator("[data-tab-strip] [data-tab-id]", { hasText: "Two" }).first().boundingBox()
+const g = await dragTo(page.locator(`aside [data-tree-path="${DIR}/One.md"]`).first(), two.x + two.width - 4, two.y + two.height / 2)
+check("a tree file dropped on a bar that has its tab: offered (the tabs make way)", g.line, g)
+check("...its tab moves there, no second one", (await tabs()).join("|") === "Two|One", await tabs())
+await fresh()
+
+await cmd("Open terminal"); await page.locator("aside [data-session]").first().waitFor(); await ui.idle()
+const term = await page.evaluate(() => document.querySelector("aside [data-session]")?.getAttribute("data-session"))
+await page.locator("[data-tab-strip] [data-tab-id]", { hasText: "One" }).first().click(); await ui.idle()
+const body = await page.locator("[data-pane-body]").first().boundingBox()
+const tg = await dragTo(page.locator(`aside [data-session="${term}"]`).first(), body.x + body.width - 20, body.y + body.height / 2)
+const ps = await panes()
+check("a Terminals panel row dropped on a pane's right edge: a split with that terminal", ps.length === 2 && ps[1].tabs.join() === "Terminal" && /Terminal/.test(tg.text ?? ""), [ps, tg])
+await page.locator(`aside [data-session="${term}"]`).first().hover()
+await ui.menu.open(page.locator(`aside [data-session="${term}"] [data-row-more]`).first())
+await ui.menu.pick("End session")
+if (await page.$("[role=alertdialog]")) await page.locator("[role=alertdialog] button", { hasText: /End/ }).click()
+await ui.idle()
+await fresh()
+
+let popups = 0
+ctx.on("page", () => popups++)
+const pinned = page.locator("aside nav[aria-label=Pages] [data-pin]").first()
+const pinName = (await pinned.textContent()).trim()
+await pinned.click({ button: "middle" }); await ui.idle()
+check("a pinned page middle-clicked: a tab here, no browser tab", popups === 0 && (await tabs()).includes(pinName), [popups, await tabs()])
+for (const p of ctx.pages()) if (p !== page) await p.close()
+await fresh()
+
+await page.click(".cm-content"); await ui.idle()
+const ed = await focus()
+check("typing in the editor", ed.startsWith("editor:"), ed)
+await page.keyboard.press("ControlOrMeta+p"); await ui.idle()
+check("⌘P: the palette has the keyboard", (await focus()) === "palette", await focus())
+await page.keyboard.press("Escape"); await ui.idle()
+check("...Escape: back in the editor", (await focus()) === ed, await focus())
+await page.keyboard.press("ControlOrMeta+o"); await ui.idle()
+await page.keyboard.press("Escape"); await ui.idle()
+check("⌘O, Escape: back in the editor", (await focus()) === ed, await focus())
+await page.keyboard.press("ControlOrMeta+o"); await ui.idle()
+await page.keyboard.type("Two"); await ui.idle(); await page.keyboard.press("Enter"); await ui.idle()
+const showing = () => page.evaluate(() => document.activeElement?.closest("section[data-pane-frame]")?.getAttribute("aria-label"))
+check("⌘O, a file picked: its editor has the keyboard", (await focus()).startsWith("editor:") && (await showing()) === "Two", [await focus(), await showing()])
+await page.goto(`${B}#file/${encodeURIComponent(`${DIR}/One.md`)}`); await ui.idle()
+await page.click(".cm-content"); await ui.idle()
+await cmd("Split right"); await ui.idle()
+const right = await focusedPane()
+check("Split right from the palette: the new pane's editor has the keyboard", (await focus()) === `editor:${right}`, [await focus(), right])
+await cmd("Focus pane to the left"); await ui.idle()
+const left = await focusedPane()
+check("Focus pane to the left: its editor has the keyboard", left !== right && (await focus()) === `editor:${left}`, [await focus(), left])
+await ui.menu.context(page.locator("[data-tab-strip] [data-tab-id] [role=tab]").first())
+check("a tab's menu has the keyboard", await page.evaluate(() => !!document.activeElement?.closest("[role=menu]")))
+await page.keyboard.press("Escape"); await ui.idle()
+check("...Escape: the keyboard back on that tab", (await focus()) === "tab", await focus())
+await page.click(".cm-content"); await ui.idle()
+await cmd("Colour scheme"); await ui.idle()
+await page.keyboard.press("Escape"); await ui.idle()
+check("a sheet (colour schemes) closed with Escape: back in the editor", (await focus()).startsWith("editor:"), await focus())
+
+const menuItems = async (loc) => {
+  await ui.menu.context(loc)
+  const items = await page.$$eval("[role=menu] > button", (bs) => bs.map((b) => b.innerText.trim()))
+  await page.keyboard.press("Escape"); await ui.idle()
+  return items
+}
+const tabLoc = page.locator("[data-tab-strip] [data-tab-id] [role=tab]").first()
+const tabItems = await menuItems(tabLoc)
+const fileItems = tabItems.slice(Math.max(0, tabItems.indexOf("Rename")))
+check("a file's tab menu: Rename, its path, Reveal, then More file actions", ["Rename", "Copy path", "Reveal in file tree"].every((x) => fileItems.includes(x)) && fileItems.at(-1) === "More file actions", tabItems)
+check("...not Move, Duplicate or Delete at its top level", !["Move file to…", "Duplicate", "Delete"].some((x) => tabItems.includes(x)), tabItems)
+await ui.menu.context(tabLoc)
+await page.locator("[role=menu] > button", { hasText: /^More file actions$/ }).hover(); await page.locator("[role=menu]").nth(1).waitFor(); await ui.idle()
+const moreFile = await page.locator("[role=menu]").nth(1).locator("button").allInnerTexts()
+await page.keyboard.press("Escape"); await ui.idle()
+if (await page.locator("[role=menu]").count()) { await page.keyboard.press("Escape"); await ui.idle() }
+check("More file actions ▸: Move, Duplicate, then Delete last", moreFile[0] === "Move file to…" && moreFile.includes("Duplicate") && moreFile.at(-1) === "Delete", moreFile)
+await page.evaluate((p) => { location.hash = `#file/${encodeURIComponent(p)}` }, `${DIR}/One.md`); await ui.idle()
+const pinMenu = await menuItems(page.locator("aside nav[aria-label=Pages] [data-pin]").first())
+check("a pinned page's menu opens it like the tree's (new tab, to the right in its submenu), has a file's items and unpins it last", pinMenu[0] === "Open in new tab" && pinMenu.includes("Copy path") && pinMenu.at(-1) === "Unpin" && pinMenu.filter((t) => t === "Unpin").length === 1, pinMenu)
+
+await page.click("aside [data-workspace-switcher]"); await ui.idle()
+check("the workspace list opens with the keyboard on the current one", (await focus()) === "ws:1", await focus())
+await page.keyboard.press("ArrowDown"); await ui.idle()
+check("...ArrowDown: the next one, New workspace", (await focus()) === "ws:2" && !!(await page.$("[data-workspace-list] [data-workspace='2'][data-workspace-new]")), await focus())
+await page.keyboard.press("ArrowUp"); await ui.idle()
+check("...ArrowUp: back to the first", (await focus()) === "ws:1", await focus())
+await page.keyboard.press("ArrowUp"); await ui.idle()
+check("...ArrowUp again: round to the last", (await focus()) === "ws:2", await focus())
+await page.keyboard.press("Escape"); await ui.idle()
+check("...Escape: closed, the keyboard back on the switcher", !(await page.$("[data-workspace-list]")) && (await focus()) === "switcher", await focus())
+await page.keyboard.press("Escape")
+
+await fresh()
+await page.locator(`aside [data-tree-path="${DIR}/Two.md"] > button`).first().click({ button: "middle" }); await ui.idle()
+const active = async () => page.evaluate(() => document.querySelector("#main-scroll")?.closest("section[data-pane-frame]")?.getAttribute("aria-label"))
+check("a tree file middle-clicked: its tab behind, One still on screen", (await tabs()).join() === "One,Two" && (await active()) === "One", [await tabs(), await active()])
+await page.locator("[data-tab-strip] [data-tab-id] [role=tab]", { hasText: "Two" }).first().click(); await ui.idle()
+await cmd("Go to previous tab")
+check("Go to previous tab", (await active()) === "One", await active())
+await cmd("Go to previous tab")
+check("...again: round to the last", (await active()) === "Two", await active())
+const before = (await api("GET", "state")).workspaces ?? []
+if (before[2]) console.log("(skipping the workspace move: this vault uses workspace 3)")
+else {
+  await cmd("Move current tab to workspace 3"); await ui.idle()
+  const ws = (await api("GET", "state")).workspaces ?? []
+  check("Move current tab to workspace 3: gone from here, there in 3", (await tabs()).join() === "One" && JSON.stringify(ws[2] ?? {}).includes(`${DIR}/Two.md`), [await tabs(), ws[2]])
+  await page.locator("[data-sonner-toast] button", { hasText: "Undo" }).first().click(); await ui.idle()
+  await until(async () => !JSON.stringify((await api("GET", "state")).workspaces?.[2] ?? null).includes(`${DIR}/Two.md`))
+  const ws2 = (await api("GET", "state")).workspaces ?? []
+  check("...its toast's Undo: back here, and 3 unused again", (await tabs()).join() === "One,Two" && !JSON.stringify(ws2[2] ?? null).includes(`${DIR}/Two.md`), [await tabs(), ws2[2]])
+  for (const n of [1, 3]) await fetch(`${B}api/workspaces/${n}`, { method: "DELETE" })
+}
+await shot("end")
+
+await browser.close()
+await fetch(`${B}api/file?path=${encodeURIComponent(DIR)}`, { method: "DELETE" })
+await done()

@@ -1,0 +1,137 @@
+// A service on its code store (core/update/servicestore.ts, bin/vaultite-server) on throwaway repos: roots made, restarted
+// onto or their web build taken, the one that keeps failing at start left. npm, builds, CI and the graph stood in for.
+import { execFileSync, spawnSync } from "node:child_process"
+import fs from "node:fs"
+import path from "node:path"
+import { check, exit, section, skip, summary, tempDir } from "./test/lib.ts"
+import { gitEnv } from "../core/gitenv.ts"
+import { giveGraph } from "../core/update/graph.ts"
+import type { Recipe } from "../core/update/store.ts"
+import { inStore } from "../core/update/servicestore.ts"
+import { checkForUpdate } from "../core/update/updater.ts"
+const t0 = Date.now()
+if (process.platform === "win32") { skip("the service's code store", "Windows' service updates its checkout in place"); await exit(summary("servicestore", t0)) }
+
+const tmp = tempDir("vaultite-servicestore-test-")
+const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=Alice Park", "-c", "user.email=alice@example.com", ...args], { cwd, encoding: "utf8", stdio: "pipe", env: gitEnv() }).trim()
+const origin = path.join(tmp, "origin.git"), dev = path.join(tmp, "dev"), checkout = path.join(tmp, "lighthouse")
+execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin], { env: gitEnv() })
+execFileSync("git", ["clone", "--quiet", origin, dev], { stdio: "pipe", env: gitEnv() })
+const commit = (files: Record<string, string>, msg: string) => {
+  for (const [f, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dev, f)), { recursive: true }); fs.writeFileSync(path.join(dev, f), text) }
+  git(dev, "add", "-A"); git(dev, "commit", "--quiet", "-m", msg); git(dev, "push", "--quiet", "origin", "HEAD:main")
+  return git(dev, "rev-parse", "HEAD")
+}
+// (the server says where it runs from and where its own files are: what the trampoline gave it)
+const server = (n: number) => `console.log(JSON.stringify({ server: ${n}, cwd: process.cwd(), local: process.env.VAULTITE_LOCAL }))\n`
+commit({ ".gitignore": "node_modules\nweb/dist/\nelectron/build.json\ndata/\n", "package.json": JSON.stringify({ name: "lighthouse", type: "module" }),
+  "package-lock.json": "{}", "server.ts": server(1), "web/src/a.ts": "1\n", "bin/vaultite-server": fs.readFileSync("bin/vaultite-server", "utf8"),
+  "bin/vaultite-launch.mjs": fs.readFileSync("bin/vaultite-launch.mjs", "utf8"),
+  "electron/shell/inputs.json": JSON.stringify({ files: ["electron/shell"], package: ["name"], electron: "package-lock.json" }), "electron/shell/boot.mjs": "// the shell\n" }, "first")
+execFileSync("git", ["clone", "--quiet", origin, checkout], { stdio: "pipe", env: gitEnv() })
+
+const recipe: Recipe = {
+  build: [
+    { name: "web build", run: async (c) => { fs.mkdirSync(path.join(c.root, "web", "dist"), { recursive: true }); fs.writeFileSync(path.join(c.root, "web", "dist", "index.html"), "<!doctype html>") } },
+    { name: "stamp", run: async (c) => { fs.mkdirSync(path.join(c.root, "electron"), { recursive: true }); fs.writeFileSync(path.join(c.root, "electron", "build.json"), JSON.stringify({ commit: git(c.root, "rev-parse", "HEAD") })) } },
+  ],
+  keyFiles: ["server.ts", "bin/vaultite-server", "bin/vaultite-launch.mjs", "web/dist/index.html"],
+  preflight: [],
+}
+// (what reaches the server: server.ts; the web app: web/)
+giveGraph(async () => ({ diskTree: () => null, graphOf: () => ({ hit: (entry: string, files: string[]) => {
+  const f = files.find((x) => entry === "server" ? x === "server.ts" : entry === "web" ? x.startsWith("web/") : false)
+  return f ? { file: f, chain: [f] } : null
+} }) }) as never)
+
+const store = path.join(checkout, "data", "code.noindex")
+let restarts = 0
+const adopted: string[] = [], logged: string[] = []
+const host = (root: string) => inStore({ checkout, store, root, branch: "main", stateFile: path.join(tmp, "state.json"), busy: async () => null, restart: () => { restarts++ },
+  ci: async () => ({ ok: true, why: "CI passed" }), adoptWeb: (d) => adopted.push(d), log: (l) => logged.push(l), recipe, install: async (dir) => { fs.mkdirSync(path.join(dir, "node_modules"), { recursive: true }) } })
+const current = () => JSON.parse(fs.readFileSync(path.join(store, "current.json"), "utf8")).commit
+const rootOf = (sha: string) => path.join(store, "roots", sha)
+const leased = (sha: string) => fs.existsSync(path.join(store, "leases", `${sha}.${process.pid}.json`))
+const launched: string[] = []
+const trampoline = () => {
+  const r = spawnSync(process.execPath, [path.join(checkout, "bin", "vaultite-server")], { encoding: "utf8",
+    env: { ...process.env, VAULTITE_CODE_STORE: store, VAULTITE_LOCAL: "", VAULTITE_SERVICE_WAIT: "off" } })
+  launched.push(r.stderr)
+  return JSON.parse(r.stdout.trim().split("\n").at(-1)!)
+}
+const pointTo = (name: "current" | "good", sha: string) => fs.writeFileSync(path.join(store, `${name}.json`), JSON.stringify({ commit: sha, t: Date.now() }))
+const isBad = (sha: string) => fs.existsSync(path.join(store, "bad", `${sha}.json`))
+
+await section("a commit the server runs: made into a root, then restarted onto", async () => {
+  const c2 = commit({ "server.ts": server(2) }, "the server changes")
+  const s = await checkForUpdate(await host(checkout))
+  check("prepared, current, the server restarts", s.state === "current" && current() === c2 && restarts === 1 && !adopted.length, { s, logged })
+  check("its root is read-only", !(fs.statSync(rootOf(c2)).mode & 0o222))
+  const ran = trampoline()
+  check("bin/vaultite-server runs it from its root, its own files the checkout's", ran.server === 2 && fs.realpathSync(ran.cwd) === fs.realpathSync(rootOf(c2)) && fs.realpathSync(ran.local) === fs.realpathSync(path.join(checkout, "data")), ran)
+  fs.rmSync(path.join(store, "service-start.json"))
+  await host(rootOf(c2))
+  check("once up on it, its root is good (what a failed start falls back to)", JSON.parse(fs.readFileSync(path.join(store, "good.json"), "utf8")).commit === c2)
+})
+
+await section("a commit of the web app only: its web build taken, no restart", async () => {
+  const before = restarts
+  const h = await host(rootOf(git(dev, "rev-parse", "HEAD")))
+  const c3 = commit({ "web/src/a.ts": "2\n" }, "the web app changes")
+  const s = await checkForUpdate(h)
+  check("current, the new root's web/dist served, nothing restarted", s.state === "current" && current() === c3 && restarts === before && adopted.at(-1) === path.join(rootOf(c3), "web", "dist"), { s, adopted, logged })
+  check("the root it serves is leased, so gc keeps it once another is current", leased(c3), fs.readdirSync(path.join(store, "leases")))
+  const c4 = commit({ "web/src/a.ts": "3\n" }, "the web app changes again")
+  await checkForUpdate(h)
+  check("the next web build taken: its root leased, the one before let go", leased(c4) && !leased(c3), fs.readdirSync(path.join(store, "leases")))
+})
+
+await section("a root whose server keeps stopping as it starts: the good one runs, and it's bad once that one starts", async () => {
+  const c4 = current(), c2 = git(dev, "rev-parse", "HEAD~2")
+  const said = [1, 2, 3].map(() => trampoline().server)
+  const fourth = trampoline()
+  check("three tries of current, then the good root runs, current only suspect", said.every((n) => n === 2) && fs.realpathSync(fourth.cwd) === fs.realpathSync(rootOf(c2))
+    && !isBad(c4) && launched.at(-1)!.includes("to tell its code from this machine's trouble"), { said, fourth, launched })
+  fs.rmSync(path.join(store, "service-start.json"))
+  pointTo("good", c2)
+  const after = trampoline()
+  check("once the good root started fine after it, current is bad, and the good one runs", isBad(c4) && fs.realpathSync(after.cwd) === fs.realpathSync(rootOf(c2)), { after, launched })
+})
+
+await section("every root stopping as it starts (the vault unreadable, the load): this machine's trouble, none bad", async () => {
+  const c3 = git(dev, "rev-parse", "HEAD~1"), c2 = git(dev, "rev-parse", "HEAD~2")
+  fs.rmSync(path.join(store, "service-start.json"))
+  pointTo("current", c3)
+  launched.length = 0
+  const ran = Array.from({ length: 8 }, () => fs.realpathSync(trampoline().cwd))
+  const cur = fs.realpathSync(rootOf(c3)), good = fs.realpathSync(rootOf(c2))
+  check("current three times, the good one three times, then current again, waiting longer each time", ran.join() === [cur, cur, cur, good, good, good, cur, cur].join()
+    && launched[6].includes("this machine's trouble, not the code's") && launched[3].includes("waits 15 s") && launched[7].includes("waits 120 s"), { ran, launched })
+  check("neither is marked bad, nor suspect", !isBad(c3) && !isBad(c2) && !fs.existsSync(path.join(store, "service-suspect.json")))
+  fs.rmSync(path.join(store, "service-start.json"))
+  launched.length = 0
+  check("once a server started, its next start doesn't wait", fs.realpathSync(trampoline().cwd) === cur && !launched[0].includes("waits"), launched)
+  fs.rmSync(path.join(store, "current.json")); fs.rmSync(path.join(store, "good.json"))
+  check("no root to run: the checkout's own server", trampoline().server === 1)
+})
+
+await section("a root's own launcher runs, as the checkout's never updates; the checkout's when the root's won't load", async () => {
+  const own = fs.readFileSync("bin/vaultite-launch.mjs", "utf8"), at = "export async function launch({ checkout }) {"
+  const marked = own.replace(at, `${at}\n  console.error("the root's launcher")`)
+  check("(the launcher has the line the test marks)", marked !== own)
+  const fresh = async (files: Record<string, string>, msg: string) => {
+    const sha = commit(files, msg)
+    await checkForUpdate(await host(checkout))
+    fs.rmSync(path.join(store, "service-start.json"), { force: true })
+    launched.length = 0
+    return { sha, ran: trampoline() }
+  }
+  const c5 = await fresh({ "bin/vaultite-launch.mjs": marked, "server.ts": server(5) }, "the launcher changes")
+  check("the current root's launcher starts its server", current() === c5.sha && c5.ran.server === 5 && launched[0].includes("the root's launcher"), { ran: c5.ran, launched, logged })
+  const c6 = await fresh({ "bin/vaultite-launch.mjs": "export const launch = (\n", "server.ts": server(6) }, "the launcher breaks")
+  check("a launcher that won't load: the checkout's starts the root's server", current() === c6.sha && c6.ran.server === 6 && launched[0].includes("launcher didn't load"), { ran: c6.ran, launched, logged })
+})
+
+execFileSync("chmod", ["-R", "u+w", tmp]) // (roots are read-only)
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5 })
+await exit(summary("servicestore", t0))

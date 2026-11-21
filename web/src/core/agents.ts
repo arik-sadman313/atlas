@@ -1,0 +1,238 @@
+import { useEffect, useState, useSyncExternalStore } from "react"
+import { SquareTerminal, type LucideIcon } from "lucide-react"
+import { choose } from "@/components/Chooser"
+import { get } from "@/core/http"
+import { isViewOpen, openView } from "@/core/files"
+import { fetchMachines, machinePath, onMachine, otherMachines, splitMachine, type Machine } from "@/core/machines"
+import { notify } from "@/core/notify"
+import { agentsOn, isEnabled, useAgents, type Agent } from "@/core/plugins"
+import type { SettingChoice } from "@/core/define"
+import { getPrefs } from "@/core/prefs"
+import { useStateFor } from "@/core/statefor"
+import { currentWorkspace, scopedState, useScopedState } from "@/core/scope"
+import { agentIn, newTerminalId, parseTerminal, resumeTerminalId } from "../../../core/terminalids.ts"
+
+const minted = new Map<string, number>()
+/** A new terminal session id: 8 letters and digits. `asked`: when the user asked for it (performance.now()). */
+export function terminalId(asked = performance.now()) {
+  const id = newTerminalId()
+  minted.set(id, asked)
+  return id
+}
+/** When the user asked for terminal `id`, if this page made it (for its opening's span). */
+export const askedAt = (id: string) => minted.get(id.replace(/@.*$/, "").split("-").pop() ?? "")
+/** Whether this page made terminal `id` ("claude-k3j2h1g0@studio" too) just now, so its tab may start it:
+ *  a tab put back (a reload, the app reopened, another device) only attaches, and never starts an agent by itself. */
+export const mintedHere = (id: string) => minted.has(id.replace(/@.*$/, "").split("-").pop() ?? "")
+
+/** Whether agents can run here: the Terminal plugin is on. */
+export const canRunAgents = () => isEnabled("terminal", getPrefs().disabled)
+
+/** Where new terminals and agents (and Dispatch) open unasked: a machine (none: this one), an account per agent. */
+export type DefaultPlace = { machine?: string; accounts?: Record<string, string> }
+const NOWHERE: DefaultPlace = {}
+const placeState = scopedState<DefaultPlace>("core:place", NOWHERE)
+export const getDefaultPlace = () => placeState.get()
+export const useDefaultPlace = () => useScopedState("core:place", NOWHERE)[0]
+
+/** The current workspace's default for agent `agent` (null: a shell), as ids: "" is this machine (also when the default
+ *  names this one), and the agent's own account. */
+export function defaultPlaceOf(agent: string | null, machines: Machine[] | null, h = getDefaultPlace()) {
+  const machine = h.machine && !machines?.find((m) => m.id === h.machine)?.self ? h.machine : ""
+  return { machine, profile: (agent && h.accounts?.[agent]) || "" }
+}
+
+/** Make machine `machine` ("": this one) the current workspace's default, and `profile` agent `agent`'s account there. */
+export function setDefaultPlace(agent: string | null, machine: string, profile = "") {
+  const h = getDefaultPlace(), accounts = { ...h.accounts }
+  if (agent) { if (profile) accounts[agent] = profile; else delete accounts[agent] }
+  const next: DefaultPlace = { ...(machine ? { machine } : {}), ...(Object.keys(accounts).length ? { accounts } : {}) }
+  placeState.set(Object.keys(next).length ? next : undefined)
+}
+
+/** Where a new one opens: what's asked (machine "" is this one), else the workspace's default. A default machine that's
+ *  offline, or doesn't run terminals (or the agent's plugin), gives way to this one: `instead` says why. */
+export async function resolvePlace(agent: string | null, asked: { machine?: string | null; profile?: string | null } = {}) {
+  const h = getDefaultPlace()
+  let machine = asked.machine ?? undefined, instead = ""
+  if (machine === undefined && h.machine) {
+    const ms = await fetchMachines(), m = ms.find((x) => x.id === h.machine)
+    const plugin = agent ? agentsOn().find((a) => a.name === agent)?.plugin : undefined
+    if (m?.self || !ms.length) machine = ""
+    else if (m?.online && m.plugins?.includes("terminal") && (!plugin || m.plugins.includes(plugin))) machine = m.id
+    else { machine = ""; instead = `${m?.label ?? h.machine} ${m?.online ? "doesn't run it" : "is offline"}` }
+  }
+  return { machine: machine ?? "", profile: asked.profile ?? (agent ? h.accounts?.[agent] ?? "" : ""), instead }
+}
+
+/** Open agent `name` in a terminal tab, new or `resume` (a session id, in the tab that has it, its account's id with
+ *  `profile`). `machine`: on another machine ("": this one); either left out: the workspace's default (resolvePlace). */
+export async function openAgent(name: string, opts: { resume?: string; split?: boolean; newTab?: boolean; machine?: string | null; profile?: string | null } = {}) {
+  if (opts.resume) {
+    const to = `terminal/${onMachine(resumeTerminalId(name, opts.resume, opts.profile), opts.machine)}`
+    return openView(to, { newTab: opts.newTab ?? !isViewOpen(to), split: opts.split })
+  }
+  const asked = performance.now(), { machine, profile, instead } = await resolvePlace(name, opts)
+  if (instead) notify(`${instead}: opened on this machine`)
+  const id = `${agentIn(name, profile)}-${terminalId(asked)}`
+  return openView(`terminal/${onMachine(id, machine)}`, { newTab: !opts.split, split: opts.split })
+}
+
+export async function openAgentSession({ terminal = "", session = "", agent = "", machine = "", host = false }: { terminal?: string; session?: string; agent?: string; machine?: string; host?: boolean }) {
+  const ms = await fetchMachines()
+  const [bare, at] = splitMachine(terminal)
+  const there = at || (machine && ms.some((m) => m.id === machine && !m.self) ? machine : "")
+  const view = agentsOn().find((a) => a.name === agent)?.session
+  if (host && session && view) { openView(`view:${view}/${onMachine(session, there)}`, { newTab: true }); return }
+  const { sessions } = await get<{ sessions: { id: string }[] }>(there ? `machines/${encodeURIComponent(there)}/terminals/sessions` : "terminals/sessions")
+  if (bare && sessions.some((s) => s.id === bare)) openView(`terminal/${onMachine(bare, there)}`, { newTab: true })
+  else if (session && agent) openAgent(agent, { resume: session, machine: there })
+  else notify("Its terminal has ended, and it names no session to resume")
+}
+
+/** Open a plain terminal: on `machine` ("": this one), else the workspace's default. */
+export async function openTerminal(opts: { machine?: string | null; split?: boolean } = {}) {
+  const asked = performance.now(), { machine, instead } = await resolvePlace(null, opts)
+  if (instead) notify(`${instead}: opened on this machine`)
+  return openView(`terminal/${onMachine(terminalId(asked), machine)}`, { newTab: !opts.split, split: opts.split })
+}
+
+/** One of an agent's accounts, as its plugin lists them (`accounts` in its definition): the first is its bare name's. */
+export type AgentAccount = { id: string; label: string }
+const accountLists = new Map<string, { at: number; list: Promise<AgentAccount[]> }>()
+/** Agent `a`'s accounts on `machine` ("": this one), none if it has none or they can't be read; kept a minute, unless
+ *  `fresh`. */
+export function accountsOf(a: Agent, machine: string, fresh = false): Promise<AgentAccount[]> {
+  if (!a.accounts) return Promise.resolve([])
+  const key = `${a.name}@${machine}`, had = accountLists.get(key)
+  if (had && !fresh && Date.now() - had.at < 60_000) return had.list
+  const list = get<AgentAccount[]>(machinePath(machine, a.accounts)).catch(() => [])
+  accountLists.set(key, { at: Date.now(), list })
+  return list
+}
+
+const names = new Map<string, { at: number; list: AgentAccount[] }>()
+const namesHeard = new Set<() => void>()
+function accountName(agent: string, machine: string, id?: string) {
+  const a = agentsOn().find((x) => x.name === agent)
+  if (!a?.accounts) return ""
+  const key = `${agent}@${machine}`, had = names.get(key)
+  if (!had || Date.now() - had.at > 300_000) {
+    names.set(key, { at: Date.now(), list: had?.list ?? [] })
+    void accountsOf(a, machine, !!had).then((list) => {
+      names.set(key, { at: Date.now(), list })
+      named = (...args) => accountName(...args)
+      namesHeard.forEach((f) => f())
+    })
+  }
+  const list = names.get(key)!.list
+  return list.length > 1 ? (id ? list.find((x) => x.id === id) : list[0])?.label ?? "" : ""
+}
+let named: typeof accountName = (...args) => accountName(...args)
+const hearNames = (f: () => void) => { namesHeard.add(f); return () => { namesHeard.delete(f) } }
+export function useAgentChoices(only?: string): SettingChoice[] {
+  const agents = useAgents().filter((a) => !only || a.name === only)
+  const [lists, setLists] = useState<Record<string, AgentAccount[]>>({})
+  const names = agents.map((a) => a.name).join()
+  useEffect(() => {
+    let live = true
+    for (const a of agentsOn().filter((x) => names.split(",").includes(x.name))) {
+      void accountsOf(a, "").then((l) => { if (live) setLists((had) => ({ ...had, [a.name]: l })) })
+    }
+    return () => { live = false }
+  }, [names])
+  return agents.flatMap((a) => {
+    const list = lists[a.name] ?? []
+    return list.length > 1 ? list.map((x, i) => ({ value: i ? `${a.name}_${x.id}` : a.name, label: `${a.label} (${x.label})` })) : [{ value: a.name, label: a.label }]
+  })
+}
+
+/** Agents' accounts' names (accountName): another function each time more are read. */
+export const useAccountNames = () => useSyncExternalStore(hearNames, () => named)
+
+const withAccounts = (id: string, a: Agent | null) => { const t = parseTerminal(id); return a?.accounts && t && !t.resume && t.agent === a.name ? { a, t } : null }
+/** The account terminal `id` runs agent `a` in, by label, when it has several (else ""): the one its id names, or the
+ *  first (its bare name's). A resumed session's isn't in its id: "". */
+export function useTerminalAccount(id: string, a: Agent | null) {
+  const [label, setLabel] = useStateFor([!!withAccounts(id, a)], () => "")
+  useEffect(() => {
+    const known = withAccounts(id, a)
+    if (!known) return
+    const { t } = known
+    let live = true
+    void accountsOf(known.a, t.machine ?? "").then((list) => {
+      const acc = list.length > 1 ? (t.profile ? list.find((x) => x.id === t.profile) : list[0]) : undefined
+      if (live) setLabel(acc?.label ?? "")
+    })
+    return () => { live = false }
+  }, [id, a, setLabel])
+  return label
+}
+
+/** A place to open a terminal or an agent: which machine ("": this one) and, for an agent with accounts, which one. */
+export type Place = { agent: Agent | null; machine: string; machineLabel: string; profile: string; profileLabel: string }
+
+/** Every place: a terminal, then each agent that's on (in each of its accounts), on this machine and on each other one
+ *  that's online with the Terminal plugin on (and the agent's plugin, for an agent). */
+export function places(): Promise<Place[]> {
+  asking ??= askPlaces().then((l) => (lastPlaces = l)).finally(() => { asking = null })
+  return lastPlaces ? Promise.resolve(lastPlaces) : asking
+}
+let lastPlaces: Place[] | null = null, lastMachines: Machine[] | null = null
+let asking: Promise<Place[]> | null = null
+async function askPlaces(): Promise<Place[]> {
+  const ms = lastMachines = await fetchMachines()
+  const where: { machine: string; label: string; plugins: string[] | null }[] = [{ machine: "", label: ms.find((m) => m.self)?.label ?? "This machine", plugins: null },
+    ...otherMachines(ms, "terminal").map((m) => ({ machine: m.id, label: m.label, plugins: m.plugins ?? [] }))]
+  const agents = agentsOn()
+  const out: Place[] = []
+  await Promise.all(where.map(async (w) => {
+    const here: Place[] = [{ agent: null, machine: w.machine, machineLabel: w.label, profile: "", profileLabel: "" }]
+    for (const a of agents) {
+      if (w.plugins && !w.plugins.includes(a.plugin)) continue
+      const accts = await accountsOf(a, w.machine, true)
+      if (accts.length > 1) for (const x of accts) here.push({ agent: a, machine: w.machine, machineLabel: w.label, profile: x.id, profileLabel: x.label })
+      else here.push({ agent: a, machine: w.machine, machineLabel: w.label, profile: "", profileLabel: "" })
+    }
+    out.push(...here)
+  }))
+  const order = where.map((w) => w.machine)
+  return out.sort((a, b) => order.indexOf(a.machine) - order.indexOf(b.machine))
+}
+
+/** Open what a place says. */
+export function openPlace(p: Place, opts: { split?: boolean } = {}) {
+  return p.agent ? openAgent(p.agent.name, { machine: p.machine, profile: p.profile, split: opts.split }) : openTerminal({ machine: p.machine, split: opts.split })
+}
+
+/** Choose where to open a terminal or an agent (`agent`: only that one's places), then open it. */
+export async function choosePlace(opts: { agent?: string; split?: boolean; first?: PlaceChoice[] } = {}) {
+  const all = (await places()).filter((p) => !opts.agent || p.agent?.name === opts.agent), first = opts.first ?? []
+  choose({
+    title: opts.agent ? "Open an agent" : "Open a terminal or an agent", placeholder: "Where to open it…",
+    items: [...first.map((c, i) => ({ id: `first:${i}`, label: c.label, detail: c.detail, icon: c.icon })),
+      ...all.map((p, i) => ({ id: String(i), label: [p.agent?.label ?? "Terminal", p.profileLabel].filter(Boolean).join(" · "), detail: p.machineLabel, icon: p.agent?.icon ?? SquareTerminal }))],
+    onPick: (it) => {
+      if (it.id.startsWith("first:")) return first[Number(it.id.slice(6))]?.run()
+      const p = all[Number(it.id)]
+      if (p) openPlace(p, opts)
+    },
+  })
+}
+export type PlaceChoice = { label: string; detail?: string; icon?: LucideIcon; run: () => void }
+
+/** Choose where new terminals and agents open in the current workspace: a machine, and the agent's account there. */
+export async function chooseDefaultPlace() {
+  const all = await places(), ms = lastMachines ?? await fetchMachines()
+  const h = getDefaultPlace(), desk = currentWorkspace()
+  const isDefault = (p: Place) => {
+    const at = defaultPlaceOf(p.agent?.name ?? null, ms, h)
+    return p.machine === at.machine && (!p.agent || !p.profile || p.profile === (at.profile || "default"))
+  }
+  choose({
+    title: desk ? `Default in ${desk.label}` : "Default", placeholder: "Where new terminals and agents open…",
+    items: all.map((p, i) => ({ id: String(i), label: [p.agent?.label ?? "Terminal", p.profileLabel].filter(Boolean).join(" · "),
+      detail: `${p.machineLabel}${isDefault(p) ? " · default" : ""}`, icon: p.agent?.icon ?? SquareTerminal })),
+    onPick: (it) => { const p = all[Number(it.id)]; if (p) setDefaultPlace(p.agent?.name ?? null, p.machine, p.profile) },
+  })
+}

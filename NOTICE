@@ -1,0 +1,33 @@
+Vaultite
+Copyright 2026 Lucas Takayasu / Vaultite
+
+This product includes third-party software and assets:
+
+- Lucide icons (https://lucide.dev), ISC License, Copyright (c) Lucide Contributors and Cole Bemis: the menu icons
+  in electron/menu-icons/ are rendered from them, and web/src/core/lucide-tags.json lists their search tags.
+- shadcn/ui (https://ui.shadcn.com), MIT License, Copyright (c) 2023 shadcn: web/src/shadcn.css and
+  web/src/components/ui/button.tsx are adapted from it.
+- libghostty-vt (https://github.com/ghostty-org/ghostty), MIT License, Copyright (c) 2024 Mitchell Hashimoto, Ghostty
+  contributors: plugins/core/terminal/vt/ghostty-vt.wasm is its WebAssembly build, as released (PROVENANCE.md there).
+- ghostty-web (https://github.com/kkrausse/ghostty-web, at 8a0701c3), MIT License, Copyright (c) 2025 Coder, (c) 2026
+  kkrausse: plugins/core/terminal/vt/render/webgl.ts follows its WebGL2 renderer's design (instanced passes, an atlas).
+- xterm.js (https://github.com/xtermjs/xterm.js), MIT License, Copyright (c) 2017-2019 The xterm.js authors:
+  plugins/core/terminal/vt/render/boxdraw.ts draws box and block characters after its custom glyphs, and the cell
+  measurement, key sequences and glyph atlas in plugins/core/terminal/vt/ follow its behaviour.
+- kdbxweb (https://github.com/keeweb/kdbxweb, at 7601e45d), MIT License, Copyright (C) 2021-2025 Antelle:
+  electron/browser/kdbx/ is it, changed (PROVENANCE.md there), and tools/fixtures/kdbx/ its test files.
+- SheetJS Community Edition 0.20.3 (https://sheetjs.com), Apache License 2.0, Copyright (C) 2012-present SheetJS LLC:
+  plugins/core/spreadsheets/xlsx/ is its release build, with the patches its PROVENANCE.md lists (LICENSE there).
+- citeproc-js (https://github.com/Juris-M/citeproc-js), under the Common Public Attribution License 1.0 (one of its
+  two licences; the other is the AGPL 3.0), Copyright (c) 2009-2019 Frank Bennett: it formats citations and
+  references. plugins/core/references/citeproc/ is its build from an upstream commit, with the one line its
+  PROVENANCE.md names (LICENSE and CPAL there).
+- Citation Style Language styles and locale (https://citationstyles.org): plugins/core/references/styles/ holds APA,
+  Chicago author-date, MLA, Harvard (Cite them right), IEEE and NLM/Vancouver from github.com/citation-style-language/styles
+  and locales-en-US.xml from github.com/citation-style-language/locales, each under the Creative Commons
+  Attribution-ShareAlike 3.0 License (creativecommons.org/licenses/by-sa/3.0), their authors named in each file.
+- Colour palettes in web/src/themes/, each under the licence listed in web/src/themes/LICENSES.md.
+
+Obsidian is a trademark of Dynalist Inc. Vaultite is not affiliated with or endorsed by Dynalist Inc.; the name is used
+only to say which files, plugins and themes it is compatible with. Other names and logos are trademarks of their
+respective owners.
