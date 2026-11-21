@@ -15,7 +15,7 @@ import '../../features/tasks/presentation/tasks_screen.dart';
 import '../../shared/widgets/atlas_scaffold.dart';
 import 'routes.dart';
 
-GoRouter createAppRouter({String initialLocation = AtlasRoutes.dashboard}) {
+GoRouter createAppRouter({String initialLocation = AtlasRoutes.documents}) {
   final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
   final shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 

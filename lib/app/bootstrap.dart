@@ -55,6 +55,13 @@ Future<void> bootstrap() async {
     ],
   );
 
+  // 7. Load & index all notes and notebooks in Vaultite engine
+  try {
+    await container.read(vaultiteEngineProvider).loadVault(defaultWs.id);
+  } catch (e) {
+    debugPrint('Failed to load Vaultite index at bootstrap: $e');
+  }
+
   runApp(
     UncontrolledProviderScope(container: container, child: const AtlasApp()),
   );

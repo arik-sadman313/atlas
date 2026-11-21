@@ -294,12 +294,22 @@ class AtlasSidebar extends ConsumerWidget {
                   },
                 ),
                 const Spacer(),
-                Text(
-                  'v0.1.0-m1',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: isDark
-                        ? AtlasColors.darkTextMuted
-                        : AtlasColors.lightTextMuted,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AtlasColors.accentBlue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'v0.15.0 • Vaultite',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: AtlasColors.accentBlue,
+                    ),
                   ),
                 ),
               ],

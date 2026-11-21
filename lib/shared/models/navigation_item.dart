@@ -23,14 +23,14 @@ const atlasNavigationItems = [
   ),
   AtlasNavigationItem(
     label: 'Notebooks',
-    icon: Icons.menu_book_outlined,
-    selectedIcon: Icons.menu_book,
+    icon: Icons.draw_outlined,
+    selectedIcon: Icons.draw_rounded,
     route: '/notebooks',
   ),
   AtlasNavigationItem(
-    label: 'Documents',
-    icon: Icons.description_outlined,
-    selectedIcon: Icons.description,
+    label: 'Documents & Vault',
+    icon: Icons.folder_special_outlined,
+    selectedIcon: Icons.folder_special,
     route: '/documents',
   ),
   AtlasNavigationItem(
