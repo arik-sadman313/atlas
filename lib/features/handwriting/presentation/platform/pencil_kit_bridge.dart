@@ -19,12 +19,46 @@ class PencilKitBridge implements InkPlatformService {
 
   PencilKitController? _pencilKitController;
   InkCanvasController? _atlasController;
+  InkToolConfig? _toolBeforeEraser;
 
   @override
   bool get isNativePencilKitAvailable =>
       defaultTargetPlatform == TargetPlatform.iOS;
 
   PencilKitController? get pencilKitController => _pencilKitController;
+
+  void initializeMethodChannel() {
+    _interopChannel.setMethodCallHandler(_handleMethodCall);
+  }
+
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onApplePencilDoubleTap':
+      case 'onApplePencilSqueeze':
+        _handlePencilDoubleTap();
+        break;
+    }
+  }
+
+  void _handlePencilDoubleTap() {
+    if (_atlasController == null) return;
+    final active = _atlasController!.activeTool;
+    if (active.type.isEraser) {
+      final restore =
+          _toolBeforeEraser ??
+          active.copyWith(
+            type: InkToolType.ballpointPen,
+            baseWidth: 3.0,
+            opacity: 1.0,
+          );
+      _atlasController!.setTool(restore);
+    } else {
+      _toolBeforeEraser = active;
+      _atlasController!.setTool(
+        active.copyWith(type: InkToolType.vectorEraser, baseWidth: 16.0),
+      );
+    }
+  }
 
   void attachPencilKitController(PencilKitController controller) {
     _pencilKitController = controller;

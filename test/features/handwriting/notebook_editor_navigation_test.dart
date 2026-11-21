@@ -131,38 +131,21 @@ void main() {
     );
 
     testWidgets(
-      'iOS / iPadOS mounts native PencilKit widget and tool palette',
+      'iOS / iPadOS mounts interactive InkCanvas and FloatingToolDock with Apple Pencil optimizations',
       (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          const MethodChannel('plugins.mjstudio/flutter_pencil_kit/util'),
-          (call) async {
-            if (call.method == 'checkAvailable') return true;
-            return null;
-          },
-        );
-
         try {
           await tester.pumpWidget(buildTestApp());
-          await tester.pump();
+          await tester.pumpAndSettle();
 
-          // iOS must mount native PencilKit widget
-          expect(find.byType(PencilKit), findsOneWidget);
-          expect(
-            find.byWidgetPredicate(
-              (w) => w is FloatingToolDock || w is InkToolPalette,
-            ),
-            findsOneWidget,
-          );
+          // iOS must mount interactive InkCanvas and FloatingToolDock
+          expect(find.byType(InkCanvas), findsOneWidget);
+          expect(find.byType(FloatingToolDock), findsOneWidget);
 
-          // iOS must NOT mount Linux InkCanvas or Android read-only InkPageView
-          expect(find.byType(InkCanvas), findsNothing);
+          // iOS must NOT mount Android read-only InkPageView or PencilKit widget
           expect(find.byType(InkPageView), findsNothing);
+          expect(find.byType(PencilKit), findsNothing);
         } finally {
-          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-            const MethodChannel('plugins.mjstudio/flutter_pencil_kit/util'),
-            null,
-          );
           debugDefaultTargetPlatformOverride = null;
         }
       },

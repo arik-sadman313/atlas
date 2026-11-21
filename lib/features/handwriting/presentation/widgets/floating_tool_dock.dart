@@ -137,6 +137,33 @@ class _FloatingToolDockState extends State<FloatingToolDock> {
                           activeTool.copyWith(type: InkToolType.pan),
                         ),
                       ),
+                      const SizedBox(width: 2),
+                      // Apple Pencil & Finger Mode Toggle (iPad Optimization)
+                      _buildToolButton(
+                        context: context,
+                        icon: widget.controller.drawWithFinger
+                            ? Icons.touch_app_rounded
+                            : Icons.do_not_touch_rounded,
+                        tooltip: widget.controller.drawWithFinger
+                            ? 'Draw with Finger: ON (both finger & pencil draw)'
+                            : 'Draw with Finger: OFF (Apple Pencil only, finger scrolls/zooms)',
+                        isSelected: widget.controller.drawWithFinger,
+                        onTap: () {
+                          widget.controller.toggleDrawWithFinger();
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                widget.controller.drawWithFinger
+                                    ? 'Finger Drawing Enabled (Both Pencil & fingers draw)'
+                                    : 'Apple Pencil Only (Fingers will scroll & zoom without interrupting writing)',
+                              ),
+                              duration: const Duration(seconds: 2),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                      ),
 
                       _buildDivider(isDark),
 

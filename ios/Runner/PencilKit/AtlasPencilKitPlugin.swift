@@ -5,14 +5,32 @@ import PencilKit
 /// Native iPadOS PencilKit interop plugin providing bidirectional serialization
 /// between Apple PKDrawing and the ATLAS portable ink format.
 @available(iOS 14.0, *)
-public class AtlasPencilKitPlugin: NSObject, FlutterPlugin {
+public class AtlasPencilKitPlugin: NSObject, FlutterPlugin, UIPencilInteractionDelegate {
+    private var channel: FlutterMethodChannel?
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: "com.atlas/pencil_kit_interop",
             binaryMessenger: registrar.messenger()
         )
         let instance = AtlasPencilKitPlugin()
+        instance.channel = channel
         registrar.addMethodCallDelegate(instance, channel: channel)
+
+        // Wire Apple Pencil 2 & Apple Pencil Pro hardware gestures
+        DispatchQueue.main.async {
+            if let rootVC = UIApplication.shared.windows.first?.rootViewController {
+                let interaction = UIPencilInteraction()
+                interaction.delegate = instance
+                rootVC.view.addInteraction(interaction)
+            }
+        }
+    }
+
+    public func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        channel?.invokeMethod("onApplePencilDoubleTap", arguments: [
+            "preferredAction": UIPencilInteraction.preferredAction.rawValue
+        ])
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

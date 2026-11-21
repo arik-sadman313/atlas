@@ -51,16 +51,36 @@ class InkCanvasController extends ChangeNotifier {
     );
   }
 
+  // Apple Pencil & Finger Mode (iPad Optimization)
+  // When false: Apple Pencil writes, while fingers can only pan/scroll, pinch-to-zoom, and tap.
+  // When true: Both fingers and Apple Pencil can draw strokes.
+  bool _drawWithFinger;
+  bool get drawWithFinger => _drawWithFinger;
+
+  set drawWithFinger(bool val) {
+    if (_drawWithFinger != val) {
+      _drawWithFinger = val;
+      notifyListeners();
+    }
+  }
+
+  void toggleDrawWithFinger([bool? value]) {
+    _drawWithFinger = value ?? !_drawWithFinger;
+    notifyListeners();
+  }
+
   InkCanvasController({
     required AtlasInkDocument document,
     InkToolConfig? initialTool,
+    bool drawWithFinger = true,
   }) : _activeTool =
            initialTool ??
            const InkToolConfig(
              type: InkToolType.ballpointPen,
              color: 0xFF18181B,
              baseWidth: 3.0,
-           ) {
+           ),
+       _drawWithFinger = drawWithFinger {
     _document = document;
   }
 

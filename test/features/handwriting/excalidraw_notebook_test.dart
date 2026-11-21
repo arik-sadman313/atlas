@@ -455,7 +455,10 @@ void main() {
       // Flip Horizontal
       final beforeFlipX = controller.selectedStrokes[0].points.first.x;
       controller.flipSelectedStrokesHorizontal();
-      expect(controller.selectedStrokes[0].points.first.x, isNot(equals(beforeFlipX)));
+      expect(
+        controller.selectedStrokes[0].points.first.x,
+        isNot(equals(beforeFlipX)),
+      );
 
       // Rotation
       controller.rotateSelectedStrokes(0.5, const Offset(100, 100));

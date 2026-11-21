@@ -16,6 +16,7 @@ class InkCanvas extends StatefulWidget {
   final bool readOnly;
   final Widget? backgroundWidget;
   final bool drawBackground;
+  final ValueChanged<Offset>? onCanvasPan;
 
   const InkCanvas({
     super.key,
@@ -25,6 +26,7 @@ class InkCanvas extends StatefulWidget {
     this.readOnly = false,
     this.backgroundWidget,
     this.drawBackground = true,
+    this.onCanvasPan,
   });
 
   @override
@@ -33,6 +35,9 @@ class InkCanvas extends StatefulWidget {
 
 class _InkCanvasState extends State<InkCanvas> {
   Timer? _drawAndHoldTimer;
+  int? _activeStylusPointer;
+  int? _activeFingerPanPointer;
+  Offset? _lastFingerPanPos;
 
   @override
   void initState() {
@@ -64,10 +69,52 @@ class _InkCanvasState extends State<InkCanvas> {
     if (widget.readOnly) return;
     _drawAndHoldTimer?.cancel();
 
-    // iPad Palm Rejection: discard accidental palm contact (large touch radius)
-    if (event.kind == ui.PointerDeviceKind.touch &&
-        (event.radiusMajor > 32.0 || event.radiusMinor > 32.0)) {
+    final isStylus =
+        event.kind == ui.PointerDeviceKind.stylus ||
+        event.kind == ui.PointerDeviceKind.invertedStylus;
+    final isTouch = event.kind == ui.PointerDeviceKind.touch;
+
+    // 1. Hardware Palm Rejection:
+    // If Apple Pencil is currently in contact or inking, reject all touch events (palm/wrist resting on screen)
+    if (isTouch && _activeStylusPointer != null) {
       return;
+    }
+
+    // Reject accidental large contact patches (palms, wrists, side of hand)
+    if (isTouch && (event.radiusMajor > 20.0 || event.radiusMinor > 20.0)) {
+      return;
+    }
+
+    // 2. Apple Pencil / Stylus Inking
+    if (isStylus) {
+      _activeStylusPointer = event.pointer;
+
+      // Inverted stylus tip (eraser on compatible styluses)
+      if (event.kind == ui.PointerDeviceKind.invertedStylus &&
+          !widget.controller.activeTool.type.isEraser) {
+        widget.controller.setTool(
+          widget.controller.activeTool.copyWith(
+            type: InkToolType.vectorEraser,
+            baseWidth: 16.0,
+          ),
+        );
+      }
+    } else if (isTouch && !widget.controller.drawWithFinger) {
+      // 3. Finger Interaction when "Draw with Finger" is OFF:
+      // If the touch is within the active selection overlay bounds, allow manipulating handles.
+      // Otherwise, the finger is dedicated solely to panning/scrolling the canvas!
+      final hasSelection = widget.controller.hasSelection;
+      final selBounds = widget.controller.selectionBounds;
+      final isOnSelection =
+          hasSelection &&
+          selBounds != null &&
+          selBounds.inflate(28.0).contains(event.localPosition);
+
+      if (!isOnSelection) {
+        _activeFingerPanPointer = event.pointer;
+        _lastFingerPanPos = event.position;
+        return;
+      }
     }
 
     if (widget.controller.activeTool.type == InkToolType.text) {
@@ -85,12 +132,18 @@ class _InkCanvasState extends State<InkCanvas> {
       return;
     }
 
-    final pressure = event.pressure == 0.0 ? 0.5 : event.pressure;
+    // Capture real hardware pressure & tilt angles from Apple Pencil
+    final pressure = event.pressure == 0.0
+        ? 0.5
+        : event.pressure.clamp(0.01, 1.0);
+    final tiltAltitude = event.tilt;
+    final tiltAzimuth = event.orientation;
+
     widget.controller.startStroke(
       event.localPosition,
       pressure: pressure,
-      tiltAzimuth: event.orientation,
-      tiltAltitude: event.tilt,
+      tiltAzimuth: tiltAzimuth,
+      tiltAltitude: tiltAltitude,
     );
   }
 
@@ -237,12 +290,35 @@ class _InkCanvasState extends State<InkCanvas> {
 
   void _handlePointerMove(PointerMoveEvent event) {
     if (widget.readOnly) return;
-    final pressure = event.pressure == 0.0 ? 0.5 : event.pressure;
+
+    // Handle finger panning when Draw with Finger is OFF
+    if (event.pointer == _activeFingerPanPointer) {
+      if (_lastFingerPanPos != null && widget.onCanvasPan != null) {
+        final delta = event.position - _lastFingerPanPos!;
+        _lastFingerPanPos = event.position;
+        widget.onCanvasPan!(delta);
+      }
+      return;
+    }
+
+    // Hardware Palm Rejection: If an Apple Pencil is active, ignore secondary touch pointer moves
+    if (_activeStylusPointer != null && event.pointer != _activeStylusPointer) {
+      return;
+    }
+
+    if (!widget.controller.isDrawing) return;
+
+    final pressure = event.pressure == 0.0
+        ? 0.5
+        : event.pressure.clamp(0.01, 1.0);
+    final tiltAltitude = event.tilt;
+    final tiltAzimuth = event.orientation;
+
     widget.controller.updateStroke(
       event.localPosition,
       pressure: pressure,
-      tiltAzimuth: event.orientation,
-      tiltAltitude: event.tilt,
+      tiltAzimuth: tiltAzimuth,
+      tiltAltitude: tiltAltitude,
     );
 
     // iPad Draw-and-Hold Shape Recognition:
@@ -253,7 +329,7 @@ class _InkCanvasState extends State<InkCanvas> {
         tool == InkToolType.fountainPen ||
         tool == InkToolType.pencil;
 
-    if (isFreehand && widget.controller.activePoints.length >= 10) {
+    if (isFreehand && widget.controller.activePoints.length >= 8) {
       _drawAndHoldTimer?.cancel();
       _drawAndHoldTimer = Timer(const Duration(milliseconds: 450), () {
         if (!mounted || !widget.controller.isDrawing) return;
@@ -270,6 +346,17 @@ class _InkCanvasState extends State<InkCanvas> {
   void _handlePointerUp(PointerUpEvent event) {
     _drawAndHoldTimer?.cancel();
     if (widget.readOnly) return;
+
+    if (event.pointer == _activeFingerPanPointer) {
+      _activeFingerPanPointer = null;
+      _lastFingerPanPos = null;
+      return;
+    }
+
+    if (event.pointer == _activeStylusPointer) {
+      _activeStylusPointer = null;
+    }
+
     if (widget.controller.activeTool.type != InkToolType.text) {
       widget.controller.endStroke();
     }
@@ -278,6 +365,17 @@ class _InkCanvasState extends State<InkCanvas> {
   void _handlePointerCancel(PointerCancelEvent event) {
     _drawAndHoldTimer?.cancel();
     if (widget.readOnly) return;
+
+    if (event.pointer == _activeFingerPanPointer) {
+      _activeFingerPanPointer = null;
+      _lastFingerPanPos = null;
+      return;
+    }
+
+    if (event.pointer == _activeStylusPointer) {
+      _activeStylusPointer = null;
+    }
+
     widget.controller.endStroke();
   }
 
