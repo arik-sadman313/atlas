@@ -20,6 +20,8 @@ import '../core/sync/device/device_identity_service.dart';
 import '../core/sync/folder/folder_sync_engine.dart';
 import '../core/sync/vault/vault_export_service.dart';
 import '../core/sync/vault/vault_import_service.dart';
+import '../core/vaultite/vaultite_engine.dart';
+import '../core/vaultite/vaultite_index.dart';
 import '../features/calendar/data/repositories/calendar_repository.dart';
 import '../features/documents/data/repositories/link_repository.dart';
 import '../features/graph/data/repositories/graph_repository.dart';
@@ -98,6 +100,24 @@ final linkRepositoryProvider = Provider<LinkRepository>((ref) {
   final linksDao = ref.watch(linksDaoProvider);
   final nodesDao = ref.watch(nodesDaoProvider);
   return LinkRepository(linksDao: linksDao, nodesDao: nodesDao);
+});
+
+final vaultiteIndexProvider = Provider<VaultiteIndex>((ref) {
+  return VaultiteIndex();
+});
+
+final vaultiteEngineProvider = Provider<VaultiteEngine>((ref) {
+  final db = ref.watch(appDatabaseProvider);
+  final blobStorage = ref.watch(blobStorageServiceProvider);
+  final index = ref.watch(vaultiteIndexProvider);
+
+  return VaultiteEngine(
+    nodesDao: db.nodesDao,
+    linksDao: db.linksDao,
+    inkDao: db.inkDao,
+    blobStorage: blobStorage,
+    index: index,
+  );
 });
 
 final pdfRenderingServiceProvider = Provider<PdfRenderingService>((ref) {

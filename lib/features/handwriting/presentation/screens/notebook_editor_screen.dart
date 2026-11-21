@@ -313,6 +313,23 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
       );
 
       _pages[_currentPageIndex] = updatedPage;
+
+      // Index notebook & sync bidirectional links in Vaultite
+      try {
+        final vaultiteEngine = ref.read(vaultiteEngineProvider);
+        final workspaceId = ref.read(currentWorkspaceIdProvider);
+        if (workspaceId.isNotEmpty) {
+          await vaultiteEngine.saveHandwrittenNotebook(
+            id: widget.notebookId,
+            workspaceId: workspaceId,
+            title: _title,
+            inkDoc: docToSave,
+          );
+        }
+      } catch (vaultErr) {
+        debugPrint('Vaultite handwriting index notice: $vaultErr');
+      }
+
       _hasUnsavedChanges = false;
       success = true;
     } catch (e) {
@@ -942,6 +959,60 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
           icon: const Icon(Icons.grid_view_rounded, size: 20),
           tooltip: 'All Pages Overview',
           onPressed: _showPageGridOverview,
+        ),
+
+        // Backlinks & Graph Links
+        IconButton(
+          icon: const Icon(Icons.alt_route_rounded, size: 20),
+          tooltip: 'Backlinks & Mentions',
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: isDark
+                  ? AtlasColors.darkSurface
+                  : AtlasColors.lightSurface,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              builder: (ctx) => DraggableScrollableSheet(
+                initialChildSize: 0.5,
+                minChildSize: 0.3,
+                maxChildSize: 0.85,
+                expand: false,
+                builder: (_, scrollController) => SingleChildScrollView(
+                  controller: scrollController,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Backlinks to $_title',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.of(ctx).pop(),
+                            ),
+                          ],
+                        ),
+                        BacklinksPanel(
+                          nodeId: widget.notebookId,
+                          initialExpanded: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
 
         // Excalidraw & PDF Export/Import Menu

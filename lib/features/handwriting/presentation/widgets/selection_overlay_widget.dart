@@ -1,7 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/providers.dart';
+import '../../../../core/vaultite/vaultite_link_parser.dart';
+import '../../../../core/vaultite/vaultite_models.dart';
 import '../../domain/models/ink_tool.dart';
 import '../controllers/ink_canvas_controller.dart';
 import 'ink_element_edit_dialog.dart';
@@ -11,7 +16,7 @@ import 'ink_element_edit_dialog.dart';
 /// - Top rotation handle for rotating selected elements
 /// - Rich floating property inspector for colors, fill styles, stroke styles,
 ///   roughness, roundness, z-ordering, alignment, group/ungroup, flip, lock, and delete.
-class SelectionOverlayWidget extends StatefulWidget {
+class SelectionOverlayWidget extends ConsumerStatefulWidget {
   final InkCanvasController controller;
   final double canvasWidth;
   final double canvasHeight;
@@ -24,10 +29,12 @@ class SelectionOverlayWidget extends StatefulWidget {
   });
 
   @override
-  State<SelectionOverlayWidget> createState() => _SelectionOverlayWidgetState();
+  ConsumerState<SelectionOverlayWidget> createState() =>
+      _SelectionOverlayWidgetState();
 }
 
-class _SelectionOverlayWidgetState extends State<SelectionOverlayWidget> {
+class _SelectionOverlayWidgetState
+    extends ConsumerState<SelectionOverlayWidget> {
   double? _rotationStartAngle;
 
   static const List<int> _paletteColors = [
@@ -452,6 +459,68 @@ class _SelectionOverlayWidgetState extends State<SelectionOverlayWidget> {
                       ),
                     );
                   }),
+                // Clickable Wiki-Link Chips for referenced notes & notebooks
+                ...() {
+                  final text = single.text ?? '';
+                  final wikiLinks = text.contains('[[')
+                      ? VaultiteLinkParser.extractLinks(text)
+                      : const <VaultiteLink>[];
+                  if (wikiLinks.isEmpty) return const <Widget>[];
+
+                  return <Widget>[
+                    _buildDivider(isDark),
+                    ...wikiLinks.map((link) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                        child: InkWell(
+                          onTap: () => _openWikiLink(context, link.target),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF6366F1)
+                                    .withValues(alpha: 0.4),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.open_in_new_rounded,
+                                  size: 12,
+                                  color: Color(0xFF6366F1),
+                                ),
+                                const SizedBox(width: 4),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 90,
+                                  ),
+                                  child: Text(
+                                    link.displayText,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF6366F1),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ];
+                }(),
                 _buildDivider(isDark),
               ],
               // Stroke Color Swatches
@@ -740,5 +809,27 @@ class _SelectionOverlayWidgetState extends State<SelectionOverlayWidget> {
       margin: const EdgeInsets.symmetric(horizontal: 4),
       color: isDark ? const Color(0xFF2D3343) : const Color(0xFFE2E8F0),
     );
+  }
+
+  Future<void> _openWikiLink(BuildContext context, String target) async {
+    final workspaceId = ref.read(currentWorkspaceIdProvider);
+    final nodesDao = ref.read(nodesDaoProvider);
+    final node = await nodesDao.findNodeByTitle(workspaceId, target);
+    if (!mounted || !context.mounted) return;
+
+    if (node != null) {
+      if (node.type == 'notebook') {
+        context.push('/notebooks/${node.id}');
+      } else {
+        context.push('/documents/${node.id}');
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Target note "[[$target]]" not found in workspace.'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 }

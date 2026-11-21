@@ -603,6 +603,19 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
         text: plainText,
       );
 
+      // 4. Index in Vaultite Engine
+      try {
+        final vaultiteEngine = ref.read(vaultiteEngineProvider);
+        await vaultiteEngine.saveMarkdownNote(
+          id: widget.documentId,
+          workspaceId: node.workspaceId,
+          title: titleToSave,
+          markdownBody: plainText,
+        );
+      } catch (ve) {
+        debugPrint('Vaultite markdown note sync notice: $ve');
+      }
+
       _hasUnsavedChanges = false;
     } catch (_) {
       // Avoid crashing the UI on save error
@@ -776,6 +789,143 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               fontWeight: FontWeight.w600,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showNotePropertiesModal() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final node = _node;
+    if (node == null) return;
+
+    final vaultiteIndex = ref.read(vaultiteIndexProvider);
+    final vaultItem = vaultiteIndex[widget.documentId];
+    final backlinks = vaultiteIndex.getBacklinks(widget.documentId);
+    final forwardLinks = vaultiteIndex.getForwardLinks(widget.documentId);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark
+          ? AtlasColors.darkSurface
+          : AtlasColors.lightSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(AtlasSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.tune_rounded,
+                        color: AtlasColors.accentBlue,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Note Properties (Vaultite)',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(sheetCtx),
+                  ),
+                ],
+              ),
+              const Divider(),
+              const SizedBox(height: 8),
+              _buildPropRow('Title', node.title, isDark),
+              _buildPropRow('File Path', '${node.title}.md', isDark),
+              _buildPropRow(
+                'Kind',
+                vaultItem?.kind.name ?? 'note',
+                isDark,
+                badge: true,
+              ),
+              _buildPropRow(
+                'Status',
+                vaultItem?.status?.name ?? 'seed',
+                isDark,
+                badge: true,
+              ),
+              _buildPropRow(
+                'Outgoing Links',
+                '${forwardLinks.length} references',
+                isDark,
+              ),
+              _buildPropRow(
+                'Backlinks',
+                '${backlinks.length} mentions',
+                isDark,
+              ),
+              _buildPropRow(
+                'Last Modified',
+                DateFormat.yMMMd().add_jm().format(node.updatedAt),
+                isDark,
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPropRow(
+    String label,
+    String value,
+    bool isDark, {
+    bool badge = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark
+                  ? AtlasColors.darkTextSecondary
+                  : AtlasColors.lightTextSecondary,
+            ),
+          ),
+          if (badge)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AtlasColors.accentBlue.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AtlasColors.accentBlue,
+                ),
+              ),
+            )
+          else
+            Text(
+              value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+            ),
         ],
       ),
     );
@@ -1095,6 +1245,12 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               icon: const Icon(Icons.format_list_bulleted_rounded),
               tooltip: 'Document Outline',
               onPressed: _showDocumentOutlineSheet,
+            ),
+            // Vaultite Note Properties Action
+            IconButton(
+              icon: const Icon(Icons.tune_rounded),
+              tooltip: 'Note Properties (Vaultite)',
+              onPressed: _showNotePropertiesModal,
             ),
             // Wiki-Link Insert Action
             IconButton(

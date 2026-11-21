@@ -105,6 +105,57 @@ Future<void> showInkElementEditModal({
                   ),
                 ),
               ),
+              IconButton(
+                icon: const Icon(
+                  Icons.link_rounded,
+                  color: Color(0xFF6366F1),
+                  size: 20,
+                ),
+                tooltip: 'Insert Wiki-Link [[Note]]',
+                onPressed: () async {
+                  final linkText = await showDialog<String>(
+                    context: ctx,
+                    builder: (linkCtx) {
+                      final titleController = TextEditingController();
+                      return AlertDialog(
+                        title: const Text('Insert Note Wiki-Link'),
+                        content: TextField(
+                          controller: titleController,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Target Note or Notebook Title',
+                            hintText: 'e.g. Architecture Specs',
+                          ),
+                          onSubmitted: (v) => Navigator.pop(linkCtx, v.trim()),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(linkCtx),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(
+                              linkCtx,
+                              titleController.text.trim(),
+                            ),
+                            child: const Text('Insert Link'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                  if (linkText != null && linkText.isNotEmpty) {
+                    final current = textCtrl.text;
+                    final toInsert = '[[$linkText]]';
+                    textCtrl.text = current.isEmpty
+                        ? toInsert
+                        : '$current $toInsert';
+                    textCtrl.selection = TextSelection.collapsed(
+                      offset: textCtrl.text.length,
+                    );
+                  }
+                },
+              ),
               if (isEditing)
                 IconButton(
                   icon: const Icon(
