@@ -42,8 +42,13 @@ import '../../../../shared/widgets/atlas_scaffold.dart';
 ///   pressure/tilt telemetry, lossless CAS binary persistence, and bidirectional portable ink conversion.
 class NotebookEditorScreen extends ConsumerStatefulWidget {
   final String notebookId;
+  final bool embedded;
 
-  const NotebookEditorScreen({super.key, required this.notebookId});
+  const NotebookEditorScreen({
+    super.key,
+    required this.notebookId,
+    this.embedded = false,
+  });
 
   @override
   ConsumerState<NotebookEditorScreen> createState() =>
@@ -747,9 +752,9 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
     final isAndroid = defaultTargetPlatform == TargetPlatform.android;
 
     return PopScope(
-      canPop: !_hasUnsavedChanges && !_isSaving,
+      canPop: widget.embedded ? true : (!_hasUnsavedChanges && !_isSaving),
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
+        if (didPop || widget.embedded) return;
         final saved = await _flushPendingSaves();
         if (saved) {
           _popSafely();
@@ -844,16 +849,19 @@ class _NotebookEditorScreenState extends ConsumerState<NotebookEditorScreen> {
       backgroundColor: isDark
           ? AtlasColors.darkSurface
           : AtlasColors.lightSurface,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back),
-        tooltip: 'Back to Notebooks',
-        onPressed: () async {
-          final saved = await _flushPendingSaves();
-          if (saved) {
-            _popSafely();
-          }
-        },
-      ),
+      automaticallyImplyLeading: !widget.embedded,
+      leading: widget.embedded
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back to Notebooks',
+              onPressed: () async {
+                final saved = await _flushPendingSaves();
+                if (saved) {
+                  _popSafely();
+                }
+              },
+            ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -5,6 +5,7 @@ import 'package:atlas/app/atlas_app.dart';
 import 'package:atlas/app/providers.dart';
 import 'package:atlas/core/database/app_database.dart';
 import 'package:atlas/core/router/app_router.dart';
+import 'package:atlas/core/router/routes.dart';
 import 'package:atlas/core/storage/cas_storage_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +33,7 @@ void main() {
     tester,
   ) async {
     final defaultWs = await db.workspacesDao.getOrCreateDefaultWorkspace();
-    final router = createAppRouter();
+    final router = createAppRouter(initialLocation: AtlasRoutes.dashboard);
 
     await tester.pumpWidget(
       ProviderScope(
@@ -56,7 +57,7 @@ void main() {
 
     // Verify navigation destinations
     expect(find.text('Notebooks'), findsWidgets);
-    expect(find.text('Documents'), findsWidgets);
+    expect(find.textContaining('Documents'), findsWidgets);
     expect(find.text('Tasks'), findsWidgets);
 
     // Clean up and advance time to flush any scheduled Stream cancellation timers

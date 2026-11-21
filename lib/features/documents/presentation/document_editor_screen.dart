@@ -17,6 +17,7 @@ import '../../journal/presentation/widgets/journal_context_day_panel.dart';
 import '../../graph/presentation/widgets/local_graph_panel.dart';
 import '../../settings/data/markdown_export_service.dart';
 import '../../tasks/presentation/widgets/node_tasks_panel.dart';
+import '../../vaultite/presentation/widgets/vault_properties_banner.dart';
 import '../data/services/document_content_service.dart';
 import 'embeds/callout_embed_builder.dart';
 import 'embeds/divider_embed_builder.dart';
@@ -39,8 +40,13 @@ import 'widgets/wiki_link_dialog.dart';
 /// - Inline [[Wiki-Links]] and bidirectional backlinks panel.
 class DocumentEditorScreen extends ConsumerStatefulWidget {
   final String documentId;
+  final bool embedded;
 
-  const DocumentEditorScreen({super.key, required this.documentId});
+  const DocumentEditorScreen({
+    super.key,
+    required this.documentId,
+    this.embedded = false,
+  });
 
   @override
   ConsumerState<DocumentEditorScreen> createState() =>
@@ -1110,9 +1116,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return PopScope(
-      canPop: !_isSaving && !_hasUnsavedChanges,
+      canPop: widget.embedded ? true : (!_isSaving && !_hasUnsavedChanges),
       onPopInvokedWithResult: (didPop, result) async {
-        if (!didPop) {
+        if (!didPop && !widget.embedded) {
           await saveDocument();
           if (context.mounted) {
             Navigator.of(context).pop();
@@ -1126,22 +1132,25 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
               ? AtlasColors.darkSurface
               : AtlasColors.lightSurface,
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            tooltip: 'Back to Documents',
-            onPressed: () async {
-              if (_hasUnsavedChanges) {
-                await saveDocument();
-              }
-              if (context.mounted) {
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                } else {
-                  context.go('/documents');
-                }
-              }
-            },
-          ),
+          automaticallyImplyLeading: !widget.embedded,
+          leading: widget.embedded
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  tooltip: 'Back to Documents',
+                  onPressed: () async {
+                    if (_hasUnsavedChanges) {
+                      await saveDocument();
+                    }
+                    if (context.mounted) {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else {
+                        context.go('/documents');
+                      }
+                    }
+                  },
+                ),
           titleSpacing: 0,
           title: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1472,6 +1481,9 @@ class DocumentEditorScreenState extends ConsumerState<DocumentEditorScreen> {
                         _onContentChanged();
                       },
                     ),
+                    const SizedBox(height: AtlasSpacing.sm),
+                    // Collapsible Obsidian/Vaultite Frontmatter Properties Banner
+                    VaultPropertiesBanner(nodeId: widget.documentId),
                     const SizedBox(height: AtlasSpacing.md),
                     Divider(
                       color: isDark

@@ -4,14 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/calendar/presentation/calendar_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
-import '../../features/documents/presentation/document_editor_screen.dart';
-import '../../features/documents/presentation/documents_screen.dart';
 import '../../features/graph/presentation/knowledge_graph_screen.dart';
 import '../../features/handwriting/presentation/screens/notebook_editor_screen.dart';
 import '../../features/notebooks/presentation/notebooks_screen.dart';
 import '../../features/search/presentation/search_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/tasks/presentation/tasks_screen.dart';
+import '../../features/vaultite/presentation/screens/vaultite_workspace_screen.dart';
 import '../../shared/widgets/atlas_scaffold.dart';
 import 'routes.dart';
 
@@ -53,14 +52,14 @@ GoRouter createAppRouter({String initialLocation = AtlasRoutes.documents}) {
           GoRoute(
             path: AtlasRoutes.documents,
             pageBuilder: (context, state) =>
-                const NoTransitionPage(child: DocumentsScreen()),
+                const NoTransitionPage(child: VaultiteWorkspaceScreen()),
             routes: [
               GoRoute(
                 path: ':id',
                 pageBuilder: (context, state) {
                   final id = state.pathParameters['id'] ?? '';
                   return NoTransitionPage(
-                    child: DocumentEditorScreen(documentId: id),
+                    child: VaultiteWorkspaceScreen(initialNodeId: id),
                   );
                 },
               ),
