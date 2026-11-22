@@ -1,3 +1,6 @@
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+
 export interface InkPoint {
   x: number
   y: number
@@ -8,28 +11,16 @@ export interface InkPoint {
 }
 
 export type InkToolType =
-  | "fountain"
-  | "ballpoint"
-  | "brush"
-  | "highlighter"
-  | "eraser"
-  | "lasso"
-  | "shape"
-  | "textbox"
-  | "stickynote"
-  | "image"
-  | "tape"
-  | "ruler"
-  | "laser"
+  | "fountain" | "ballpoint" | "brush" | "highlighter" | "eraser" | "lasso"
+  | "shape" | "textbox" | "stickynote" | "image" | "tape" | "ruler" | "laser"
 
 export type EraserMode = "precision" | "standard" | "stroke"
-
 export type ShapePrimitive = "line" | "arrow" | "rect" | "ellipse" | "triangle" | "polygon" | "arc"
 
 export interface PenToolConfig {
-  tipSharpness: number // 0 to 100%
-  pressureSensitivity: number // 0 to 100%
-  stabilization: number // 0 to 100%
+  tipSharpness: number
+  pressureSensitivity: number
+  stabilization: number
 }
 
 export interface PenStudioSettings {
@@ -39,21 +30,9 @@ export interface PenStudioSettings {
 }
 
 export const DEFAULT_PEN_SETTINGS: PenStudioSettings = {
-  fountain: {
-    tipSharpness: 75,
-    pressureSensitivity: 60,
-    stabilization: 45,
-  },
-  ballpoint: {
-    tipSharpness: 10,
-    pressureSensitivity: 0,
-    stabilization: 50,
-  },
-  brush: {
-    tipSharpness: 85,
-    pressureSensitivity: 90,
-    stabilization: 35,
-  },
+  fountain: { tipSharpness: 75, pressureSensitivity: 60, stabilization: 45 },
+  ballpoint: { tipSharpness: 10, pressureSensitivity: 0, stabilization: 50 },
+  brush: { tipSharpness: 85, pressureSensitivity: 90, stabilization: 35 },
 }
 
 export interface InkStroke {
@@ -130,48 +109,22 @@ export type PageSize = "Standard" | "A3" | "A4" | "A5" | "Letter"
 export type PageOrientation = "portrait" | "landscape"
 
 export const PAGE_DIMENSIONS: Record<PageSize, { portrait: { width: number; height: number }; landscape: { width: number; height: number } }> = {
-  Standard: {
-    portrait: { width: 800, height: 1100 },
-    landscape: { width: 1100, height: 800 },
-  },
-  A4: {
-    portrait: { width: 842, height: 1191 },
-    landscape: { width: 1191, height: 842 },
-  },
-  A5: {
-    portrait: { width: 595, height: 842 },
-    landscape: { width: 842, height: 595 },
-  },
-  A3: {
-    portrait: { width: 1191, height: 1684 },
-    landscape: { width: 1684, height: 1191 },
-  },
-  Letter: {
-    portrait: { width: 816, height: 1056 },
-    landscape: { width: 1056, height: 816 },
-  },
+  Standard: { portrait: { width: 800, height: 1100 }, landscape: { width: 1100, height: 800 } },
+  A4: { portrait: { width: 842, height: 1191 }, landscape: { width: 1191, height: 842 } },
+  A5: { portrait: { width: 595, height: 842 }, landscape: { width: 842, height: 595 } },
+  A3: { portrait: { width: 1191, height: 1684 }, landscape: { width: 1684, height: 1191 } },
+  Letter: { portrait: { width: 816, height: 1056 }, landscape: { width: 1056, height: 816 } },
 }
 
 export type PageTemplate =
-  | "blank"
-  | "ruled"
-  | "ruled-wide"
-  | "grid"
-  | "dotted"
-  | "cornell"
-  | "music-staff"
-  | "monthly-planner"
-  | "weekly-planner"
+  | "blank" | "ruled" | "ruled-wide" | "grid" | "dotted"
+  | "cornell" | "music-staff" | "monthly-planner" | "weekly-planner"
 
 export type PaperColor = "white" | "cream" | "dark"
 
 export type CoverStyle =
-  | "leather-black"
-  | "gradient-sunset"
-  | "marble-blue"
-  | "minimal-kraft"
-  | "notebook-classic"
-  | "academic-navy"
+  | "leather-black" | "gradient-sunset" | "marble-blue"
+  | "minimal-kraft" | "notebook-classic" | "academic-navy"
 
 export interface NotebookCover {
   style: CoverStyle
@@ -273,6 +226,9 @@ export interface NotebookPage {
   height: number
   pdfSource?: string
   pdfPageIndex?: number
+  elements?: readonly ExcalidrawElement[]
+  appState?: Partial<AppState>
+  files?: BinaryFiles
 }
 
 export interface NotebookDocument {
@@ -311,6 +267,8 @@ export function createEmptyPage(
     bookmarked: false,
     width: dims.width,
     height: dims.height,
+    elements: [],
+    files: {},
   }
 }
 

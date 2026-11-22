@@ -339,6 +339,7 @@ export default defineConfig({
   plugins: [pluginModules([path.resolve(import.meta.dirname, 'plugins/core')]), react(), tailwindcss(), keepRecentBuilds(), buildStamp(), pluginIcons(), noOfficialPlugins(), lucideByFile(), bootChunks(), stableChunks()],
   resolve: {
     alias: {
+      'mermaid': path.resolve(import.meta.dirname, 'node_modules/mermaid'),
       // What plugins import: the plugin API (web/src/api.ts). Core code uses @/.
       '@vaultite': path.resolve(import.meta.dirname, './web/src/api.ts'),
       '@': path.resolve(import.meta.dirname, './web/src'),
