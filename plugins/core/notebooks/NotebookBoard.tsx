@@ -1,15 +1,25 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
-import { Excalidraw } from "@excalidraw/excalidraw"
 import "@excalidraw/excalidraw/index.css"
-import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
-import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import { DocumentNavigationDrawer } from "./DocumentNavigationDrawer"
 import { GoodNotesToolbar } from "./GoodNotesToolbar"
 import { GoodNotesPaperSettings } from "./GoodNotesPaperSettings"
-import { GoodNotesPaperSheet } from "./GoodNotesPaperSheet"
+import { GoodNotesDeskSheet } from "./GoodNotesDeskSheet"
 import { useNotebookDocument } from "./useNotebookDocument"
-import { migrateLegacyPageToExcalidraw } from "./legacyMigration"
-import type { NotebookPage } from "./types"
+import {
+  applyToolToScene,
+  updateSelectedColor,
+  updateSelectedWidth,
+  zoomIn,
+  zoomOut,
+  resetZoom,
+  triggerShortcutsHelp,
+} from "./notebookActions"
+import {
+  exportSceneToPng,
+  exportSceneToSvg,
+  copySceneToClipboard,
+} from "./notebookExport"
 
 declare global {
   interface Window {
@@ -24,167 +34,6 @@ export interface NotebookBoardProps {
   place?: string
   onChange?: (newText: string) => void
 }
-
-type FormToolType = "rectangle" | "diamond" | "ellipse" | "arrow" | "line"
-
-function isFormTool(tool: string): tool is FormToolType {
-  return tool === "rectangle" || tool === "diamond" || tool === "ellipse" || tool === "arrow" || tool === "line"
-}
-
-const HIDE_DEFAULT_UI_OPTIONS = {
-  canvasActions: {
-    changeViewBackgroundColor: false,
-    clearCanvas: false,
-    loadScene: false,
-    saveToActiveFile: false,
-    toggleTheme: false,
-    saveAsImage: false,
-    export: false as const,
-  },
-  tools: {
-    image: true,
-  },
-}
-
-function applyFreedraw(
-  api: ExcalidrawImperativeAPI,
-  tool: "pen" | "highlighter",
-  color: string,
-  strokeWidth: number
-) {
-  const isHighlighter = tool === "highlighter"
-  api.setActiveTool({ type: "freedraw", locked: true })
-  api.updateScene({
-    appState: {
-      currentItemStrokeColor: color,
-      currentItemStrokeWidth: isHighlighter ? 18 : strokeWidth,
-      currentItemOpacity: isHighlighter ? 45 : 100,
-      currentItemRoughness: 0,
-    },
-  })
-}
-
-function applyForm(
-  api: ExcalidrawImperativeAPI,
-  form: FormToolType,
-  color: string,
-  strokeWidth: number
-) {
-  api.setActiveTool({ type: form, locked: true })
-  api.updateScene({
-    appState: {
-      currentItemStrokeColor: color,
-      currentItemStrokeWidth: strokeWidth,
-      currentItemOpacity: 100,
-      currentItemRoughness: 0,
-    },
-  })
-}
-
-function applyToolToScene(
-  api: ExcalidrawImperativeAPI,
-  tool: string,
-  color: string,
-  strokeWidth: number
-) {
-  if (tool === "lasso") {
-    api.setActiveTool({ type: "selection" })
-    return
-  }
-  api.updateScene({ appState: { selectedElementIds: {} } })
-  if (tool === "highlighter" || tool === "pen") {
-    applyFreedraw(api, tool, color, strokeWidth)
-    return
-  }
-  if (tool === "eraser" || tool === "laser" || tool === "text") {
-    api.setActiveTool({ type: tool, locked: true })
-    return
-  }
-  if (isFormTool(tool)) {
-    applyForm(api, tool, color, strokeWidth)
-  }
-}
-
-function updateSelectedColor(api: ExcalidrawImperativeAPI | null, c: string) {
-  if (!api) return
-  const selectedIds = api.getAppState().selectedElementIds || {}
-  if (Object.values(selectedIds).some(Boolean)) {
-    const els = api.getSceneElements().map((el) => (
-      selectedIds[el.id] ? { ...el, strokeColor: c } : el
-    ))
-    api.updateScene({ elements: els, appState: { currentItemStrokeColor: c } })
-  } else {
-    api.updateScene({ appState: { currentItemStrokeColor: c } })
-  }
-}
-
-function updateSelectedWidth(api: ExcalidrawImperativeAPI | null, w: number) {
-  if (!api) return
-  const selectedIds = api.getAppState().selectedElementIds || {}
-  if (Object.values(selectedIds).some(Boolean)) {
-    const els = api.getSceneElements().map((el) => (
-      selectedIds[el.id] ? { ...el, strokeWidth: w } : el
-    ))
-    api.updateScene({ elements: els, appState: { currentItemStrokeWidth: w } })
-  } else {
-    api.updateScene({ appState: { currentItemStrokeWidth: w } })
-  }
-}
-
-interface DeskSheetProps {
-  deskRef: React.RefObject<HTMLDivElement | null>
-  sheetRef: React.RefObject<HTMLDivElement | null>
-  currentPage: NotebookPage
-  readOnly: boolean
-  onApiReady: (api: ExcalidrawImperativeAPI) => void
-  onElementsChange: (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => void
-}
-
-const DeskSheet: React.FC<DeskSheetProps> = ({
-  deskRef,
-  sheetRef,
-  currentPage,
-  readOnly,
-  onApiReady,
-  onElementsChange,
-}) => (
-  <main
-    ref={deskRef}
-    className="goodnotes-desk flex-1 relative overflow-auto flex justify-center py-8 px-6 bg-slate-200/90 dark:bg-[#0c0e12] select-none"
-  >
-    <GoodNotesPaperSheet
-      sheetRef={sheetRef}
-      template={currentPage.template}
-      paperColor={currentPage.paperColor || "white"}
-      pageSize={currentPage.pageSize || "Standard"}
-      orientation={currentPage.orientation || "portrait"}
-    >
-      <Excalidraw
-        excalidrawAPI={onApiReady}
-        initialData={{
-          elements: migrateLegacyPageToExcalidraw(currentPage),
-          files: currentPage.files,
-          appState: {
-            viewBackgroundColor: "transparent",
-            currentItemRoughness: 0,
-            theme: currentPage.paperColor === "dark" ? "dark" : "light",
-            scrollX: 0,
-            scrollY: 0,
-          },
-        }}
-        onChange={onElementsChange}
-        onScrollChange={(scrollX, scrollY) => {
-          if (scrollX !== 0 || scrollY !== 0) {
-            window.__excalidrawAPI?.updateScene({ appState: { scrollX: 0, scrollY: 0 } })
-          }
-        }}
-        viewModeEnabled={readOnly}
-        zenModeEnabled={false}
-        UIOptions={HIDE_DEFAULT_UI_OPTIONS}
-      />
-    </GoodNotesPaperSheet>
-  </main>
-)
 
 export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   text,
@@ -212,6 +61,9 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const [strokeWidth, setStrokeWidth] = useState<number>(1.5)
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false)
   const [isPaperSettingsOpen, setIsPaperSettingsOpen] = useState<boolean>(false)
+  const [isLibraryOpen, setIsLibraryOpen] = useState<boolean>(false)
+  const [gridMode, setGridMode] = useState<boolean>(false)
+  const [snapToObjects, setSnapToObjects] = useState<boolean>(true)
   const [readOnly, setReadOnly] = useState<boolean>(!editable)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const deskRef = useRef<HTMLDivElement | null>(null)
@@ -243,16 +95,6 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     document.querySelector(".goodnotes-canvas-root .excalidraw")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, metaKey: true, bubbles: true }))
   }, [])
-
-  const handleRotatePage = useCallback((index: number) => {
-    const p = docRef.current.pages[index]
-    if (p) { p.rotation = ((p.rotation || 0) + 90) % 360; setDoc({ ...docRef.current }) }
-  }, [docRef, setDoc])
-
-  const handleToggleBookmark = useCallback((index: number) => {
-    const p = docRef.current.pages[index]
-    if (p) { p.bookmarked = !p.bookmarked; setDoc({ ...docRef.current }) }
-  }, [docRef, setDoc])
 
   const handleSwitchPage = useCallback((idx: number) => {
     switchPage(idx, excalidrawAPIRef.current)
@@ -324,6 +166,20 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onUndo={handleUndo}
         onRedo={handleRedo}
         onInsertImage={() => excalidrawAPIRef.current?.setActiveTool({ type: "image" })}
+        onToggleLibrary={() => excalidrawAPIRef.current?.toggleSidebar({ name: "default" })}
+        isLibraryOpen={isLibraryOpen}
+        gridMode={gridMode}
+        onToggleGridMode={() => setGridMode(!gridMode)}
+        snapToObjects={snapToObjects}
+        onToggleSnapToObjects={() => setSnapToObjects(!snapToObjects)}
+        onZoomIn={() => excalidrawAPIRef.current && zoomIn(excalidrawAPIRef.current)}
+        onZoomOut={() => excalidrawAPIRef.current && zoomOut(excalidrawAPIRef.current)}
+        onResetZoom={() => excalidrawAPIRef.current && resetZoom(excalidrawAPIRef.current)}
+        onHelp={triggerShortcutsHelp}
+        onExportPng={() => excalidrawAPIRef.current && exportSceneToPng(excalidrawAPIRef.current, `page-${currentPageIndex + 1}`)}
+        onExportSvg={() => excalidrawAPIRef.current && exportSceneToSvg(excalidrawAPIRef.current, `page-${currentPageIndex + 1}`)}
+        onCopyPng={() => excalidrawAPIRef.current && copySceneToClipboard(excalidrawAPIRef.current, "png")}
+        onCopySvg={() => excalidrawAPIRef.current && copySceneToClipboard(excalidrawAPIRef.current, "svg")}
       />
 
       <GoodNotesPaperSettings
@@ -344,17 +200,25 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onAddPage={(idx) => addPage(idx, excalidrawAPIRef.current)}
         onDuplicatePage={(idx) => duplicatePage(idx, excalidrawAPIRef.current)}
         onDeletePage={(idx) => deletePage(idx, excalidrawAPIRef.current)}
-        onRotatePage={handleRotatePage}
-        onToggleBookmark={handleToggleBookmark}
+        onRotatePage={(idx) => {
+          const p = docRef.current.pages[idx]
+          if (p) { p.rotation = ((p.rotation || 0) + 90) % 360; setDoc({ ...docRef.current }) }
+        }}
+        onToggleBookmark={(idx) => {
+          const p = docRef.current.pages[idx]
+          if (p) { p.bookmarked = !p.bookmarked; setDoc({ ...docRef.current }) }
+        }}
         readOnly={readOnly}
         onToggleReadOnly={() => setReadOnly(!readOnly)}
       />
 
-      <DeskSheet
+      <GoodNotesDeskSheet
         deskRef={deskRef}
         sheetRef={sheetRef}
         currentPage={currentPage}
         readOnly={readOnly}
+        gridMode={gridMode}
+        snapToObjects={snapToObjects}
         onApiReady={(api) => {
           excalidrawAPIRef.current = api
           window.__excalidrawAPI = api
@@ -362,6 +226,8 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         }}
         onElementsChange={(elements, appState, files) => {
           updatePageData(elements, files)
+          const libOpen = appState.openSidebar?.name === "default"
+          if (libOpen !== isLibraryOpen) setIsLibraryOpen(libOpen)
           const toolType = appState.activeTool?.type
           if (toolType === "selection" && activeTool !== "lasso") {
             setActiveTool("lasso")

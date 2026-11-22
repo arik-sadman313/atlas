@@ -4,14 +4,18 @@ import {
   Highlighter,
   Eraser,
   Lasso,
+  Hand,
   Square,
   Diamond,
   Circle,
   ArrowUpRight,
   Minus,
+  Frame,
   Type,
+  Globe,
   Sparkles,
   Image as ImageIcon,
+  Library,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -19,8 +23,13 @@ import {
   Sliders,
 } from "lucide-react"
 import { GoodNotesStyleControls, type GoodNotesStyleControlsProps } from "./GoodNotesStyleControls"
+import { GoodNotesExportMenu, type GoodNotesExportMenuProps } from "./GoodNotesExportMenu"
+import { CanvasQuickControls, type CanvasQuickControlsProps } from "./CanvasQuickControls"
 
-export interface GoodNotesToolbarProps extends GoodNotesStyleControlsProps {
+export interface GoodNotesToolbarProps
+  extends GoodNotesStyleControlsProps,
+    GoodNotesExportMenuProps,
+    CanvasQuickControlsProps {
   activeTool: string
   onSelectTool: (tool: string) => void
   currentPageIndex: number
@@ -32,6 +41,8 @@ export interface GoodNotesToolbarProps extends GoodNotesStyleControlsProps {
   isDrawerOpen: boolean
   onTogglePaperSettings: () => void
   onInsertImage: () => void
+  onToggleLibrary: () => void
+  isLibraryOpen: boolean
 }
 
 interface ToolItem {
@@ -45,6 +56,7 @@ const DRAWING_TOOLS: ToolItem[] = [
   { id: "highlighter", label: "Highlighter", icon: Highlighter },
   { id: "eraser", label: "Eraser", icon: Eraser },
   { id: "lasso", label: "Lasso / Select", icon: Lasso },
+  { id: "hand", label: "Hand / Pan", icon: Hand },
 ]
 
 const FORM_TOOLS: ToolItem[] = [
@@ -53,10 +65,12 @@ const FORM_TOOLS: ToolItem[] = [
   { id: "ellipse", label: "Circle", icon: Circle },
   { id: "arrow", label: "Arrow", icon: ArrowUpRight },
   { id: "line", label: "Line", icon: Minus },
+  { id: "frame", label: "Frame / Slide", icon: Frame },
 ]
 
 const CONTENT_TOOLS: ToolItem[] = [
   { id: "text", label: "Text Note", icon: Type },
+  { id: "embeddable", label: "Web Embed", icon: Globe },
   { id: "laser", label: "Laser Pointer", icon: Sparkles },
 ]
 
@@ -89,30 +103,26 @@ const PageCounter: React.FC<{
   </div>
 )
 
-const PageNavSection: React.FC<{
-  currentPageIndex: number
-  totalPages: number
-  isDrawerOpen: boolean
-  onToggleDrawer: () => void
-  onPrevPage: () => void
-  onNextPage: () => void
-  onAddPage: () => void
-  onTogglePaperSettings: () => void
-}> = ({
-  currentPageIndex,
-  totalPages,
-  isDrawerOpen,
-  onToggleDrawer,
-  onPrevPage,
-  onNextPage,
-  onAddPage,
-  onTogglePaperSettings,
-}) => (
+const PageNavSection: React.FC<Pick<
+  GoodNotesToolbarProps,
+  | "currentPageIndex"
+  | "totalPages"
+  | "isDrawerOpen"
+  | "onToggleDrawer"
+  | "onPrevPage"
+  | "onNextPage"
+  | "onAddPage"
+  | "onTogglePaperSettings"
+  | "onExportPng"
+  | "onExportSvg"
+  | "onCopyPng"
+  | "onCopySvg"
+>> = (props) => (
   <div className="flex items-center gap-1 shrink-0">
     <button
-      onClick={onToggleDrawer}
+      onClick={props.onToggleDrawer}
       className={`p-1.5 rounded-lg transition-colors ${
-        isDrawerOpen
+        props.isDrawerOpen
           ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
           : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
       }`}
@@ -120,30 +130,34 @@ const PageNavSection: React.FC<{
     >
       <Layers className="size-4" />
     </button>
-
     <PageCounter
-      currentPageIndex={currentPageIndex}
-      totalPages={totalPages}
-      onPrevPage={onPrevPage}
-      onNextPage={onNextPage}
+      currentPageIndex={props.currentPageIndex}
+      totalPages={props.totalPages}
+      onPrevPage={props.onPrevPage}
+      onNextPage={props.onNextPage}
     />
-
     <button
-      onClick={onAddPage}
+      onClick={props.onAddPage}
       className="flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-semibold transition-colors"
       data-tip="Add Page After Current"
     >
       <Plus className="size-3.5" />
       <span>Page</span>
     </button>
-
     <button
-      onClick={onTogglePaperSettings}
+      onClick={props.onTogglePaperSettings}
       className="p-1.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
       data-tip="Paper Template & Color"
     >
       <Sliders className="size-4" />
     </button>
+    <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-800 mx-0.5" />
+    <GoodNotesExportMenu
+      onExportPng={props.onExportPng}
+      onExportSvg={props.onExportSvg}
+      onCopyPng={props.onCopyPng}
+      onCopySvg={props.onCopySvg}
+    />
   </div>
 )
 
@@ -172,7 +186,9 @@ const ToolPaletteSection: React.FC<{
   activeTool: string
   onSelectTool: (tool: string) => void
   onInsertImage: () => void
-}> = ({ activeTool, onSelectTool, onInsertImage }) => (
+  onToggleLibrary: () => void
+  isLibraryOpen: boolean
+}> = ({ activeTool, onSelectTool, onInsertImage, onToggleLibrary, isLibraryOpen }) => (
   <div className="flex items-center gap-0.5 bg-slate-100/90 dark:bg-slate-800/80 p-1 rounded-xl">
     {DRAWING_TOOLS.map((t) => (
       <ToolButton
@@ -207,35 +223,53 @@ const ToolPaletteSection: React.FC<{
     >
       <ImageIcon className="size-4" />
     </button>
+    <div className="w-[1px] h-4 bg-slate-300 dark:bg-slate-700 mx-0.5" />
+    <button
+      onClick={onToggleLibrary}
+      className={`p-1.5 rounded-lg transition-all ${
+        isLibraryOpen
+          ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
+          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/40"
+      }`}
+      data-tip="Excalidraw Library (Assets & Stickers)"
+    >
+      <Library className="size-4" />
+    </button>
   </div>
 )
 
 export const GoodNotesToolbar: React.FC<GoodNotesToolbarProps> = (props) => (
   <header className="h-12 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 flex items-center justify-between gap-2 shadow-sm select-none z-30 shrink-0">
-    <PageNavSection
-      currentPageIndex={props.currentPageIndex}
-      totalPages={props.totalPages}
-      isDrawerOpen={props.isDrawerOpen}
-      onToggleDrawer={props.onToggleDrawer}
-      onPrevPage={props.onPrevPage}
-      onNextPage={props.onNextPage}
-      onAddPage={props.onAddPage}
-      onTogglePaperSettings={props.onTogglePaperSettings}
-    />
+    <PageNavSection {...props} />
 
     <ToolPaletteSection
       activeTool={props.activeTool}
       onSelectTool={props.onSelectTool}
       onInsertImage={props.onInsertImage}
+      onToggleLibrary={props.onToggleLibrary}
+      isLibraryOpen={props.isLibraryOpen}
     />
 
-    <GoodNotesStyleControls
-      color={props.color}
-      onChangeColor={props.onChangeColor}
-      strokeWidth={props.strokeWidth}
-      onChangeStrokeWidth={props.onChangeStrokeWidth}
-      onUndo={props.onUndo}
-      onRedo={props.onRedo}
-    />
+    <div className="flex items-center gap-2">
+      <CanvasQuickControls
+        gridMode={props.gridMode}
+        onToggleGridMode={props.onToggleGridMode}
+        snapToObjects={props.snapToObjects}
+        onToggleSnapToObjects={props.onToggleSnapToObjects}
+        onZoomIn={props.onZoomIn}
+        onZoomOut={props.onZoomOut}
+        onResetZoom={props.onResetZoom}
+        onHelp={props.onHelp}
+      />
+      <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-800" />
+      <GoodNotesStyleControls
+        color={props.color}
+        onChangeColor={props.onChangeColor}
+        strokeWidth={props.strokeWidth}
+        onChangeStrokeWidth={props.onChangeStrokeWidth}
+        onUndo={props.onUndo}
+        onRedo={props.onRedo}
+      />
+    </div>
   </header>
 )
