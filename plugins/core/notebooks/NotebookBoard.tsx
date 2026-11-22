@@ -1,13 +1,15 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
 import { Excalidraw } from "@excalidraw/excalidraw"
 import "@excalidraw/excalidraw/index.css"
-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import { DocumentNavigationDrawer } from "./DocumentNavigationDrawer"
 import { GoodNotesToolbar } from "./GoodNotesToolbar"
 import { GoodNotesPaperSettings } from "./GoodNotesPaperSettings"
 import { GoodNotesPaperSheet } from "./GoodNotesPaperSheet"
 import { useNotebookDocument } from "./useNotebookDocument"
 import { migrateLegacyPageToExcalidraw } from "./legacyMigration"
+import type { NotebookPage } from "./types"
 
 declare global {
   interface Window {
@@ -23,7 +25,11 @@ export interface NotebookBoardProps {
   onChange?: (newText: string) => void
 }
 
-type FormToolType = "rectangle" | "ellipse" | "diamond" | "arrow" | "line"
+type FormToolType = "rectangle" | "diamond" | "ellipse" | "arrow" | "line"
+
+function isFormTool(tool: string): tool is FormToolType {
+  return tool === "rectangle" || tool === "diamond" || tool === "ellipse" || tool === "arrow" || tool === "line"
+}
 
 const HIDE_DEFAULT_UI_OPTIONS = {
   canvasActions: {
@@ -40,35 +46,145 @@ const HIDE_DEFAULT_UI_OPTIONS = {
   },
 }
 
-function applyToolToScene(
+function applyFreedraw(
   api: ExcalidrawImperativeAPI,
-  tool: string,
-  form: string,
+  tool: "pen" | "highlighter",
   color: string,
   strokeWidth: number
 ) {
-  if (tool === "highlighter") {
-    api.setActiveTool({ type: "freedraw" })
-    api.updateScene({ appState: { currentItemStrokeColor: color, currentItemStrokeWidth: 18, currentItemOpacity: 45, currentItemRoughness: 0 } })
-    return
-  }
-  if (tool === "pen") {
-    api.setActiveTool({ type: "freedraw" })
-    api.updateScene({ appState: { currentItemStrokeColor: color, currentItemStrokeWidth: strokeWidth, currentItemOpacity: 100, currentItemRoughness: 0 } })
-    return
-  }
-  if (tool === "eraser" || tool === "laser" || tool === "text") {
-    api.setActiveTool({ type: tool })
-    return
-  }
+  const isHighlighter = tool === "highlighter"
+  api.setActiveTool({ type: "freedraw", locked: true })
+  api.updateScene({
+    appState: {
+      currentItemStrokeColor: color,
+      currentItemStrokeWidth: isHighlighter ? 18 : strokeWidth,
+      currentItemOpacity: isHighlighter ? 45 : 100,
+      currentItemRoughness: 0,
+    },
+  })
+}
+
+function applyForm(
+  api: ExcalidrawImperativeAPI,
+  form: FormToolType,
+  color: string,
+  strokeWidth: number
+) {
+  api.setActiveTool({ type: form, locked: true })
+  api.updateScene({
+    appState: {
+      currentItemStrokeColor: color,
+      currentItemStrokeWidth: strokeWidth,
+      currentItemOpacity: 100,
+      currentItemRoughness: 0,
+    },
+  })
+}
+
+function applyToolToScene(
+  api: ExcalidrawImperativeAPI,
+  tool: string,
+  color: string,
+  strokeWidth: number
+) {
   if (tool === "lasso") {
     api.setActiveTool({ type: "selection" })
     return
   }
-  const formType: FormToolType = form === "ellipse" ? "ellipse" : form === "arrow" ? "arrow" : form === "line" ? "line" : "rectangle"
-  api.setActiveTool({ type: formType })
-  api.updateScene({ appState: { currentItemStrokeColor: color, currentItemStrokeWidth: strokeWidth, currentItemOpacity: 100, currentItemRoughness: 0 } })
+  api.updateScene({ appState: { selectedElementIds: {} } })
+  if (tool === "highlighter" || tool === "pen") {
+    applyFreedraw(api, tool, color, strokeWidth)
+    return
+  }
+  if (tool === "eraser" || tool === "laser" || tool === "text") {
+    api.setActiveTool({ type: tool, locked: true })
+    return
+  }
+  if (isFormTool(tool)) {
+    applyForm(api, tool, color, strokeWidth)
+  }
 }
+
+function updateSelectedColor(api: ExcalidrawImperativeAPI | null, c: string) {
+  if (!api) return
+  const selectedIds = api.getAppState().selectedElementIds || {}
+  if (Object.values(selectedIds).some(Boolean)) {
+    const els = api.getSceneElements().map((el) => (
+      selectedIds[el.id] ? { ...el, strokeColor: c } : el
+    ))
+    api.updateScene({ elements: els, appState: { currentItemStrokeColor: c } })
+  } else {
+    api.updateScene({ appState: { currentItemStrokeColor: c } })
+  }
+}
+
+function updateSelectedWidth(api: ExcalidrawImperativeAPI | null, w: number) {
+  if (!api) return
+  const selectedIds = api.getAppState().selectedElementIds || {}
+  if (Object.values(selectedIds).some(Boolean)) {
+    const els = api.getSceneElements().map((el) => (
+      selectedIds[el.id] ? { ...el, strokeWidth: w } : el
+    ))
+    api.updateScene({ elements: els, appState: { currentItemStrokeWidth: w } })
+  } else {
+    api.updateScene({ appState: { currentItemStrokeWidth: w } })
+  }
+}
+
+interface DeskSheetProps {
+  deskRef: React.RefObject<HTMLDivElement | null>
+  sheetRef: React.RefObject<HTMLDivElement | null>
+  currentPage: NotebookPage
+  readOnly: boolean
+  onApiReady: (api: ExcalidrawImperativeAPI) => void
+  onElementsChange: (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => void
+}
+
+const DeskSheet: React.FC<DeskSheetProps> = ({
+  deskRef,
+  sheetRef,
+  currentPage,
+  readOnly,
+  onApiReady,
+  onElementsChange,
+}) => (
+  <main
+    ref={deskRef}
+    className="goodnotes-desk flex-1 relative overflow-auto flex justify-center py-8 px-6 bg-slate-200/90 dark:bg-[#0c0e12] select-none"
+  >
+    <GoodNotesPaperSheet
+      sheetRef={sheetRef}
+      template={currentPage.template}
+      paperColor={currentPage.paperColor || "white"}
+      pageSize={currentPage.pageSize || "Standard"}
+      orientation={currentPage.orientation || "portrait"}
+    >
+      <Excalidraw
+        excalidrawAPI={onApiReady}
+        initialData={{
+          elements: migrateLegacyPageToExcalidraw(currentPage),
+          files: currentPage.files,
+          appState: {
+            viewBackgroundColor: "transparent",
+            currentItemRoughness: 0,
+            theme: currentPage.paperColor === "dark" ? "dark" : "light",
+            scrollX: 0,
+            scrollY: 0,
+          },
+        }}
+        onChange={onElementsChange}
+        onScrollChange={(scrollX, scrollY) => {
+          if (scrollX !== 0 || scrollY !== 0) {
+            window.__excalidrawAPI?.updateScene({ appState: { scrollX: 0, scrollY: 0 } })
+          }
+        }}
+        viewModeEnabled={readOnly}
+        zenModeEnabled={false}
+        UIOptions={HIDE_DEFAULT_UI_OPTIONS}
+      />
+    </GoodNotesPaperSheet>
+  </main>
+)
 
 export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   text,
@@ -92,7 +208,6 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   } = useNotebookDocument({ text, onChange })
 
   const [activeTool, setActiveTool] = useState<string>("pen")
-  const [activeForm, setActiveForm] = useState<string>("rectangle")
   const [color, setColor] = useState<string>("#1e293b")
   const [strokeWidth, setStrokeWidth] = useState<number>(1.5)
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false)
@@ -105,36 +220,28 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const handleSelectTool = useCallback((tool: string) => {
     setActiveTool(tool)
     if (excalidrawAPIRef.current) {
-      applyToolToScene(excalidrawAPIRef.current, tool, activeForm, color, strokeWidth)
-    }
-  }, [activeForm, color, strokeWidth])
-
-  const handleSelectForm = useCallback((form: string) => {
-    setActiveForm(form)
-    setActiveTool("form")
-    if (excalidrawAPIRef.current) {
-      applyToolToScene(excalidrawAPIRef.current, "form", form, color, strokeWidth)
+      applyToolToScene(excalidrawAPIRef.current, tool, color, strokeWidth)
     }
   }, [color, strokeWidth])
 
   const handleChangeColor = useCallback((c: string) => {
     setColor(c)
-    excalidrawAPIRef.current?.updateScene({ appState: { currentItemStrokeColor: c } })
+    updateSelectedColor(excalidrawAPIRef.current, c)
   }, [])
 
   const handleChangeStrokeWidth = useCallback((w: number) => {
     setStrokeWidth(w)
-    excalidrawAPIRef.current?.updateScene({ appState: { currentItemStrokeWidth: w } })
+    updateSelectedWidth(excalidrawAPIRef.current, w)
   }, [])
 
   const handleUndo = useCallback(() => {
-    const el = document.querySelector(".goodnotes-canvas-root .excalidraw")
-    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, metaKey: true, bubbles: true }))
+    document.querySelector(".goodnotes-canvas-root .excalidraw")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, metaKey: true, bubbles: true }))
   }, [])
 
   const handleRedo = useCallback(() => {
-    const el = document.querySelector(".goodnotes-canvas-root .excalidraw")
-    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, metaKey: true, bubbles: true }))
+    document.querySelector(".goodnotes-canvas-root .excalidraw")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, metaKey: true, bubbles: true }))
   }, [])
 
   const handleRotatePage = useCallback((index: number) => {
@@ -149,9 +256,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
 
   const handleSwitchPage = useCallback((idx: number) => {
     switchPage(idx, excalidrawAPIRef.current)
-    if (deskRef.current) {
-      deskRef.current.scrollTop = 0
-    }
+    if (deskRef.current) deskRef.current.scrollTop = 0
   }, [switchPage])
 
   useEffect(() => {
@@ -181,14 +286,29 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         .goodnotes-canvas-root .sidebar-trigger { display: none !important; }
         .goodnotes-canvas-root .hint { display: none !important; }
         .goodnotes-canvas-root .layer-ui__wrapper__footer { display: none !important; }
-        .goodnotes-canvas-root .excalidraw { background: transparent !important; }
+        .goodnotes-canvas-root .excalidraw { background: transparent !important; overflow: visible !important; }
+        .goodnotes-canvas-root .layer-ui__wrapper { overflow: visible !important; }
+        .goodnotes-canvas-root .selected-shape-actions {
+          position: absolute !important;
+          left: -245px !important;
+          top: 10px !important;
+          z-index: 50 !important;
+          width: 200px !important;
+          pointer-events: auto !important;
+          overflow: visible !important;
+        }
+        .goodnotes-canvas-root .selected-shape-actions .App-menu__left {
+          position: relative !important;
+          max-height: calc(100vh - 140px) !important;
+          overflow-y: auto !important;
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.25) !important;
+          border-radius: 12px !important;
+        }
       `}</style>
 
       <GoodNotesToolbar
         activeTool={activeTool}
-        activeForm={activeForm}
         onSelectTool={handleSelectTool}
-        onSelectForm={handleSelectForm}
         color={color}
         onChangeColor={handleChangeColor}
         strokeWidth={strokeWidth}
@@ -230,50 +350,24 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onToggleReadOnly={() => setReadOnly(!readOnly)}
       />
 
-      <main
-        ref={deskRef}
-        className="goodnotes-desk flex-1 relative overflow-auto flex justify-center py-8 px-6 bg-slate-200/90 dark:bg-[#0c0e12] select-none"
-      >
-        <GoodNotesPaperSheet
-          sheetRef={sheetRef}
-          template={currentPage.template}
-          paperColor={currentPage.paperColor || "white"}
-          pageSize={currentPage.pageSize || "Standard"}
-          orientation={currentPage.orientation || "portrait"}
-        >
-          <Excalidraw
-            excalidrawAPI={(api) => {
-              excalidrawAPIRef.current = api
-              window.__excalidrawAPI = api
-              applyToolToScene(api, activeTool, activeForm, color, strokeWidth)
-            }}
-            initialData={{
-              elements: migrateLegacyPageToExcalidraw(currentPage),
-              files: currentPage.files,
-              appState: {
-                viewBackgroundColor: "transparent",
-                currentItemRoughness: 0,
-                theme: currentPage.paperColor === "dark" ? "dark" : "light",
-                scrollX: 0,
-                scrollY: 0,
-              },
-            }}
-            onChange={(elements, _appState, files) => {
-              updatePageData(elements, files)
-            }}
-            onScrollChange={(scrollX, scrollY) => {
-              if (scrollX !== 0 || scrollY !== 0) {
-                excalidrawAPIRef.current?.updateScene({
-                  appState: { scrollX: 0, scrollY: 0 },
-                })
-              }
-            }}
-            viewModeEnabled={readOnly}
-            zenModeEnabled={false}
-            UIOptions={HIDE_DEFAULT_UI_OPTIONS}
-          />
-        </GoodNotesPaperSheet>
-      </main>
+      <DeskSheet
+        deskRef={deskRef}
+        sheetRef={sheetRef}
+        currentPage={currentPage}
+        readOnly={readOnly}
+        onApiReady={(api) => {
+          excalidrawAPIRef.current = api
+          window.__excalidrawAPI = api
+          applyToolToScene(api, activeTool, color, strokeWidth)
+        }}
+        onElementsChange={(elements, appState, files) => {
+          updatePageData(elements, files)
+          const toolType = appState.activeTool?.type
+          if (toolType === "selection" && activeTool !== "lasso") {
+            setActiveTool("lasso")
+          }
+        }}
+      />
     </div>
   )
 }
