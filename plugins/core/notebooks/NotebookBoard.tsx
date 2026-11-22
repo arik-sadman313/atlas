@@ -8,11 +8,9 @@ import { GoodNotesDeskSheet } from "./GoodNotesDeskSheet"
 import { useNotebookDocument } from "./useNotebookDocument"
 import {
   applyToolToScene,
+  applySceneZoom,
   updateSelectedColor,
   updateSelectedWidth,
-  zoomIn,
-  zoomOut,
-  resetZoom,
   triggerShortcutsHelp,
 } from "./notebookActions"
 import {
@@ -64,6 +62,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const [isLibraryOpen, setIsLibraryOpen] = useState<boolean>(false)
   const [gridMode, setGridMode] = useState<boolean>(false)
   const [snapToObjects, setSnapToObjects] = useState<boolean>(true)
+  const [zoom, setZoom] = useState<number>(1)
   const [readOnly, setReadOnly] = useState<boolean>(!editable)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const deskRef = useRef<HTMLDivElement | null>(null)
@@ -76,24 +75,16 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     }
   }, [color, strokeWidth])
 
-  const handleChangeColor = useCallback((c: string) => {
-    setColor(c)
-    updateSelectedColor(excalidrawAPIRef.current, c)
+  const handleZoomIn = useCallback(() => {
+    setZoom((prev) => Math.min(3, Math.round((prev + 0.15) * 100) / 100))
   }, [])
 
-  const handleChangeStrokeWidth = useCallback((w: number) => {
-    setStrokeWidth(w)
-    updateSelectedWidth(excalidrawAPIRef.current, w)
+  const handleZoomOut = useCallback(() => {
+    setZoom((prev) => Math.max(0.5, Math.round((prev - 0.15) * 100) / 100))
   }, [])
 
-  const handleUndo = useCallback(() => {
-    document.querySelector(".goodnotes-canvas-root .excalidraw")
-      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, metaKey: true, bubbles: true }))
-  }, [])
-
-  const handleRedo = useCallback(() => {
-    document.querySelector(".goodnotes-canvas-root .excalidraw")
-      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, metaKey: true, bubbles: true }))
+  const handleResetZoom = useCallback(() => {
+    setZoom(1)
   }, [])
 
   const handleSwitchPage = useCallback((idx: number) => {
@@ -102,9 +93,22 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   }, [switchPage])
 
   useEffect(() => {
+    if (excalidrawAPIRef.current) {
+      applySceneZoom(excalidrawAPIRef.current, zoom)
+    }
+  }, [zoom])
+
+  useEffect(() => {
     const sheet = sheetRef.current
     if (!sheet) return
     const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        const delta = -e.deltaY * 0.005
+        setZoom((prev) => Math.min(3, Math.max(0.5, Math.round((prev + delta) * 100) / 100)))
+        return
+      }
       if (deskRef.current) {
         deskRef.current.scrollTop += e.deltaY
         deskRef.current.scrollLeft += e.deltaX
@@ -115,6 +119,24 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     sheet.addEventListener("wheel", onWheel, { capture: true, passive: false })
     return () => sheet.removeEventListener("wheel", onWheel, { capture: true })
   }, [currentPageIndex])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault()
+        setZoom((prev) => Math.min(3, Math.round((prev + 0.15) * 100) / 100))
+      } else if (e.key === "-") {
+        e.preventDefault()
+        setZoom((prev) => Math.max(0.5, Math.round((prev - 0.15) * 100) / 100))
+      } else if (e.key === "0") {
+        e.preventDefault()
+        setZoom(1)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   useEffect(() => {
     return () => { saveCurrentScene(excalidrawAPIRef.current) }
@@ -152,9 +174,9 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         activeTool={activeTool}
         onSelectTool={handleSelectTool}
         color={color}
-        onChangeColor={handleChangeColor}
+        onChangeColor={(c) => { setColor(c); updateSelectedColor(excalidrawAPIRef.current, c) }}
         strokeWidth={strokeWidth}
-        onChangeStrokeWidth={handleChangeStrokeWidth}
+        onChangeStrokeWidth={(w) => { setStrokeWidth(w); updateSelectedWidth(excalidrawAPIRef.current, w) }}
         currentPageIndex={currentPageIndex}
         totalPages={doc.pages.length}
         onPrevPage={() => handleSwitchPage(currentPageIndex - 1)}
@@ -163,8 +185,8 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
         isDrawerOpen={isDrawerOpen}
         onTogglePaperSettings={() => setIsPaperSettingsOpen(!isPaperSettingsOpen)}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
+        onUndo={() => document.querySelector(".goodnotes-canvas-root .excalidraw")?.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, metaKey: true, bubbles: true }))}
+        onRedo={() => document.querySelector(".goodnotes-canvas-root .excalidraw")?.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, metaKey: true, bubbles: true }))}
         onInsertImage={() => excalidrawAPIRef.current?.setActiveTool({ type: "image" })}
         onToggleLibrary={() => excalidrawAPIRef.current?.toggleSidebar({ name: "default" })}
         isLibraryOpen={isLibraryOpen}
@@ -172,9 +194,10 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onToggleGridMode={() => setGridMode(!gridMode)}
         snapToObjects={snapToObjects}
         onToggleSnapToObjects={() => setSnapToObjects(!snapToObjects)}
-        onZoomIn={() => excalidrawAPIRef.current && zoomIn(excalidrawAPIRef.current)}
-        onZoomOut={() => excalidrawAPIRef.current && zoomOut(excalidrawAPIRef.current)}
-        onResetZoom={() => excalidrawAPIRef.current && resetZoom(excalidrawAPIRef.current)}
+        zoom={zoom}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onResetZoom={handleResetZoom}
         onHelp={triggerShortcutsHelp}
         onExportPng={() => excalidrawAPIRef.current && exportSceneToPng(excalidrawAPIRef.current, `page-${currentPageIndex + 1}`)}
         onExportSvg={() => excalidrawAPIRef.current && exportSceneToSvg(excalidrawAPIRef.current, `page-${currentPageIndex + 1}`)}
@@ -219,6 +242,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         readOnly={readOnly}
         gridMode={gridMode}
         snapToObjects={snapToObjects}
+        zoom={zoom}
         onApiReady={(api) => {
           excalidrawAPIRef.current = api
           window.__excalidrawAPI = api

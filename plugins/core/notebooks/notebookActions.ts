@@ -103,26 +103,23 @@ function isNormalizedZoom(v: number): v is NormalizedZoomValue {
   return Number.isFinite(v) && v > 0
 }
 
-function toZoom(n: number, fallback: NormalizedZoomValue): NormalizedZoomValue {
-  if (isNormalizedZoom(n)) return n
-  return fallback
+export function toZoom(n: number): NormalizedZoomValue {
+  let val = n
+  if (isNormalizedZoom(val)) return val
+  val = 1
+  if (isNormalizedZoom(val)) return val
+  throw new Error("Invalid zoom")
 }
 
-export function zoomIn(api: ExcalidrawImperativeAPI) {
-  const current = api.getAppState().zoom.value
-  const next = Math.min(3, Math.round((current + 0.1) * 10) / 10)
-  api.updateScene({ appState: { zoom: { value: toZoom(next, current) } } })
-}
-
-export function zoomOut(api: ExcalidrawImperativeAPI) {
-  const current = api.getAppState().zoom.value
-  const next = Math.max(0.2, Math.round((current - 0.1) * 10) / 10)
-  api.updateScene({ appState: { zoom: { value: toZoom(next, current) } } })
-}
-
-export function resetZoom(api: ExcalidrawImperativeAPI) {
-  const current = api.getAppState().zoom.value
-  api.updateScene({ appState: { zoom: { value: toZoom(1, current) } } })
+export function applySceneZoom(api: ExcalidrawImperativeAPI, zoom: number) {
+  api.updateScene({
+    appState: {
+      zoom: { value: toZoom(zoom) },
+      scrollX: 0,
+      scrollY: 0,
+    },
+  })
+  api.refresh()
 }
 
 export function triggerShortcutsHelp() {

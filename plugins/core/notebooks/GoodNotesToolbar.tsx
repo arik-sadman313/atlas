@@ -256,6 +256,7 @@ export const GoodNotesToolbar: React.FC<GoodNotesToolbarProps> = (props) => (
         onToggleGridMode={props.onToggleGridMode}
         snapToObjects={props.snapToObjects}
         onToggleSnapToObjects={props.onToggleSnapToObjects}
+        zoom={props.zoom}
         onZoomIn={props.onZoomIn}
         onZoomOut={props.onZoomOut}
         onResetZoom={props.onResetZoom}

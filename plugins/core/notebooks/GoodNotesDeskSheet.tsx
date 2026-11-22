@@ -4,6 +4,7 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import { GoodNotesPaperSheet } from "./GoodNotesPaperSheet"
 import { migrateLegacyPageToExcalidraw } from "./legacyMigration"
+import { toZoom } from "./notebookActions"
 import type { NotebookPage } from "./types"
 
 const HIDE_DEFAULT_UI_OPTIONS = {
@@ -21,6 +22,17 @@ const HIDE_DEFAULT_UI_OPTIONS = {
   },
 }
 
+function getInitialAppState(paperColor?: string, zoom = 1) {
+  return {
+    viewBackgroundColor: "transparent",
+    currentItemRoughness: 0,
+    theme: paperColor === "dark" ? ("dark" as const) : ("light" as const),
+    zoom: { value: toZoom(zoom) },
+    scrollX: 0,
+    scrollY: 0,
+  }
+}
+
 export interface GoodNotesDeskSheetProps {
   deskRef: React.RefObject<HTMLDivElement | null>
   sheetRef: React.RefObject<HTMLDivElement | null>
@@ -28,6 +40,7 @@ export interface GoodNotesDeskSheetProps {
   readOnly: boolean
   gridMode: boolean
   snapToObjects: boolean
+  zoom: number
   onApiReady: (api: ExcalidrawImperativeAPI) => void
   onElementsChange: (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => void
 }
@@ -39,6 +52,7 @@ export const GoodNotesDeskSheet: React.FC<GoodNotesDeskSheetProps> = ({
   readOnly,
   gridMode,
   snapToObjects,
+  zoom,
   onApiReady,
   onElementsChange,
 }) => (
@@ -52,25 +66,18 @@ export const GoodNotesDeskSheet: React.FC<GoodNotesDeskSheetProps> = ({
       paperColor={currentPage.paperColor || "white"}
       pageSize={currentPage.pageSize || "Standard"}
       orientation={currentPage.orientation || "portrait"}
+      zoom={zoom}
     >
       <Excalidraw
         excalidrawAPI={onApiReady}
         initialData={{
           elements: migrateLegacyPageToExcalidraw(currentPage),
           files: currentPage.files,
-          appState: {
-            viewBackgroundColor: "transparent",
-            currentItemRoughness: 0,
-            theme: currentPage.paperColor === "dark" ? "dark" : "light",
-            scrollX: 0,
-            scrollY: 0,
-          },
+          appState: getInitialAppState(currentPage.paperColor, zoom),
         }}
         onChange={onElementsChange}
-        onScrollChange={(scrollX, scrollY) => {
-          if (scrollX !== 0 || scrollY !== 0) {
-            window.__excalidrawAPI?.updateScene({ appState: { scrollX: 0, scrollY: 0 } })
-          }
+        onScrollChange={(x, y) => {
+          if (x !== 0 || y !== 0) window.__excalidrawAPI?.updateScene({ appState: { scrollX: 0, scrollY: 0 } })
         }}
         viewModeEnabled={readOnly}
         zenModeEnabled={false}

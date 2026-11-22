@@ -1,11 +1,12 @@
 import React from "react"
-import { Grid, Magnet, ZoomIn, ZoomOut, Maximize2, HelpCircle } from "lucide-react"
+import { Grid, Magnet, ZoomIn, ZoomOut, HelpCircle } from "lucide-react"
 
 export interface CanvasQuickControlsProps {
   gridMode: boolean
   onToggleGridMode: () => void
   snapToObjects: boolean
   onToggleSnapToObjects: () => void
+  zoom: number
   onZoomIn: () => void
   onZoomOut: () => void
   onResetZoom: () => void
@@ -45,31 +46,32 @@ const SnapButtons: React.FC<{
 )
 
 const ZoomButtons: React.FC<{
+  zoom: number
   onZoomIn: () => void
   onZoomOut: () => void
   onResetZoom: () => void
-}> = ({ onZoomIn, onZoomOut, onResetZoom }) => (
+}> = ({ zoom, onZoomIn, onZoomOut, onResetZoom }) => (
   <>
     <button
       onClick={onZoomOut}
       className="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-      data-tip="Zoom Out"
+      data-tip="Zoom Out (Ctrl+-)"
     >
       <ZoomOut className="size-4" />
     </button>
     <button
-      onClick={onZoomIn}
-      className="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-      data-tip="Zoom In"
+      onClick={onResetZoom}
+      className="px-1.5 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors select-none tabular-nums"
+      data-tip="Reset Zoom (Ctrl+0)"
     >
-      <ZoomIn className="size-4" />
+      {Math.round(zoom * 100)}%
     </button>
     <button
-      onClick={onResetZoom}
+      onClick={onZoomIn}
       className="p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-      data-tip="Reset Zoom (100%)"
+      data-tip="Zoom In (Ctrl++)"
     >
-      <Maximize2 className="size-4" />
+      <ZoomIn className="size-4" />
     </button>
   </>
 )
@@ -84,6 +86,7 @@ export const CanvasQuickControls: React.FC<CanvasQuickControlsProps> = (props) =
     />
     <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-800 mx-0.5" />
     <ZoomButtons
+      zoom={props.zoom}
       onZoomIn={props.onZoomIn}
       onZoomOut={props.onZoomOut}
       onResetZoom={props.onResetZoom}
