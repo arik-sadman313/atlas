@@ -22,7 +22,7 @@ export function usePageMutations(
   const addPage = useCallback((afterIndex: number, api: ExcalidrawImperativeAPI | null) => {
     saveCurrentScene(api)
     const cur = docRef.current.pages[afterIndex] || docRef.current.pages[0]
-    const newPage = createEmptyPage(afterIndex + 2, cur.template, cur.paperColor)
+    const newPage = createEmptyPage(afterIndex + 2, cur.template, cur.paperColor, cur.pageSize, cur.orientation)
     docRef.current.pages.splice(afterIndex + 1, 0, newPage)
     docRef.current.pages.forEach((p, i) => { p.pageNumber = i + 1 })
     setDoc({ ...docRef.current })

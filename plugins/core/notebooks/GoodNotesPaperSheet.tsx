@@ -1,9 +1,13 @@
 import React from "react"
-import type { PageTemplate, PaperColor } from "./types"
+import type { PageTemplate, PaperColor, PageSize, PageOrientation } from "./types"
+import { PAGE_DIMENSIONS } from "./types"
 
 interface GoodNotesPaperSheetProps {
   template: PageTemplate
   paperColor: PaperColor
+  pageSize?: PageSize
+  orientation?: PageOrientation
+  sheetRef?: React.Ref<HTMLDivElement>
   children: React.ReactNode
 }
 
@@ -55,12 +59,23 @@ function getPaperStyle(template: PageTemplate, paperColor: PaperColor = "white")
 export const GoodNotesPaperSheet: React.FC<GoodNotesPaperSheetProps> = ({
   template,
   paperColor,
+  pageSize = "Standard",
+  orientation = "portrait",
+  sheetRef,
   children,
-}) => (
-  <div
-    className="w-full h-full relative overflow-hidden transition-colors duration-200 select-none"
-    style={getPaperStyle(template, paperColor)}
-  >
-    {children}
-  </div>
-)
+}) => {
+  const dims = PAGE_DIMENSIONS[pageSize]?.[orientation] || PAGE_DIMENSIONS.Standard.portrait
+  return (
+    <div
+      ref={sheetRef}
+      className="goodnotes-paper-sheet relative rounded-md border border-slate-300/80 dark:border-slate-800 shadow-2xl shadow-black/20 dark:shadow-black/70 overflow-hidden shrink-0 select-none transition-colors duration-200"
+      style={{
+        ...getPaperStyle(template, paperColor),
+        width: `${dims.width}px`,
+        height: `${dims.height}px`,
+      }}
+    >
+      {children}
+    </div>
+  )
+}

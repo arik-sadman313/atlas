@@ -9,6 +9,12 @@ import { GoodNotesPaperSheet } from "./GoodNotesPaperSheet"
 import { useNotebookDocument } from "./useNotebookDocument"
 import { migrateLegacyPageToExcalidraw } from "./legacyMigration"
 
+declare global {
+  interface Window {
+    __excalidrawAPI?: ExcalidrawImperativeAPI
+  }
+}
+
 export interface NotebookBoardProps {
   text: string
   path?: string
@@ -93,6 +99,8 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const [isPaperSettingsOpen, setIsPaperSettingsOpen] = useState<boolean>(false)
   const [readOnly, setReadOnly] = useState<boolean>(!editable)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const deskRef = useRef<HTMLDivElement | null>(null)
+  const sheetRef = useRef<HTMLDivElement | null>(null)
 
   const handleSelectTool = useCallback((tool: string) => {
     setActiveTool(tool)
@@ -139,6 +147,28 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     if (p) { p.bookmarked = !p.bookmarked; setDoc({ ...docRef.current }) }
   }, [docRef, setDoc])
 
+  const handleSwitchPage = useCallback((idx: number) => {
+    switchPage(idx, excalidrawAPIRef.current)
+    if (deskRef.current) {
+      deskRef.current.scrollTop = 0
+    }
+  }, [switchPage])
+
+  useEffect(() => {
+    const sheet = sheetRef.current
+    if (!sheet) return
+    const onWheel = (e: WheelEvent) => {
+      if (deskRef.current) {
+        deskRef.current.scrollTop += e.deltaY
+        deskRef.current.scrollLeft += e.deltaX
+      }
+      e.stopPropagation()
+      e.preventDefault()
+    }
+    sheet.addEventListener("wheel", onWheel, { capture: true, passive: false })
+    return () => sheet.removeEventListener("wheel", onWheel, { capture: true })
+  }, [currentPageIndex])
+
   useEffect(() => {
     return () => { saveCurrentScene(excalidrawAPIRef.current) }
   }, [saveCurrentScene])
@@ -150,6 +180,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         .goodnotes-canvas-root .main-menu-trigger { display: none !important; }
         .goodnotes-canvas-root .sidebar-trigger { display: none !important; }
         .goodnotes-canvas-root .hint { display: none !important; }
+        .goodnotes-canvas-root .layer-ui__wrapper__footer { display: none !important; }
         .goodnotes-canvas-root .excalidraw { background: transparent !important; }
       `}</style>
 
@@ -164,8 +195,8 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onChangeStrokeWidth={handleChangeStrokeWidth}
         currentPageIndex={currentPageIndex}
         totalPages={doc.pages.length}
-        onPrevPage={() => switchPage(currentPageIndex - 1, excalidrawAPIRef.current)}
-        onNextPage={() => switchPage(currentPageIndex + 1, excalidrawAPIRef.current)}
+        onPrevPage={() => handleSwitchPage(currentPageIndex - 1)}
+        onNextPage={() => handleSwitchPage(currentPageIndex + 1)}
         onAddPage={() => addPage(currentPageIndex, excalidrawAPIRef.current)}
         onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
         isDrawerOpen={isDrawerOpen}
@@ -189,7 +220,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onClose={() => setIsDrawerOpen(false)}
         pages={doc.pages}
         currentPageIndex={currentPageIndex}
-        onSelectPage={(idx) => { switchPage(idx, excalidrawAPIRef.current); setIsDrawerOpen(false) }}
+        onSelectPage={(idx) => { handleSwitchPage(idx); setIsDrawerOpen(false) }}
         onAddPage={(idx) => addPage(idx, excalidrawAPIRef.current)}
         onDuplicatePage={(idx) => duplicatePage(idx, excalidrawAPIRef.current)}
         onDeletePage={(idx) => deletePage(idx, excalidrawAPIRef.current)}
@@ -199,14 +230,21 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onToggleReadOnly={() => setReadOnly(!readOnly)}
       />
 
-      <main className="flex-1 relative overflow-hidden flex items-center justify-center">
+      <main
+        ref={deskRef}
+        className="goodnotes-desk flex-1 relative overflow-auto flex justify-center py-8 px-6 bg-slate-200/90 dark:bg-[#0c0e12] select-none"
+      >
         <GoodNotesPaperSheet
+          sheetRef={sheetRef}
           template={currentPage.template}
           paperColor={currentPage.paperColor || "white"}
+          pageSize={currentPage.pageSize || "Standard"}
+          orientation={currentPage.orientation || "portrait"}
         >
           <Excalidraw
             excalidrawAPI={(api) => {
               excalidrawAPIRef.current = api
+              window.__excalidrawAPI = api
               applyToolToScene(api, activeTool, activeForm, color, strokeWidth)
             }}
             initialData={{
@@ -216,10 +254,19 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
                 viewBackgroundColor: "transparent",
                 currentItemRoughness: 0,
                 theme: currentPage.paperColor === "dark" ? "dark" : "light",
+                scrollX: 0,
+                scrollY: 0,
               },
             }}
             onChange={(elements, _appState, files) => {
               updatePageData(elements, files)
+            }}
+            onScrollChange={(scrollX, scrollY) => {
+              if (scrollX !== 0 || scrollY !== 0) {
+                excalidrawAPIRef.current?.updateScene({
+                  appState: { scrollX: 0, scrollY: 0 },
+                })
+              }
             }}
             viewModeEnabled={readOnly}
             zenModeEnabled={false}

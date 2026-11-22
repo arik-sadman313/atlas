@@ -77,7 +77,14 @@ export function useNotebookDocument({ text, onChange }: UseNotebookDocumentProps
     if (targetPage.files && api) {
       api.addFiles(Object.values(targetPage.files))
     }
-    api?.updateScene({ elements })
+    api?.updateScene({
+      elements,
+      appState: {
+        scrollX: 0,
+        scrollY: 0,
+        theme: targetPage.paperColor === "dark" ? "dark" : "light",
+      },
+    })
     api?.history.clear()
     setCurrentPageIndex(targetIndex)
   }, [saveCurrentScene])
