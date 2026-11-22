@@ -277,11 +277,8 @@ export default function NotebookBoard({
   const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set())
   const [activeImageId, setActiveImageId] = useState<string | null>(null)
-  const [isDraggingSelection, setIsDraggingSelection] = useState(false)
-  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null)
   const lassoPointsRef = useRef<{ x: number; y: number }[]>([])
   const lassoRafIdRef = useRef<number | null>(null)
-  const dragRafIdRef = useRef<number | null>(null)
   const deleteSelectedRef = useRef<() => void>(() => {})
   const duplicateSelectedRef = useRef<() => void>(() => {})
   const [lassoFilter, setLassoFilter] = useState<LassoFilter>({
@@ -632,41 +629,6 @@ export default function NotebookBoard({
 
     // 3. Lasso Tool
     if (activeTool === "lasso") {
-      if (
-        (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
-        computedSelectionBounds
-      ) {
-        if (
-          pt.x >= computedSelectionBounds.minX - 15 &&
-          pt.x <= computedSelectionBounds.maxX + 15 &&
-          pt.y >= computedSelectionBounds.minY - 15 &&
-          pt.y <= computedSelectionBounds.maxY + 15
-        ) {
-          const strokeMap = new Map<string, InkStroke>()
-          currentPage.strokes.forEach((s) => {
-            if (selectedStrokeIds.has(s.id)) strokeMap.set(s.id, s)
-          })
-          const boxMap = new Map<string, InkTextBox>()
-          ;(currentPage.textBoxes || []).forEach((b) => {
-            if (selectedBoxIds.has(b.id)) boxMap.set(b.id, b)
-          })
-          const imageMap = new Map<string, NotebookImage>()
-          ;(currentPage.images || []).forEach((img) => {
-            if (selectedImageIds.has(img.id)) imageMap.set(img.id, img)
-          })
-          initialSelectionSnapshotRef.current = {
-            strokes: strokeMap,
-            boxes: boxMap,
-            images: imageMap,
-            startPt: pt,
-          }
-          setIsDraggingSelection(true)
-          dragStartPointRef.current = { x: pt.x, y: pt.y }
-          pushHistory()
-          return
-        }
-      }
-
       lassoPointsRef.current = [{ x: pt.x, y: pt.y }]
       setLassoPoints([{ x: pt.x, y: pt.y }])
       setSelectedStrokeIds(new Set())
@@ -853,42 +815,6 @@ export default function NotebookBoard({
 
     // Lasso loop dragging
     if (activeTool === "lasso") {
-      if (isDraggingSelection && initialSelectionSnapshotRef.current) {
-        const { strokes: origStrokes, boxes: origBoxes, images: origImages, startPt } = initialSelectionSnapshotRef.current
-        const totalDx = pt.x - startPt.x
-        const totalDy = pt.y - startPt.y
-
-        if (!dragRafIdRef.current) {
-          dragRafIdRef.current = requestAnimationFrame(() => {
-            dragRafIdRef.current = null
-            const curPage = docRef.current.pages[currentPageIndex] || currentPage
-            const updatedStrokes = curPage.strokes.map((s) => {
-              const orig = origStrokes.get(s.id)
-              return orig ? translateStroke(orig, totalDx, totalDy) : s
-            })
-            const updatedBoxes = (curPage.textBoxes || []).map((b) => {
-              const orig = origBoxes.get(b.id)
-              return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : b
-            })
-            const updatedImages = (curPage.images || []).map((img) => {
-              const orig = origImages.get(img.id)
-              return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : img
-            })
-
-            const updatedPages = [...docRef.current.pages]
-            updatedPages[currentPageIndex] = {
-              ...curPage,
-              strokes: updatedStrokes,
-              textBoxes: updatedBoxes,
-              images: updatedImages,
-            }
-            docRef.current = { ...docRef.current, pages: updatedPages }
-            setDoc(docRef.current)
-          })
-        }
-        return
-      }
-
       if (lassoMode === "rect") {
         const startPt = lassoPointsRef.current[0] || pt
         lassoPointsRef.current = [startPt, { x: pt.x, y: pt.y }]
@@ -1063,22 +989,9 @@ export default function NotebookBoard({
 
     // Lasso completion
     if (activeTool === "lasso") {
-      if (dragRafIdRef.current) {
-        cancelAnimationFrame(dragRafIdRef.current)
-        dragRafIdRef.current = null
-      }
       if (lassoRafIdRef.current) {
         cancelAnimationFrame(lassoRafIdRef.current)
         lassoRafIdRef.current = null
-      }
-
-      if (isDraggingSelection) {
-        setIsDraggingSelection(false)
-        if (initialSelectionSnapshotRef.current) {
-          commitDoc(docRef.current)
-          initialSelectionSnapshotRef.current = null
-        }
-        return
       }
 
       const curPage = docRef.current.pages[currentPageIndex] || currentPage
@@ -1367,6 +1280,361 @@ export default function NotebookBoard({
       window.removeEventListener("pointerup", onUp)
       pushHistory()
       commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
+  // Drag / Move Lasso Selection (Strokes, Text Boxes, Images)
+  const startSelectionDrag = (e: React.PointerEvent) => {
+    if (readOnly) return
+    e.stopPropagation()
+    e.preventDefault()
+
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const boxSnapshot = (curPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
+    const imgSnapshot = (curPage.images || []).filter((img) => selectedImageIds.has(img.id))
+
+    if (strokeSnapshot.length === 0 && boxSnapshot.length === 0 && imgSnapshot.length === 0) return
+
+    const startX = e.clientX
+    const startY = e.clientY
+    let hasMoved = false
+    let latestPages = docRef.current.pages
+    let dragRafId: number | null = null
+    let pendingDx = 0
+    let pendingDy = 0
+
+    const applyDrag = (curDx: number, curDy: number) => {
+      const page = docRef.current.pages[currentPageIndex] || curPage
+
+      const updatedStrokes = page.strokes.map((s) => {
+        if (selectedStrokeIds.has(s.id)) {
+          const orig = strokeSnapshot.find((x) => x.id === s.id)
+          return orig ? translateStroke(orig, curDx, curDy) : s
+        }
+        return s
+      })
+
+      const updatedBoxes = (page.textBoxes || []).map((b) => {
+        if (selectedBoxIds.has(b.id)) {
+          const orig = boxSnapshot.find((x) => x.id === b.id)
+          return orig ? { ...orig, x: Math.round(orig.x + curDx), y: Math.round(orig.y + curDy) } : b
+        }
+        return b
+      })
+
+      const updatedImages = (page.images || []).map((img) => {
+        if (selectedImageIds.has(img.id)) {
+          const orig = imgSnapshot.find((x) => x.id === img.id)
+          return orig ? { ...orig, x: Math.round(orig.x + curDx), y: Math.round(orig.y + curDy) } : img
+        }
+        return img
+      })
+
+      latestPages = [...docRef.current.pages]
+      latestPages[currentPageIndex] = {
+        ...page,
+        strokes: updatedStrokes,
+        textBoxes: updatedBoxes,
+        images: updatedImages,
+      }
+      docRef.current = { ...docRef.current, pages: latestPages }
+      setDoc(docRef.current)
+    }
+
+    const onMove = (moveEv: PointerEvent) => {
+      hasMoved = true
+      pendingDx = (moveEv.clientX - startX) / zoomLevel
+      pendingDy = (moveEv.clientY - startY) / zoomLevel
+
+      if (!dragRafId) {
+        dragRafId = requestAnimationFrame(() => {
+          dragRafId = null
+          applyDrag(pendingDx, pendingDy)
+        })
+      }
+    }
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      if (dragRafId) {
+        cancelAnimationFrame(dragRafId)
+        dragRafId = null
+      }
+      if (hasMoved) {
+        applyDrag(pendingDx, pendingDy)
+        pushHistory()
+        commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
+      }
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
+  // Resize Lasso Selection from any of the 4 corners
+  const startSelectionResize = (
+    e: React.PointerEvent,
+    corner: "tl" | "tr" | "bl" | "br"
+  ) => {
+    if (readOnly || !computedSelectionBounds) return
+    e.stopPropagation()
+    e.preventDefault()
+
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const boxSnapshot = (curPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
+    const imgSnapshot = (curPage.images || []).filter((img) => selectedImageIds.has(img.id))
+
+    const bounds = computedSelectionBounds
+    const origW = bounds.maxX - bounds.minX
+    const origH = bounds.maxY - bounds.minY
+    const startX = e.clientX
+    const startY = e.clientY
+
+    let origin = { x: bounds.minX, y: bounds.minY }
+    if (corner === "tl") {
+      origin = { x: bounds.maxX, y: bounds.maxY }
+    } else if (corner === "tr") {
+      origin = { x: bounds.minX, y: bounds.maxY }
+    } else if (corner === "bl") {
+      origin = { x: bounds.maxX, y: bounds.minY }
+    }
+
+    let hasResized = false
+    let latestPages = docRef.current.pages
+    let resizeRafId: number | null = null
+    let pendingX = startX
+    let pendingY = startY
+
+    const applyResize = (targetX: number, targetY: number) => {
+      const cdx = (targetX - startX) / zoomLevel
+      const cdy = (targetY - startY) / zoomLevel
+
+      let newW = origW
+      let newH = origH
+
+      if (corner === "br") {
+        newW = origW + cdx
+        newH = origH + cdy
+      } else if (corner === "tl") {
+        newW = origW - cdx
+        newH = origH - cdy
+      } else if (corner === "tr") {
+        newW = origW + cdx
+        newH = origH - cdy
+      } else if (corner === "bl") {
+        newW = origW - cdx
+        newH = origH + cdy
+      }
+
+      const sx = Math.max(0.1, newW / Math.max(10, origW))
+      const sy = Math.max(0.1, newH / Math.max(10, origH))
+
+      const page = docRef.current.pages[currentPageIndex] || curPage
+      const updatedStrokes = page.strokes.map((s) => {
+        if (selectedStrokeIds.has(s.id)) {
+          const orig = strokeSnapshot.find((x) => x.id === s.id)
+          return orig ? scaleStroke(orig, sx, sy, origin) : s
+        }
+        return s
+      })
+
+      const updatedBoxes = (page.textBoxes || []).map((b) => {
+        if (selectedBoxIds.has(b.id)) {
+          const orig = boxSnapshot.find((x) => x.id === b.id)
+          if (!orig) return b
+          const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
+          const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
+          const nw = Math.max(30, Math.round(orig.width * sx))
+          const nh = Math.max(20, Math.round(orig.height * sy))
+          const newFontSize = Math.max(8, Math.round((orig.fontSize || 16) * Math.min(sx, sy)))
+          return { ...orig, x: newX, y: newY, width: nw, height: nh, fontSize: newFontSize }
+        }
+        return b
+      })
+
+      const updatedImages = (page.images || []).map((img) => {
+        if (selectedImageIds.has(img.id)) {
+          const orig = imgSnapshot.find((x) => x.id === img.id)
+          if (!orig) return img
+          const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
+          const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
+          const nw = Math.max(20, Math.round(orig.width * sx))
+          const nh = Math.max(20, Math.round(orig.height * sy))
+          return { ...orig, x: newX, y: newY, width: nw, height: nh }
+        }
+        return img
+      })
+
+      latestPages = [...docRef.current.pages]
+      latestPages[currentPageIndex] = {
+        ...page,
+        strokes: updatedStrokes,
+        textBoxes: updatedBoxes,
+        images: updatedImages,
+      }
+      docRef.current = { ...docRef.current, pages: latestPages }
+      setDoc(docRef.current)
+    }
+
+    const onMove = (moveEv: PointerEvent) => {
+      hasResized = true
+      pendingX = moveEv.clientX
+      pendingY = moveEv.clientY
+
+      if (!resizeRafId) {
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = null
+          applyResize(pendingX, pendingY)
+        })
+      }
+    }
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      if (resizeRafId) {
+        cancelAnimationFrame(resizeRafId)
+        resizeRafId = null
+      }
+      if (hasResized) {
+        applyResize(pendingX, pendingY)
+        pushHistory()
+        commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
+      }
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
+  // Rotate Lasso Selection (Smooth drag or 90° tap)
+  const startSelectionRotate = (e: React.PointerEvent) => {
+    if (readOnly || !computedSelectionBounds || !svgRef.current) return
+    e.stopPropagation()
+    e.preventDefault()
+
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const boxSnapshot = (curPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
+    const imgSnapshot = (curPage.images || []).filter((img) => selectedImageIds.has(img.id))
+
+    const origin = {
+      x: (computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2,
+      y: (computedSelectionBounds.minY + computedSelectionBounds.maxY) / 2,
+    }
+
+    const svgRect = svgRef.current.getBoundingClientRect()
+    const centerScreenX = svgRect.left + origin.x * zoomLevel
+    const centerScreenY = svgRect.top + origin.y * zoomLevel
+
+    const startAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX)
+    let hasRotated = false
+    let latestPages = docRef.current.pages
+    let rotateRafId: number | null = null
+    let pendingAngle = startAngle
+
+    const applyRotate = (angleVal: number) => {
+      const angleDiff = angleVal - startAngle
+      const cos = Math.cos(angleDiff)
+      const sin = Math.sin(angleDiff)
+
+      const page = docRef.current.pages[currentPageIndex] || curPage
+      const updatedStrokes = page.strokes.map((s) => {
+        if (selectedStrokeIds.has(s.id)) {
+          const orig = strokeSnapshot.find((x) => x.id === s.id)
+          return orig ? rotateStroke(orig, angleDiff, origin) : s
+        }
+        return s
+      })
+
+      const updatedBoxes = (page.textBoxes || []).map((b) => {
+        if (selectedBoxIds.has(b.id)) {
+          const orig = boxSnapshot.find((x) => x.id === b.id)
+          if (!orig) return b
+          const bcx = orig.x + orig.width / 2
+          const bcy = orig.y + orig.height / 2
+          const dx = bcx - origin.x
+          const dy = bcy - origin.y
+          const ncx = origin.x + dx * cos - dy * sin
+          const ncy = origin.y + dx * sin + dy * cos
+          return {
+            ...orig,
+            x: Math.round(ncx - orig.width / 2),
+            y: Math.round(ncy - orig.height / 2),
+          }
+        }
+        return b
+      })
+
+      const updatedImages = (page.images || []).map((img) => {
+        if (selectedImageIds.has(img.id)) {
+          const orig = imgSnapshot.find((x) => x.id === img.id)
+          if (!orig) return img
+          const icx = orig.x + orig.width / 2
+          const icy = orig.y + orig.height / 2
+          const dx = icx - origin.x
+          const dy = icy - origin.y
+          const ncx = origin.x + dx * cos - dy * sin
+          const ncy = origin.y + dx * sin + dy * cos
+          return {
+            ...orig,
+            x: Math.round(ncx - img.width / 2),
+            y: Math.round(ncy - img.height / 2),
+          }
+        }
+        return img
+      })
+
+      latestPages = [...docRef.current.pages]
+      latestPages[currentPageIndex] = {
+        ...page,
+        strokes: updatedStrokes,
+        textBoxes: updatedBoxes,
+        images: updatedImages,
+      }
+      docRef.current = { ...docRef.current, pages: latestPages }
+      setDoc(docRef.current)
+    }
+
+    const onMove = (moveEv: PointerEvent) => {
+      const curAngle = Math.atan2(moveEv.clientY - centerScreenY, moveEv.clientX - centerScreenX)
+      const deltaAngle = curAngle - startAngle
+      if (Math.abs(deltaAngle) > 0.05) {
+        hasRotated = true
+      }
+
+      if (!hasRotated) return
+      pendingAngle = curAngle
+
+      if (!rotateRafId) {
+        rotateRafId = requestAnimationFrame(() => {
+          rotateRafId = null
+          applyRotate(pendingAngle)
+        })
+      }
+    }
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      if (rotateRafId) {
+        cancelAnimationFrame(rotateRafId)
+        rotateRafId = null
+      }
+      if (hasRotated) {
+        applyRotate(pendingAngle)
+        pushHistory()
+        commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
+      } else {
+        // Tapped without dragging: rotate 90° clockwise
+        rotateSelected(90)
+      }
     }
 
     window.addEventListener("pointermove", onMove)
@@ -2784,6 +3052,7 @@ export default function NotebookBoard({
             {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
               computedSelectionBounds && (
                 <div
+                  onPointerDown={(e) => e.stopPropagation()}
                   className="absolute z-50 bg-white dark:bg-[#1a1d24] px-3 py-1.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 animate-in fade-in select-none"
                   style={{
                     left: `${Math.max(10, Math.min(currentPage.width * zoomLevel - 440, computedSelectionBounds.minX * zoomLevel))}px`,
@@ -3125,130 +3394,145 @@ export default function NotebookBoard({
                 )
               )}
 
-              {/* Selected Group Bounding Box Indicator with Corner Resize Handles */}
+              {/* Selected Group Bounding Box Indicator with 4 Corner Resize & Rotation Handles */}
               {computedSelectionBounds &&
                 (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) && (
                   <g className="lasso-selection-box">
+                    {/* Interactive Selection Area (Drag anywhere inside or on border) */}
                     <rect
                       x={computedSelectionBounds.minX - 6}
                       y={computedSelectionBounds.minY - 6}
                       width={computedSelectionBounds.maxX - computedSelectionBounds.minX + 12}
                       height={computedSelectionBounds.maxY - computedSelectionBounds.minY + 12}
-                      fill="rgba(59, 130, 246, 0.05)"
+                      fill="rgba(59, 130, 246, 0.08)"
                       stroke="#3b82f6"
                       strokeWidth={1.5}
                       strokeDasharray="4,4"
-                      className="cursor-move"
-                    />
+                      className="cursor-move pointer-events-auto"
+                      onPointerDown={startSelectionDrag}
+                    >
+                      <title>Drag to move selected items</title>
+                    </rect>
 
-                    {/* Top Rotation Handle Stem and Circular Pin */}
+                    {/* Top Rotation Handle Stem */}
                     <line
                       x1={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
                       y1={computedSelectionBounds.minY - 6}
                       x2={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
-                      y2={computedSelectionBounds.minY - 24}
+                      y2={computedSelectionBounds.minY - 26}
                       stroke="#3b82f6"
                       strokeWidth={1.5}
+                      className="pointer-events-none"
                     />
-                    <circle
-                      cx={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
-                      cy={computedSelectionBounds.minY - 24}
-                      r={7}
-                      fill="#3b82f6"
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                      className="cursor-pointer hover:scale-125 transition-transform"
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        rotateSelected(90)
-                      }}
+
+                    {/* Top Rotation Pin (Click to rotate 90°, drag to rotate freely) */}
+                    <g
+                      className="cursor-grab active:cursor-grabbing pointer-events-auto"
+                      onPointerDown={startSelectionRotate}
                     >
-                      <title>Rotate Selection 90°</title>
-                    </circle>
+                      {/* Generous touch target */}
+                      <circle
+                        cx={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
+                        cy={computedSelectionBounds.minY - 26}
+                        r={16}
+                        fill="transparent"
+                      />
+                      {/* Visual pin */}
+                      <circle
+                        cx={(computedSelectionBounds.minX + computedSelectionBounds.maxX) / 2}
+                        cy={computedSelectionBounds.minY - 26}
+                        r={6.5}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                      <title>Click to rotate 90° or drag to rotate freely</title>
+                    </g>
 
-                    {/* Bottom-right Corner Scale Handle */}
-                    <circle
-                      cx={computedSelectionBounds.maxX + 6}
-                      cy={computedSelectionBounds.maxY + 6}
-                      r={7}
-                      fill="#3b82f6"
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                      className="cursor-nwse-resize"
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        const startX = e.clientX
-                        const startY = e.clientY
-                        const origW = computedSelectionBounds.maxX - computedSelectionBounds.minX
-                        const origH = computedSelectionBounds.maxY - computedSelectionBounds.minY
-                        const origin = { x: computedSelectionBounds.minX, y: computedSelectionBounds.minY }
-                        const strokeSnapshot = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
-                        const boxSnapshot = (currentPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
-                        const imgSnapshot = (currentPage.images || []).filter((i) => selectedImageIds.has(i.id))
-                        let latestPages = docRef.current.pages
+                    {/* 4 Corner Resize Handles with 32px touch targets */}
+                    {/* Top-Left */}
+                    <g
+                      className="cursor-nwse-resize pointer-events-auto"
+                      onPointerDown={(e) => startSelectionResize(e, "tl")}
+                    >
+                      <circle
+                        cx={computedSelectionBounds.minX - 6}
+                        cy={computedSelectionBounds.minY - 6}
+                        r={16}
+                        fill="transparent"
+                      />
+                      <circle
+                        cx={computedSelectionBounds.minX - 6}
+                        cy={computedSelectionBounds.minY - 6}
+                        r={6}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </g>
 
-                        const onMove = (moveEv: PointerEvent) => {
-                          const dw = (moveEv.clientX - startX) / zoomLevel
-                          const dh = (moveEv.clientY - startY) / zoomLevel
-                          const sx = Math.max(0.2, (origW + dw) / Math.max(10, origW))
-                          const sy = Math.max(0.2, (origH + dh) / Math.max(10, origH))
+                    {/* Top-Right */}
+                    <g
+                      className="cursor-nesw-resize pointer-events-auto"
+                      onPointerDown={(e) => startSelectionResize(e, "tr")}
+                    >
+                      <circle
+                        cx={computedSelectionBounds.maxX + 6}
+                        cy={computedSelectionBounds.minY - 6}
+                        r={16}
+                        fill="transparent"
+                      />
+                      <circle
+                        cx={computedSelectionBounds.maxX + 6}
+                        cy={computedSelectionBounds.minY - 6}
+                        r={6}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </g>
 
-                          const updatedStrokes = currentPage.strokes.map((s) => {
-                            if (selectedStrokeIds.has(s.id)) {
-                              const orig = strokeSnapshot.find((x) => x.id === s.id)
-                              return orig ? scaleStroke(orig, sx, sy, origin) : s
-                            }
-                            return s
-                          })
+                    {/* Bottom-Left */}
+                    <g
+                      className="cursor-nesw-resize pointer-events-auto"
+                      onPointerDown={(e) => startSelectionResize(e, "bl")}
+                    >
+                      <circle
+                        cx={computedSelectionBounds.minX - 6}
+                        cy={computedSelectionBounds.maxY + 6}
+                        r={16}
+                        fill="transparent"
+                      />
+                      <circle
+                        cx={computedSelectionBounds.minX - 6}
+                        cy={computedSelectionBounds.maxY + 6}
+                        r={6}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </g>
 
-                          const updatedBoxes = (currentPage.textBoxes || []).map((b) => {
-                            if (selectedBoxIds.has(b.id)) {
-                              const orig = boxSnapshot.find((x) => x.id === b.id)
-                              if (!orig) return b
-                              const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
-                              const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
-                              const newW = Math.max(30, Math.round(orig.width * sx))
-                              const newH = Math.max(20, Math.round(orig.height * sy))
-                              const newFontSize = Math.max(8, Math.round((orig.fontSize || 16) * Math.min(sx, sy)))
-                              return { ...orig, x: newX, y: newY, width: newW, height: newH, fontSize: newFontSize }
-                            }
-                            return b
-                          })
-
-                          const updatedImages = (currentPage.images || []).map((img) => {
-                            if (selectedImageIds.has(img.id)) {
-                              const orig = imgSnapshot.find((x) => x.id === img.id)
-                              if (!orig) return img
-                              const newX = Math.round(origin.x + (orig.x - origin.x) * sx)
-                              const newY = Math.round(origin.y + (orig.y - origin.y) * sy)
-                              const newW = Math.max(20, Math.round(orig.width * sx))
-                              const newH = Math.max(20, Math.round(orig.height * sy))
-                              return { ...orig, x: newX, y: newY, width: newW, height: newH }
-                            }
-                            return img
-                          })
-
-                          latestPages = [...docRef.current.pages]
-                          latestPages[currentPageIndex] = {
-                            ...currentPage,
-                            strokes: updatedStrokes,
-                            textBoxes: updatedBoxes,
-                            images: updatedImages,
-                          }
-                          docRef.current = { ...docRef.current, pages: latestPages }
-                          setDoc(docRef.current)
-                        }
-
-                        const onUp = () => {
-                          window.removeEventListener("pointermove", onMove)
-                          window.removeEventListener("pointerup", onUp)
-                          pushHistory()
-                          commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
-                        }
-                        window.addEventListener("pointermove", onMove)
-                        window.addEventListener("pointerup", onUp)
-                      }}
-                    />
+                    {/* Bottom-Right */}
+                    <g
+                      className="cursor-nwse-resize pointer-events-auto"
+                      onPointerDown={(e) => startSelectionResize(e, "br")}
+                    >
+                      <circle
+                        cx={computedSelectionBounds.maxX + 6}
+                        cy={computedSelectionBounds.maxY + 6}
+                        r={16}
+                        fill="transparent"
+                      />
+                      <circle
+                        cx={computedSelectionBounds.maxX + 6}
+                        cy={computedSelectionBounds.maxY + 6}
+                        r={6}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    </g>
                   </g>
                 )}
 
