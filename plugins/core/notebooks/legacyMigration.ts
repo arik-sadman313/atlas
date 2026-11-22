@@ -88,7 +88,7 @@ function convertStrokeToFreedraw(
     height,
     points: freePoints,
     pressures: stroke.points.map((p) => p.pressure ?? 0.5),
-    simulatePressure: true,
+    simulatePressure: false,
     strokeColor: stroke.color,
     strokeWidth: isHighlighter ? Math.max(12, stroke.size) : Math.max(1, stroke.size),
     opacity: isHighlighter ? 45 : 100,

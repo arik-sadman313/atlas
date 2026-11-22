@@ -84,7 +84,7 @@ export const GoodNotesPaperSheet: React.FC<GoodNotesPaperSheetProps> = ({
   return (
     <div
       ref={sheetRef}
-      className="goodnotes-paper-sheet relative rounded-md border border-slate-300/80 dark:border-slate-800 shadow-2xl shadow-black/20 dark:shadow-black/70 shrink-0 select-none transition-[width,height] duration-75"
+      className="goodnotes-paper-sheet relative rounded-md border border-slate-300/80 dark:border-slate-800 shadow-2xl shadow-black/20 dark:shadow-black/70 shrink-0 select-none"
       style={{
         ...getPaperStyle(template, paperColor, zoom),
         width: `${width}px`,

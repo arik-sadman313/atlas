@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react"
+import { useZoomTarget } from "@vaultite"
 import "@excalidraw/excalidraw/index.css"
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import { DocumentNavigationDrawer } from "./DocumentNavigationDrawer"
@@ -12,6 +13,7 @@ import {
   updateSelectedColor,
   updateSelectedWidth,
   triggerShortcutsHelp,
+  normalizeFreedrawElements,
 } from "./notebookActions"
 import {
   exportSceneToPng,
@@ -65,6 +67,7 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const [zoom, setZoom] = useState<number>(1)
   const [readOnly, setReadOnly] = useState<boolean>(!editable)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const deskRef = useRef<HTMLDivElement | null>(null)
   const sheetRef = useRef<HTMLDivElement | null>(null)
 
@@ -87,6 +90,17 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     setZoom(1)
   }, [])
 
+  useZoomTarget(containerRef, (step) => {
+    if (step === 1) handleZoomIn()
+    else if (step === -1) handleZoomOut()
+    else if (step === 0) handleResetZoom()
+    return null
+  })
+
+  useEffect(() => {
+    void window.vaultite?.interfaceSize?.step(0)
+  }, [])
+
   const handleSwitchPage = useCallback((idx: number) => {
     switchPage(idx, excalidrawAPIRef.current)
     if (deskRef.current) deskRef.current.scrollTop = 0
@@ -99,13 +113,13 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   }, [zoom])
 
   useEffect(() => {
-    const sheet = sheetRef.current
-    if (!sheet) return
+    const el = containerRef.current
+    if (!el) return
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
         e.stopPropagation()
-        const delta = -e.deltaY * 0.005
+        const delta = -e.deltaY * 0.003
         setZoom((prev) => Math.min(3, Math.max(0.5, Math.round((prev + delta) * 100) / 100)))
         return
       }
@@ -116,34 +130,34 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
       e.stopPropagation()
       e.preventDefault()
     }
-    sheet.addEventListener("wheel", onWheel, { capture: true, passive: false })
-    return () => sheet.removeEventListener("wheel", onWheel, { capture: true })
-  }, [currentPageIndex])
+    el.addEventListener("wheel", onWheel, { capture: true, passive: false })
+    return () => el.removeEventListener("wheel", onWheel, { capture: true })
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       if (e.key === "=" || e.key === "+") {
         e.preventDefault()
-        setZoom((prev) => Math.min(3, Math.round((prev + 0.15) * 100) / 100))
+        handleZoomIn()
       } else if (e.key === "-") {
         e.preventDefault()
-        setZoom((prev) => Math.max(0.5, Math.round((prev - 0.15) * 100) / 100))
+        handleZoomOut()
       } else if (e.key === "0") {
         e.preventDefault()
-        setZoom(1)
+        handleResetZoom()
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [handleZoomIn, handleZoomOut, handleResetZoom])
 
   useEffect(() => {
     return () => { saveCurrentScene(excalidrawAPIRef.current) }
   }, [saveCurrentScene])
 
   return (
-    <div className="goodnotes-canvas-root absolute inset-0 flex flex-col bg-slate-100 dark:bg-[#12151a] overflow-hidden select-none">
+    <div ref={containerRef} className="goodnotes-canvas-root absolute inset-0 flex flex-col bg-slate-100 dark:bg-[#12151a] overflow-hidden select-none">
       <style>{`
         .goodnotes-canvas-root .App-toolbar-container { display: none !important; }
         .goodnotes-canvas-root .main-menu-trigger { display: none !important; }
@@ -249,7 +263,11 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
           applyToolToScene(api, activeTool, color, strokeWidth)
         }}
         onElementsChange={(elements, appState, files) => {
-          updatePageData(elements, files)
+          const { updated, changed } = normalizeFreedrawElements(elements)
+          if (changed) {
+            excalidrawAPIRef.current?.updateScene({ elements: updated })
+          }
+          updatePageData(updated, files)
           const libOpen = appState.openSidebar?.name === "default"
           if (libOpen !== isLibraryOpen) setIsLibraryOpen(libOpen)
           const toolType = appState.activeTool?.type

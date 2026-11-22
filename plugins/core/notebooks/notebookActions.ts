@@ -1,3 +1,4 @@
+import type { ExcalidrawElement, ExcalidrawFreeDrawElement } from "@excalidraw/excalidraw/element/types"
 import type { ExcalidrawImperativeAPI, NormalizedZoomValue } from "@excalidraw/excalidraw/types"
 
 export type FormToolType = "rectangle" | "diamond" | "ellipse" | "arrow" | "line" | "frame"
@@ -125,4 +126,42 @@ export function applySceneZoom(api: ExcalidrawImperativeAPI, zoom: number) {
 export function triggerShortcutsHelp() {
   const el = document.querySelector(".goodnotes-canvas-root .excalidraw")
   el?.dispatchEvent(new KeyboardEvent("keydown", { key: "?", code: "Slash", shiftKey: true, bubbles: true }))
+}
+
+export interface NormalizedElementsResult {
+  updated: readonly ExcalidrawElement[]
+  changed: boolean
+}
+
+function isFreedrawInconsistent(el: ExcalidrawElement): el is ExcalidrawFreeDrawElement {
+  if (el.type !== "freedraw") return false
+  if (el.simulatePressure || el.roughness !== 0) return true
+  if (!el.pressures || el.pressures.length !== el.points.length) return true
+  return el.pressures.some((p) => p !== 0.5)
+}
+
+export function normalizeFreedrawElements(
+  elements: readonly ExcalidrawElement[]
+): NormalizedElementsResult {
+  let changed = false
+  for (const el of elements) {
+    if (isFreedrawInconsistent(el)) {
+      changed = true
+      break
+    }
+  }
+  if (!changed) return { updated: elements, changed: false }
+
+  const updated = elements.map((el) => {
+    if (isFreedrawInconsistent(el)) {
+      return {
+        ...el,
+        simulatePressure: false,
+        pressures: el.points.map(() => 0.5),
+        roughness: 0,
+      }
+    }
+    return el
+  })
+  return { updated, changed: true }
 }
