@@ -146,6 +146,63 @@ const STICKY_COLORS = [
   { bg: "#fbcfe8", border: "#f472b6", text: "#831843" }, // pink
 ]
 
+function findBoxAtPoint(
+  tapPt: { x: number; y: number },
+  boxes: InkTextBox[] | undefined,
+  filter: { textBoxes: boolean; stickyNotes: boolean }
+): { boxId: string } | null {
+  if (!boxes || (!filter.textBoxes && !filter.stickyNotes)) return null
+  for (const b of boxes) {
+    if (b.isStickyNote && !filter.stickyNotes) continue
+    if (!b.isStickyNote && !filter.textBoxes) continue
+    if (tapPt.x >= b.x && tapPt.x <= b.x + b.width && tapPt.y >= b.y && tapPt.y <= b.y + b.height) {
+      return { boxId: b.id }
+    }
+  }
+  return null
+}
+
+function findImageAtPoint(
+  tapPt: { x: number; y: number },
+  images: NotebookImage[] | undefined,
+  filter: { images: boolean }
+): { imageId: string } | null {
+  if (!images || !filter.images) return null
+  for (const img of images) {
+    if (tapPt.x >= img.x && tapPt.x <= img.x + img.width && tapPt.y >= img.y && tapPt.y <= img.y + img.height) {
+      return { imageId: img.id }
+    }
+  }
+  return null
+}
+
+function findStrokeAtPoint(
+  tapPt: { x: number; y: number },
+  strokes: InkStroke[] | undefined,
+  filter: { handwriting: boolean }
+): { strokeId: string } | null {
+  if (!strokes || !filter.handwriting) return null
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i]
+    if (isPointNearStroke(tapPt, s, 16)) {
+      return { strokeId: s.id }
+    }
+  }
+  return null
+}
+
+function findItemAtPoint(
+  tapPt: { x: number; y: number },
+  curPage: NotebookPage,
+  filter: { handwriting: boolean; textBoxes: boolean; images: boolean; stickyNotes: boolean }
+): { strokeId?: string; boxId?: string; imageId?: string } | null {
+  return (
+    findBoxAtPoint(tapPt, curPage.textBoxes, filter) ??
+    findImageAtPoint(tapPt, curPage.images, filter) ??
+    findStrokeAtPoint(tapPt, curPage.strokes, filter)
+  )
+}
+
 export default function NotebookBoard({
   text,
   path,
@@ -277,6 +334,7 @@ export default function NotebookBoard({
   const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set())
   const [activeImageId, setActiveImageId] = useState<string | null>(null)
+  const isManipulatingSelectionRef = useRef(false)
   const lassoPointsRef = useRef<{ x: number; y: number }[]>([])
   const lassoRafIdRef = useRef<number | null>(null)
   const deleteSelectedRef = useRef<() => void>(() => {})
@@ -369,6 +427,18 @@ export default function NotebookBoard({
     commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
   }, [currentPage, currentPageIndex, doc, redoStack, commitDoc])
 
+  const switchTool = useCallback((tool: InkToolType) => {
+    if (tool !== "lasso") {
+      setSelectedStrokeIds(new Set())
+      setSelectedBoxIds(new Set())
+      setSelectedImageIds(new Set())
+      setLassoPoints([])
+      lassoPointsRef.current = []
+      isManipulatingSelectionRef.current = false
+    }
+    setActiveTool(tool)
+  }, [])
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -382,17 +452,17 @@ export default function NotebookBoard({
         redo()
         e.preventDefault()
       } else if (e.key === "p" || e.key === "P") {
-        setActiveTool("fountain")
+        switchTool("fountain")
       } else if (e.key === "h" || e.key === "H") {
-        setActiveTool("highlighter")
+        switchTool("highlighter")
       } else if (e.key === "e" || e.key === "E") {
-        setActiveTool("eraser")
+        switchTool("eraser")
       } else if (e.key === "l" || e.key === "L") {
-        setActiveTool("lasso")
+        switchTool("lasso")
       } else if (e.key === "t" || e.key === "T") {
-        setActiveTool("textbox")
+        switchTool("textbox")
       } else if (e.key === "s" || e.key === "S") {
-        setActiveTool("stickynote")
+        switchTool("stickynote")
       } else if (e.key === "Escape") {
         setZenMode(false)
         setIsNavDrawerOpen(false)
@@ -450,7 +520,7 @@ export default function NotebookBoard({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("paste", handlePaste)
     }
-  }, [undo, redo, pushHistory, commitDoc, currentPageIndex])
+  }, [undo, redo, pushHistory, commitDoc, currentPageIndex, switchTool])
 
   // Touch gesture arbitration for iPadOS / multi-touch devices (Pinch-to-zoom & two-finger pan)
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -508,32 +578,37 @@ export default function NotebookBoard({
     }
   }
 
-  // Coordinate conversion taking into account SVG CTM (transforms, zoom, rotation, scroll)
+  const clientToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      if (svgRef.current) {
+        const svg = svgRef.current
+        const ctm = svg.getScreenCTM()
+        if (ctm) {
+          const p = svg.createSVGPoint()
+          p.x = clientX
+          p.y = clientY
+          const pt = p.matrixTransform(ctm.inverse())
+          return { x: pt.x, y: pt.y }
+        }
+        const rect = svg.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) {
+          return {
+            x: (clientX - rect.left) * (currentPage.width / rect.width),
+            y: (clientY - rect.top) * (currentPage.height / rect.height),
+          }
+        }
+      }
+      const scale = zoomLevel || 1.0
+      return { x: clientX / scale, y: clientY / scale }
+    },
+    [currentPage.height, currentPage.width, zoomLevel]
+  )
+
   const getCanvasPoint = (e: React.PointerEvent<SVGSVGElement>): { x: number; y: number; pressure: number } | null => {
     if (!svgRef.current) return null
-    let x = 0
-    let y = 0
-
-    const svg = svgRef.current
-    const ctm = svg.getScreenCTM()
-    if (ctm) {
-      const svgPoint = svg.createSVGPoint()
-      svgPoint.x = e.clientX
-      svgPoint.y = e.clientY
-      const matrixPt = svgPoint.matrixTransform(ctm.inverse())
-      x = matrixPt.x
-      y = matrixPt.y
-    } else {
-      const rect = svg.getBoundingClientRect()
-      const scaleX = currentPage.width / rect.width
-      const scaleY = currentPage.height / rect.height
-      x = (e.clientX - rect.left) * scaleX
-      y = (e.clientY - rect.top) * scaleY
-    }
-
-    // Hardware Apple Pencil pressure
+    const pt = clientToCanvas(e.clientX, e.clientY)
     const pressure = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5
-    return { x, y, pressure }
+    return { x: pt.x, y: pt.y, pressure }
   }
 
   // Pointer Down
@@ -629,6 +704,7 @@ export default function NotebookBoard({
 
     // 3. Lasso Tool
     if (activeTool === "lasso") {
+      if (isManipulatingSelectionRef.current) return
       lassoPointsRef.current = [{ x: pt.x, y: pt.y }]
       setLassoPoints([{ x: pt.x, y: pt.y }])
       setSelectedStrokeIds(new Set())
@@ -674,7 +750,7 @@ export default function NotebookBoard({
       }
       commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
       setEditingBoxId(newBox.id)
-      setActiveTool(
+      switchTool(
         previousTool && previousTool !== "textbox" && previousTool !== "stickynote"
           ? previousTool
           : "fountain"
@@ -815,6 +891,7 @@ export default function NotebookBoard({
 
     // Lasso loop dragging
     if (activeTool === "lasso") {
+      if (isManipulatingSelectionRef.current) return
       if (lassoMode === "rect") {
         const startPt = lassoPointsRef.current[0] || pt
         lassoPointsRef.current = [startPt, { x: pt.x, y: pt.y }]
@@ -984,7 +1061,7 @@ export default function NotebookBoard({
 
     // Auto-deselect eraser
     if (activeTool === "eraser" && autoDeselectEraser) {
-      setActiveTool(previousTool !== "eraser" ? previousTool : "fountain")
+      switchTool(previousTool !== "eraser" ? previousTool : "fountain")
     }
 
     // Lasso completion
@@ -992,6 +1069,10 @@ export default function NotebookBoard({
       if (lassoRafIdRef.current) {
         cancelAnimationFrame(lassoRafIdRef.current)
         lassoRafIdRef.current = null
+      }
+
+      if (isManipulatingSelectionRef.current || lassoPointsRef.current.length === 0) {
+        return
       }
 
       const curPage = docRef.current.pages[currentPageIndex] || currentPage
@@ -1028,6 +1109,11 @@ export default function NotebookBoard({
                 }
               })
             }
+          } else {
+            const hit = findItemAtPoint(p0, curPage, lassoFilter)
+            if (hit?.boxId) selectedBoxes.add(hit.boxId)
+            else if (hit?.imageId) selectedImages.add(hit.imageId)
+            else if (hit?.strokeId) selectedStrokes.add(hit.strokeId)
           }
         }
       } else {
@@ -1052,6 +1138,11 @@ export default function NotebookBoard({
               }
             })
           }
+        } else if (pts.length > 0) {
+          const hit = findItemAtPoint(pts[0], curPage, lassoFilter)
+          if (hit?.boxId) selectedBoxes.add(hit.boxId)
+          else if (hit?.imageId) selectedImages.add(hit.imageId)
+          else if (hit?.strokeId) selectedStrokes.add(hit.strokeId)
         }
       }
 
@@ -1189,8 +1280,7 @@ export default function NotebookBoard({
     if (readOnly) return
     e.stopPropagation()
     setActiveImageId(img.id)
-    const startX = e.clientX
-    const startY = e.clientY
+    const startPt = clientToCanvas(e.clientX, e.clientY)
     const origX = img.x
     const origY = img.y
     let hasMoved = false
@@ -1198,8 +1288,9 @@ export default function NotebookBoard({
 
     const onMove = (moveEv: PointerEvent) => {
       hasMoved = true
-      const dx = (moveEv.clientX - startX) / zoomLevel
-      const dy = (moveEv.clientY - startY) / zoomLevel
+      const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+      const dx = curPt.x - startPt.x
+      const dy = curPt.y - startPt.y
       const newX = Math.round(origX + dx)
       const newY = Math.round(origY + dy)
 
@@ -1232,8 +1323,7 @@ export default function NotebookBoard({
     corner: "tl" | "tr" | "bl" | "br"
   ) => {
     e.stopPropagation()
-    const startX = e.clientX
-    const startY = e.clientY
+    const startPt = clientToCanvas(e.clientX, e.clientY)
     const origW = img.width
     const origH = img.height
     const origX = img.x
@@ -1241,8 +1331,9 @@ export default function NotebookBoard({
     let latestPages = docRef.current.pages
 
     const onMove = (moveEv: PointerEvent) => {
-      const dx = (moveEv.clientX - startX) / zoomLevel
-      const dy = (moveEv.clientY - startY) / zoomLevel
+      const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+      const dx = curPt.x - startPt.x
+      const dy = curPt.y - startPt.y
       let newW = origW
       let newH = origH
       let newX = origX
@@ -1291,6 +1382,7 @@ export default function NotebookBoard({
     if (readOnly) return
     e.stopPropagation()
     e.preventDefault()
+    isManipulatingSelectionRef.current = true
 
     const curPage = docRef.current.pages[currentPageIndex] || currentPage
     const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
@@ -1299,8 +1391,7 @@ export default function NotebookBoard({
 
     if (strokeSnapshot.length === 0 && boxSnapshot.length === 0 && imgSnapshot.length === 0) return
 
-    const startX = e.clientX
-    const startY = e.clientY
+    const startPt = clientToCanvas(e.clientX, e.clientY)
     let hasMoved = false
     let latestPages = docRef.current.pages
     let dragRafId: number | null = null
@@ -1347,8 +1438,9 @@ export default function NotebookBoard({
 
     const onMove = (moveEv: PointerEvent) => {
       hasMoved = true
-      pendingDx = (moveEv.clientX - startX) / zoomLevel
-      pendingDy = (moveEv.clientY - startY) / zoomLevel
+      const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+      pendingDx = curPt.x - startPt.x
+      pendingDy = curPt.y - startPt.y
 
       if (!dragRafId) {
         dragRafId = requestAnimationFrame(() => {
@@ -1361,6 +1453,9 @@ export default function NotebookBoard({
     const onUp = () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      setTimeout(() => {
+        isManipulatingSelectionRef.current = false
+      }, 100)
       if (dragRafId) {
         cancelAnimationFrame(dragRafId)
         dragRafId = null
@@ -1384,6 +1479,7 @@ export default function NotebookBoard({
     if (readOnly || !computedSelectionBounds) return
     e.stopPropagation()
     e.preventDefault()
+    isManipulatingSelectionRef.current = true
 
     const curPage = docRef.current.pages[currentPageIndex] || currentPage
     const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
@@ -1393,8 +1489,7 @@ export default function NotebookBoard({
     const bounds = computedSelectionBounds
     const origW = bounds.maxX - bounds.minX
     const origH = bounds.maxY - bounds.minY
-    const startX = e.clientX
-    const startY = e.clientY
+    const startPt = clientToCanvas(e.clientX, e.clientY)
 
     let origin = { x: bounds.minX, y: bounds.minY }
     if (corner === "tl") {
@@ -1408,12 +1503,12 @@ export default function NotebookBoard({
     let hasResized = false
     let latestPages = docRef.current.pages
     let resizeRafId: number | null = null
-    let pendingX = startX
-    let pendingY = startY
+    let pendingCanvasX = startPt.x
+    let pendingCanvasY = startPt.y
 
-    const applyResize = (targetX: number, targetY: number) => {
-      const cdx = (targetX - startX) / zoomLevel
-      const cdy = (targetY - startY) / zoomLevel
+    const applyResize = (targetCanvasX: number, targetCanvasY: number) => {
+      const cdx = targetCanvasX - startPt.x
+      const cdy = targetCanvasY - startPt.y
 
       let newW = origW
       let newH = origH
@@ -1484,13 +1579,14 @@ export default function NotebookBoard({
 
     const onMove = (moveEv: PointerEvent) => {
       hasResized = true
-      pendingX = moveEv.clientX
-      pendingY = moveEv.clientY
+      const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+      pendingCanvasX = curPt.x
+      pendingCanvasY = curPt.y
 
       if (!resizeRafId) {
         resizeRafId = requestAnimationFrame(() => {
           resizeRafId = null
-          applyResize(pendingX, pendingY)
+          applyResize(pendingCanvasX, pendingCanvasY)
         })
       }
     }
@@ -1498,12 +1594,15 @@ export default function NotebookBoard({
     const onUp = () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      setTimeout(() => {
+        isManipulatingSelectionRef.current = false
+      }, 100)
       if (resizeRafId) {
         cancelAnimationFrame(resizeRafId)
         resizeRafId = null
       }
       if (hasResized) {
-        applyResize(pendingX, pendingY)
+        applyResize(pendingCanvasX, pendingCanvasY)
         pushHistory()
         commitDoc({ ...docRef.current, pages: latestPages, updatedAt: Date.now() })
       }
@@ -1518,6 +1617,7 @@ export default function NotebookBoard({
     if (readOnly || !computedSelectionBounds || !svgRef.current) return
     e.stopPropagation()
     e.preventDefault()
+    isManipulatingSelectionRef.current = true
 
     const curPage = docRef.current.pages[currentPageIndex] || currentPage
     const strokeSnapshot = curPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
@@ -1529,9 +1629,22 @@ export default function NotebookBoard({
       y: (computedSelectionBounds.minY + computedSelectionBounds.maxY) / 2,
     }
 
-    const svgRect = svgRef.current.getBoundingClientRect()
-    const centerScreenX = svgRect.left + origin.x * zoomLevel
-    const centerScreenY = svgRect.top + origin.y * zoomLevel
+    let centerScreenX = 0
+    let centerScreenY = 0
+    const svg = svgRef.current
+    const ctm = svg.getScreenCTM()
+    if (ctm) {
+      const p = svg.createSVGPoint()
+      p.x = origin.x
+      p.y = origin.y
+      const screenPt = p.matrixTransform(ctm)
+      centerScreenX = screenPt.x
+      centerScreenY = screenPt.y
+    } else {
+      const svgRect = svg.getBoundingClientRect()
+      centerScreenX = svgRect.left + (origin.x / currentPage.width) * svgRect.width
+      centerScreenY = svgRect.top + (origin.y / currentPage.height) * svgRect.height
+    }
 
     const startAngle = Math.atan2(e.clientY - centerScreenY, e.clientX - centerScreenX)
     let hasRotated = false
@@ -1623,6 +1736,9 @@ export default function NotebookBoard({
     const onUp = () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      setTimeout(() => {
+        isManipulatingSelectionRef.current = false
+      }, 100)
       if (rotateRafId) {
         cancelAnimationFrame(rotateRafId)
         rotateRafId = null
@@ -2179,7 +2295,7 @@ export default function NotebookBoard({
                     setIsPenStudioOpen((prev) => !prev)
                   } else {
                     setPreviousTool(activeTool)
-                    setActiveTool("fountain")
+                    switchTool("fountain")
                   }
                 }}
                 className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
@@ -2206,7 +2322,7 @@ export default function NotebookBoard({
                     setIsPenStudioOpen((prev) => !prev)
                   } else {
                     setPreviousTool(activeTool)
-                    setActiveTool("ballpoint")
+                    switchTool("ballpoint")
                   }
                 }}
                 className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
@@ -2233,7 +2349,7 @@ export default function NotebookBoard({
                     setIsPenStudioOpen((prev) => !prev)
                   } else {
                     setPreviousTool(activeTool)
-                    setActiveTool("brush")
+                    switchTool("brush")
                   }
                 }}
                 className={`relative w-8 h-8 rounded-xl flex flex-col items-center justify-center transition-all ${
@@ -2256,7 +2372,7 @@ export default function NotebookBoard({
               <button
                 onClick={() => {
                   setPreviousTool(activeTool)
-                  setActiveTool("highlighter")
+                  switchTool("highlighter")
                 }}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "highlighter"
@@ -2277,7 +2393,7 @@ export default function NotebookBoard({
               <button
                 onClick={() => {
                   setPreviousTool(activeTool)
-                  setActiveTool("eraser")
+                  switchTool("eraser")
                 }}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "eraser"
@@ -2293,7 +2409,7 @@ export default function NotebookBoard({
               <button
                 onClick={() => {
                   setPreviousTool(activeTool)
-                  setActiveTool("lasso")
+                  switchTool("lasso")
                 }}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "lasso"
@@ -2314,7 +2430,7 @@ export default function NotebookBoard({
               <button
                 onClick={() => {
                   setPreviousTool(activeTool)
-                  setActiveTool("shape")
+                  switchTool("shape")
                 }}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "shape"
@@ -2334,7 +2450,7 @@ export default function NotebookBoard({
               <button
                 onClick={() => {
                   setPreviousTool(activeTool)
-                  setActiveTool("tape")
+                  switchTool("tape")
                 }}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "tape"
@@ -2353,7 +2469,7 @@ export default function NotebookBoard({
             <div className="flex items-center gap-0.5">
               {/* Text Box */}
               <button
-                onClick={() => setActiveTool("textbox")}
+                onClick={() => switchTool("textbox")}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "textbox"
                     ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
@@ -2366,7 +2482,7 @@ export default function NotebookBoard({
 
               {/* Sticky Note */}
               <button
-                onClick={() => setActiveTool("stickynote")}
+                onClick={() => switchTool("stickynote")}
                 className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
                   activeTool === "stickynote"
                     ? "bg-white dark:bg-slate-700 text-amber-500 shadow-sm font-semibold scale-105 ring-1 ring-black/5 dark:ring-white/10"
@@ -2425,7 +2541,7 @@ export default function NotebookBoard({
                       setLaserPopoverOpen(!laserPopoverOpen)
                     } else {
                       setPreviousTool(activeTool)
-                      setActiveTool("laser")
+                      switchTool("laser")
                       setLaserState((prev) => ({ ...prev, active: true }))
                       setLaserPopoverOpen(true)
                     }
@@ -2905,7 +3021,7 @@ export default function NotebookBoard({
             <PenStudioPopover
               activeTool={activeTool}
               onSelectTool={(tool) => {
-                setActiveTool(tool)
+                switchTool(tool)
               }}
               penSettings={penSettings}
               onChangePenSettings={(tool, cfg) => {
@@ -3037,11 +3153,18 @@ export default function NotebookBoard({
               }
             }
           }}
-          className="flex-1 overflow-auto flex items-center justify-center p-8 relative touch-none"
+          onPointerDown={(e) => {
+            if (e.target === containerRef.current && activeTool === "lasso") {
+              setSelectedStrokeIds(new Set())
+              setSelectedBoxIds(new Set())
+              setSelectedImageIds(new Set())
+            }
+          }}
+          className="flex-1 overflow-auto flex items-center justify-center p-8 pb-28 relative touch-none"
         >
           {/* Scaled Notebook Page Canvas Wrapper */}
           <div
-            className="relative shadow-2xl transition-transform origin-top-left"
+            className="relative shrink-0 shadow-2xl transition-transform origin-top-left"
             style={{
               width: `${currentPage.width * zoomLevel}px`,
               height: `${currentPage.height * zoomLevel}px`,
@@ -3049,7 +3172,8 @@ export default function NotebookBoard({
             }}
           >
             {/* Lasso Floating Action Menu inside Page coordinate system */}
-            {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
+            {activeTool === "lasso" &&
+              (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
               computedSelectionBounds && (
                 <div
                   onPointerDown={(e) => e.stopPropagation()}
@@ -3395,7 +3519,8 @@ export default function NotebookBoard({
               )}
 
               {/* Selected Group Bounding Box Indicator with 4 Corner Resize & Rotation Handles */}
-              {computedSelectionBounds &&
+              {activeTool === "lasso" &&
+                computedSelectionBounds &&
                 (selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) && (
                   <g className="lasso-selection-box">
                     {/* Interactive Selection Area (Drag anywhere inside or on border) */}
@@ -3559,14 +3684,14 @@ export default function NotebookBoard({
                     try {
                       e.currentTarget.setPointerCapture(e.pointerId)
                     } catch {}
-                    const startClientX = e.clientX
-                    const startClientY = e.clientY
+                    const startPt = clientToCanvas(e.clientX, e.clientY)
                     const startTargetX = zoomWindowState.targetX
                     const startTargetY = zoomWindowState.targetY
 
                     const onMove = (moveEv: PointerEvent) => {
-                      const dx = (moveEv.clientX - startClientX) / zoomLevel
-                      const dy = (moveEv.clientY - startClientY) / zoomLevel
+                      const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+                      const dx = curPt.x - startPt.x
+                      const dy = curPt.y - startPt.y
                       setZoomWindowState((prev) => ({
                         ...prev,
                         targetX: Math.max(0, Math.min(currentPage.width - 100, startTargetX + dx)),
@@ -3648,14 +3773,14 @@ export default function NotebookBoard({
                     onPointerDown={(e) => {
                       if (readOnly) return
                       e.stopPropagation()
-                      const startX = e.clientX
-                      const startY = e.clientY
+                      const startPt = clientToCanvas(e.clientX, e.clientY)
                       const origX = box.x
                       const origY = box.y
                       let latestPages = docRef.current.pages
                       const onMove = (moveEv: PointerEvent) => {
-                        const dx = (moveEv.clientX - startX) / zoomLevel
-                        const dy = (moveEv.clientY - startY) / zoomLevel
+                        const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+                        const dx = curPt.x - startPt.x
+                        const dy = curPt.y - startPt.y
                         const updatedBoxes = currentPage.textBoxes.map((b) =>
                           b.id === box.id ? { ...b, x: Math.round(origX + dx), y: Math.round(origY + dy) } : b
                         )
@@ -3857,15 +3982,15 @@ export default function NotebookBoard({
                       className="absolute bottom-1 right-1 w-3.5 h-3.5 cursor-nwse-resize opacity-40 hover:opacity-100 flex items-center justify-center select-none"
                       onPointerDown={(e) => {
                         e.stopPropagation()
-                        const startX = e.clientX
-                        const startY = e.clientY
+                        const startPt = clientToCanvas(e.clientX, e.clientY)
                         const origW = box.width
                         const origH = box.height
                         let latestPages = docRef.current.pages
 
                         const onMove = (moveEv: PointerEvent) => {
-                          const dw = (moveEv.clientX - startX) / zoomLevel
-                          const dh = (moveEv.clientY - startY) / zoomLevel
+                          const curPt = clientToCanvas(moveEv.clientX, moveEv.clientY)
+                          const dw = curPt.x - startPt.x
+                          const dh = curPt.y - startPt.y
                           const updatedBoxes = currentPage.textBoxes.map((b) =>
                             b.id === box.id
                               ? { ...b, width: Math.max(100, Math.round(origW + dw)), height: Math.max(40, Math.round(origH + dh)) }

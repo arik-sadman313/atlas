@@ -442,17 +442,134 @@ export function detectGeometricShape(points: { x: number; y: number }[]): ShapeP
   return null
 }
 
-/**
- * Checks whether given pointer coordinates hit or pass near a stroke.
- */
+function distToSegmentSquared(
+  p: { x: number; y: number },
+  v: { x: number; y: number },
+  w: { x: number; y: number }
+): number {
+  const l2 = (w.x - v.x) ** 2 + (w.y - v.y) ** 2
+  if (l2 === 0) return (p.x - v.x) ** 2 + (p.y - v.y) ** 2
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2
+  t = Math.max(0, Math.min(1, t))
+  const projX = v.x + t * (w.x - v.x)
+  const projY = v.y + t * (w.y - v.y)
+  return (p.x - projX) ** 2 + (p.y - projY) ** 2
+}
+
+function isNearLine(point: { x: number; y: number }, first: { x: number; y: number }, last: { x: number; y: number }, r2: number): boolean {
+  return distToSegmentSquared(point, first, last) <= r2
+}
+
+function isNearArrow(point: { x: number; y: number }, first: { x: number; y: number }, last: { x: number; y: number }, size: number, r2: number): boolean {
+  if (distToSegmentSquared(point, first, last) <= r2) return true
+  const angle = Math.atan2(last.y - first.y, last.x - first.x)
+  const headLen = Math.max(14, (size || 2) * 2.5)
+  const a1 = angle - Math.PI / 6
+  const a2 = angle + Math.PI / 6
+  const h1 = { x: last.x - headLen * Math.cos(a1), y: last.y - headLen * Math.sin(a1) }
+  const h2 = { x: last.x - headLen * Math.cos(a2), y: last.y - headLen * Math.sin(a2) }
+  return distToSegmentSquared(point, h1, last) <= r2 || distToSegmentSquared(point, h2, last) <= r2
+}
+
+function isNearRect(point: { x: number; y: number }, minX: number, maxX: number, minY: number, maxY: number, fill: boolean, r2: number): boolean {
+  if (fill && point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) return true
+  const tl = { x: minX, y: minY }
+  const tr = { x: maxX, y: minY }
+  const br = { x: maxX, y: maxY }
+  const bl = { x: minX, y: maxY }
+  return (
+    distToSegmentSquared(point, tl, tr) <= r2 ||
+    distToSegmentSquared(point, tr, br) <= r2 ||
+    distToSegmentSquared(point, br, bl) <= r2 ||
+    distToSegmentSquared(point, bl, tl) <= r2
+  )
+}
+
+function isNearEllipse(point: { x: number; y: number }, minX: number, maxX: number, minY: number, maxY: number, fill: boolean, r: number): boolean {
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  const rx = Math.max(2, (maxX - minX) / 2)
+  const ry = Math.max(2, (maxY - minY) / 2)
+  const normDist = Math.sqrt(((point.x - cx) / rx) ** 2 + ((point.y - cy) / ry) ** 2)
+  if (fill && normDist <= 1.0) return true
+  return Math.abs(normDist - 1.0) * Math.min(rx, ry) <= r
+}
+
+function isNearTriangle(point: { x: number; y: number }, minX: number, maxX: number, minY: number, maxY: number, r2: number): boolean {
+  const top = { x: (minX + maxX) / 2, y: minY }
+  const right = { x: maxX, y: maxY }
+  const left = { x: minX, y: maxY }
+  return (
+    distToSegmentSquared(point, top, right) <= r2 ||
+    distToSegmentSquared(point, right, left) <= r2 ||
+    distToSegmentSquared(point, left, top) <= r2
+  )
+}
+
+function isPointNearPrimitive(
+  point: { x: number; y: number },
+  stroke: InkStroke,
+  r: number,
+  r2: number
+): boolean {
+  const pts = stroke.points
+  const first = pts[0]
+  const last = pts[pts.length - 1]
+  let minX = Math.min(first.x, last.x)
+  let maxX = Math.max(first.x, last.x)
+  let minY = Math.min(first.y, last.y)
+  let maxY = Math.max(first.y, last.y)
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+
+  const kind = stroke.shapeType
+  if (kind === "line") return isNearLine(point, first, last, r2)
+  if (kind === "arrow") return isNearArrow(point, first, last, stroke.size, r2)
+  if (kind === "rect") return isNearRect(point, minX, maxX, minY, maxY, Boolean(stroke.fill), r2)
+  if (kind === "ellipse") return isNearEllipse(point, minX, maxX, minY, maxY, Boolean(stroke.fill), r)
+  if (kind === "triangle") return isNearTriangle(point, minX, maxX, minY, maxY, r2)
+  return false
+}
+
+function isOutsideBounds(point: { x: number; y: number }, pts: { x: number; y: number }[], r: number): boolean {
+  let minX = pts[0].x, maxX = pts[0].x, minY = pts[0].y, maxY = pts[0].y
+  for (let i = 1; i < pts.length; i++) {
+    const px = pts[i].x
+    const py = pts[i].y
+    if (px < minX) minX = px
+    else if (px > maxX) maxX = px
+    if (py < minY) minY = py
+    else if (py > maxY) maxY = py
+  }
+  return point.x < minX - r || point.x > maxX + r || point.y < minY - r || point.y > maxY + r
+}
+
 export function isPointNearStroke(point: { x: number; y: number }, stroke: InkStroke, threshold = 12): boolean {
-  const r = stroke.size / 2 + threshold
+  if (!stroke.points || stroke.points.length === 0) return false
+  const r = (stroke.size || 2) / 2 + threshold
   const r2 = r * r
 
-  for (const p of stroke.points) {
-    const dx = p.x - point.x
-    const dy = p.y - point.y
-    if (dx * dx + dy * dy <= r2) {
+  const pts = stroke.points
+  if (pts.length === 1) {
+    const dx = pts[0].x - point.x
+    const dy = pts[0].y - point.y
+    return dx * dx + dy * dy <= r2
+  }
+
+  if (stroke.shapeType) {
+    return isPointNearPrimitive(point, stroke, r, r2)
+  }
+
+  if (isOutsideBounds(point, pts, r)) {
+    return false
+  }
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (distToSegmentSquared(point, pts[i], pts[i + 1]) <= r2) {
       return true
     }
   }
