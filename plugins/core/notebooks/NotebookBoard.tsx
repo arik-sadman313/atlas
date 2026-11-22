@@ -8,17 +8,10 @@ import { GoodNotesPaperSettings } from "./GoodNotesPaperSettings"
 import { GoodNotesDeskSheet } from "./GoodNotesDeskSheet"
 import { useNotebookDocument } from "./useNotebookDocument"
 import {
-  applyToolToScene,
-  applySceneZoom,
-  updateSelectedColor,
-  updateSelectedWidth,
-  triggerShortcutsHelp,
-  normalizeFreedrawElements,
+  applyToolToScene, applySceneZoom, updateSelectedColor, updateSelectedWidth, triggerShortcutsHelp
 } from "./notebookActions"
 import {
-  exportSceneToPng,
-  exportSceneToSvg,
-  copySceneToClipboard,
+  exportSceneToPng, exportSceneToSvg, copySceneToClipboard
 } from "./notebookExport"
 
 declare global {
@@ -41,19 +34,9 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   onChange,
 }) => {
   const {
-    doc,
-    setDoc,
-    docRef,
-    currentPageIndex,
-    currentPage,
-    switchPage,
-    addPage,
-    duplicatePage,
-    deletePage,
-    setPaperTemplate,
-    setPaperColor,
-    updatePageData,
-    saveCurrentScene,
+    doc, setDoc, docRef, currentPageIndex, currentPage, switchPage,
+    addPage, duplicatePage, deletePage, setPaperTemplate, setPaperColor,
+    updatePageData, saveCurrentScene,
   } = useNotebookDocument({ text, onChange })
 
   const [activeTool, setActiveTool] = useState<string>("pen")
@@ -66,10 +49,35 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
   const [snapToObjects, setSnapToObjects] = useState<boolean>(true)
   const [zoom, setZoom] = useState<number>(1)
   const [readOnly, setReadOnly] = useState<boolean>(!editable)
+  const [hasSelectedElements, setHasSelectedElements] = useState<boolean>(false)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const deskRef = useRef<HTMLDivElement | null>(null)
   const sheetRef = useRef<HTMLDivElement | null>(null)
+
+  const updatePanelPosition = useCallback(() => {
+    const root = containerRef.current
+    const sheet = sheetRef.current
+    if (!root || !sheet) return
+    const rootRect = root.getBoundingClientRect()
+    const sheetRect = sheet.getBoundingClientRect()
+    const idealLeft = sheetRect.left - rootRect.left - 215
+    const safeLeft = Math.max(16, idealLeft)
+    const top = Math.max(60, sheetRect.top - rootRect.top)
+    root.style.setProperty("--desk-panel-left", `${Math.round(rootRect.left + safeLeft)}px`)
+    root.style.setProperty("--desk-panel-top", `${Math.round(rootRect.top + top)}px`)
+  }, [])
+
+  useEffect(() => {
+    updatePanelPosition()
+    window.addEventListener("resize", updatePanelPosition)
+    const d = deskRef.current
+    d?.addEventListener("scroll", updatePanelPosition)
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition)
+      d?.removeEventListener("scroll", updatePanelPosition)
+    }
+  }, [updatePanelPosition, zoom])
 
   const handleSelectTool = useCallback((tool: string) => {
     setActiveTool(tool)
@@ -156,8 +164,16 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
     return () => { saveCurrentScene(excalidrawAPIRef.current) }
   }, [saveCurrentScene])
 
+  const isPen = activeTool === "pen" || activeTool === "highlighter" || activeTool === "eraser" || activeTool === "laser"
+  const hideProperties = isPen && !hasSelectedElements
+
   return (
-    <div ref={containerRef} className="goodnotes-canvas-root absolute inset-0 flex flex-col bg-slate-100 dark:bg-[#12151a] overflow-hidden select-none">
+    <div
+      ref={containerRef}
+      className={`goodnotes-canvas-root absolute inset-0 flex flex-col bg-slate-100 dark:bg-[#12151a] overflow-hidden select-none ${
+        hideProperties ? "hide-properties-panel" : ""
+      }`}
+    >
       <style>{`
         .goodnotes-canvas-root .App-toolbar-container { display: none !important; }
         .goodnotes-canvas-root .main-menu-trigger { display: none !important; }
@@ -167,9 +183,9 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         .goodnotes-canvas-root .excalidraw { background: transparent !important; overflow: visible !important; }
         .goodnotes-canvas-root .layer-ui__wrapper { overflow: visible !important; }
         .goodnotes-canvas-root .selected-shape-actions {
-          position: absolute !important;
-          left: -245px !important;
-          top: 10px !important;
+          position: fixed !important;
+          left: var(--desk-panel-left, 60px) !important;
+          top: var(--desk-panel-top, 125px) !important;
           z-index: 50 !important;
           width: 200px !important;
           pointer-events: auto !important;
@@ -177,10 +193,13 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         }
         .goodnotes-canvas-root .selected-shape-actions .App-menu__left {
           position: relative !important;
-          max-height: calc(100vh - 140px) !important;
+          max-height: calc(100vh - 145px) !important;
           overflow-y: auto !important;
           box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.25) !important;
           border-radius: 12px !important;
+        }
+        .goodnotes-canvas-root.hide-properties-panel .selected-shape-actions {
+          display: none !important;
         }
       `}</style>
 
@@ -222,10 +241,8 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
       <GoodNotesPaperSettings
         isOpen={isPaperSettingsOpen}
         onClose={() => setIsPaperSettingsOpen(false)}
-        template={currentPage.template}
-        paperColor={currentPage.paperColor || "white"}
-        onChangeTemplate={setPaperTemplate}
-        onChangeColor={setPaperColor}
+        template={currentPage.template} paperColor={currentPage.paperColor || "white"}
+        onChangeTemplate={setPaperTemplate} onChangeColor={setPaperColor}
       />
 
       <DocumentNavigationDrawer
@@ -239,11 +256,10 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
         onDeletePage={(idx) => deletePage(idx, excalidrawAPIRef.current)}
         onRotatePage={(idx) => {
           const p = docRef.current.pages[idx]
-          if (p) { p.rotation = ((p.rotation || 0) + 90) % 360; setDoc({ ...docRef.current }) }
+          if (p) setDoc({ ...docRef.current, pages: docRef.current.pages.map((pg, i) => i === idx ? { ...pg, rotation: ((pg.rotation || 0) + 90) % 360 } : pg) })
         }}
         onToggleBookmark={(idx) => {
-          const p = docRef.current.pages[idx]
-          if (p) { p.bookmarked = !p.bookmarked; setDoc({ ...docRef.current }) }
+          setDoc({ ...docRef.current, pages: docRef.current.pages.map((pg, i) => i === idx ? { ...pg, bookmarked: !pg.bookmarked } : pg) })
         }}
         readOnly={readOnly}
         onToggleReadOnly={() => setReadOnly(!readOnly)}
@@ -263,17 +279,14 @@ export const NotebookBoard: React.FC<NotebookBoardProps> = ({
           applyToolToScene(api, activeTool, color, strokeWidth)
         }}
         onElementsChange={(elements, appState, files) => {
-          const { updated, changed } = normalizeFreedrawElements(elements)
-          if (changed) {
-            excalidrawAPIRef.current?.updateScene({ elements: updated })
-          }
-          updatePageData(updated, files)
+          updatePageData(elements, files)
           const libOpen = appState.openSidebar?.name === "default"
           if (libOpen !== isLibraryOpen) setIsLibraryOpen(libOpen)
           const toolType = appState.activeTool?.type
-          if (toolType === "selection" && activeTool !== "lasso") {
-            setActiveTool("lasso")
-          }
+          if (toolType === "selection" && activeTool !== "lasso") setActiveTool("lasso")
+          const hasSelected = Object.values(appState.selectedElementIds || {}).some(Boolean)
+          if (hasSelected !== hasSelectedElements) setHasSelectedElements(hasSelected)
+          updatePanelPosition()
         }}
       />
     </div>
