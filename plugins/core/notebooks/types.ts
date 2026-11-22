@@ -224,6 +224,7 @@ export interface LassoFilter {
   images: boolean
   textBoxes: boolean
   stickyNotes: boolean
+  mode?: "freehand" | "rect"
 }
 
 export interface RulerState {

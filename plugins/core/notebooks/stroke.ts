@@ -510,11 +510,110 @@ export function eraseStrokeAtPoint(
 }
 
 /**
- * Tests if a stroke's centroid lies inside a lasso polygon or rectangle.
+ * Computes orientation of triplet (p, q, r).
+ * > 0: Counter-clockwise
+ * < 0: Clockwise
+ * = 0: Collinear
  */
-function isPointInPolygon(pt: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
+function ccw(A: { x: number; y: number }, B: { x: number; y: number }, C: { x: number; y: number }): number {
+  return (C.y - A.y) * (B.x - A.x) - (B.y - A.y) * (C.x - A.x)
+}
+
+function isPointOnSegment(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+  return (
+    p.x >= Math.min(a.x, b.x) - 1e-5 &&
+    p.x <= Math.max(a.x, b.x) + 1e-5 &&
+    p.y >= Math.min(a.y, b.y) - 1e-5 &&
+    p.y <= Math.max(a.y, b.y) + 1e-5
+  )
+}
+
+/**
+ * Robust 2D line segment intersection test.
+ */
+export function doSegmentsIntersect(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  p4: { x: number; y: number }
+): boolean {
+  // Quick bounding box rejection
+  if (
+    Math.max(p1.x, p2.x) < Math.min(p3.x, p4.x) ||
+    Math.min(p1.x, p2.x) > Math.max(p3.x, p4.x) ||
+    Math.max(p1.y, p2.y) < Math.min(p3.y, p4.y) ||
+    Math.min(p1.y, p2.y) > Math.max(p3.y, p4.y)
+  ) {
+    return false
+  }
+
+  const d1 = ccw(p3, p4, p1)
+  const d2 = ccw(p3, p4, p2)
+  const d3 = ccw(p1, p2, p3)
+  const d4 = ccw(p1, p2, p4)
+
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+    return true
+  }
+
+  if (Math.abs(d1) < 1e-6 && isPointOnSegment(p1, p3, p4)) return true
+  if (Math.abs(d2) < 1e-6 && isPointOnSegment(p2, p3, p4)) return true
+  if (Math.abs(d3) < 1e-6 && isPointOnSegment(p3, p1, p2)) return true
+  if (Math.abs(d4) < 1e-6 && isPointOnSegment(p4, p1, p2)) return true
+
+  return false
+}
+
+/**
+ * Checks if a segment intersects any edge of a polygon.
+ */
+export function doesSegmentIntersectPolygon(
+  s1: { x: number; y: number },
+  s2: { x: number; y: number },
+  polygon: { x: number; y: number }[]
+): boolean {
+  const n = polygon.length
+  for (let i = 0; i < n; i++) {
+    const p1 = polygon[i]
+    const p2 = polygon[(i + 1) % n]
+    if (doSegmentsIntersect(s1, s2, p1, p2)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Point in polygon test combining non-zero winding number and even-odd ray casting.
+ * Handles self-intersecting loops, open lasso chords, and complex concave curves.
+ */
+export function isPointInPolygon(pt: { x: number; y: number }, polygon: { x: number; y: number }[]): boolean {
+  const n = polygon.length
+  if (n < 3) return false
+
+  // 1. Non-zero winding number check
+  let wn = 0
+  for (let i = 0; i < n; i++) {
+    const p1 = polygon[i]
+    const p2 = polygon[(i + 1) % n]
+
+    if (p1.y <= pt.y) {
+      if (p2.y > pt.y) {
+        const cross = (p2.x - p1.x) * (pt.y - p1.y) - (pt.x - p1.x) * (p2.y - p1.y)
+        if (cross > 0) wn++
+      }
+    } else {
+      if (p2.y <= pt.y) {
+        const cross = (p2.x - p1.x) * (pt.y - p1.y) - (pt.x - p1.x) * (p2.y - p1.y)
+        if (cross < 0) wn--
+      }
+    }
+  }
+  if (wn !== 0) return true
+
+  // 2. Standard ray casting (even-odd) fallback
   let inside = false
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+  for (let i = 0, j = n - 1; i < n; j = i++) {
     const xi = polygon[i].x, yi = polygon[i].y
     const xj = polygon[j].x, yj = polygon[j].y
     const intersect = ((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)
@@ -524,44 +623,236 @@ function isPointInPolygon(pt: { x: number; y: number }, polygon: { x: number; y:
 }
 
 /**
- * Tests if a stroke's centroid or any of its points lies inside a lasso polygon.
+ * Tests if an ink stroke lies within or intersects a freehand lasso polygon.
  */
 export function isStrokeInLasso(lassoPoints: { x: number; y: number }[], stroke: InkStroke): boolean {
   if (lassoPoints.length < 3 || stroke.points.length === 0) return false
 
+  // 1. Quick bounding box rejection
+  let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity
   let sumX = 0, sumY = 0
   for (const p of stroke.points) {
+    if (p.x < sMinX) sMinX = p.x
+    if (p.y < sMinY) sMinY = p.y
+    if (p.x > sMaxX) sMaxX = p.x
+    if (p.y > sMaxY) sMaxY = p.y
     sumX += p.x
     sumY += p.y
   }
+
+  let lMinX = Infinity, lMinY = Infinity, lMaxX = -Infinity, lMaxY = -Infinity
+  for (const p of lassoPoints) {
+    if (p.x < lMinX) lMinX = p.x
+    if (p.y < lMinY) lMinY = p.y
+    if (p.x > lMaxX) lMaxX = p.x
+    if (p.y > lMaxY) lMaxY = p.y
+  }
+
+  if (sMaxX < lMinX || sMinX > lMaxX || sMaxY < lMinY || sMinY > lMaxY) {
+    return false
+  }
+
+  // 2. Centroid check
   const centroid = { x: sumX / stroke.points.length, y: sumY / stroke.points.length }
   if (isPointInPolygon(centroid, lassoPoints)) return true
 
+  // 3. Any discrete stroke vertex inside lasso
   for (const p of stroke.points) {
     if (isPointInPolygon(p, lassoPoints)) return true
+  }
+
+  // 4. Geometric primitives handling (rectangles, ellipses, triangles, lines, arrows)
+  if (stroke.shapeType) {
+    const pts = stroke.points
+    const first = pts[0]
+    const last = pts[pts.length - 1]
+    const shapeMinX = Math.min(first.x, last.x, sMinX)
+    const shapeMaxX = Math.max(first.x, last.x, sMaxX)
+    const shapeMinY = Math.min(first.y, last.y, sMinY)
+    const shapeMaxY = Math.max(first.y, last.y, sMaxY)
+
+    const shapeKeyPoints = [
+      first,
+      last,
+      { x: shapeMinX, y: shapeMinY },
+      { x: shapeMaxX, y: shapeMinY },
+      { x: shapeMaxX, y: shapeMaxY },
+      { x: shapeMinX, y: shapeMaxY },
+      { x: (shapeMinX + shapeMaxX) / 2, y: (shapeMinY + shapeMaxY) / 2 },
+    ]
+    for (const kp of shapeKeyPoints) {
+      if (isPointInPolygon(kp, lassoPoints)) return true
+    }
+
+    // Check if lasso was drawn inside the shape
+    for (const lp of lassoPoints) {
+      if (lp.x >= shapeMinX && lp.x <= shapeMaxX && lp.y >= shapeMinY && lp.y <= shapeMaxY) {
+        return true
+      }
+    }
+  }
+
+  // 5. Stroke segment to lasso polygon intersection test
+  const strokeLen = stroke.points.length
+  const step = strokeLen > 100 ? Math.ceil(strokeLen / 50) : 1
+  for (let i = 0; i < strokeLen - 1; i += step) {
+    const s1 = stroke.points[i]
+    const s2 = stroke.points[Math.min(strokeLen - 1, i + step)]
+    if (doesSegmentIntersectPolygon(s1, s2, lassoPoints)) {
+      return true
+    }
   }
 
   return false
 }
 
-export function isBoxInLasso(lassoPoints: { x: number; y: number }[], box: { x: number; y: number; width: number; height: number }): boolean {
+/**
+ * Tests if a text box, sticky note, or placed image lies within or intersects a freehand lasso polygon.
+ */
+export function isBoxInLasso(
+  lassoPoints: { x: number; y: number }[],
+  box: { x: number; y: number; width: number; height: number }
+): boolean {
   if (lassoPoints.length < 3) return false
-  const cx = box.x + box.width / 2
-  const cy = box.y + box.height / 2
 
+  const bMinX = box.x
+  const bMaxX = box.x + box.width
+  const bMinY = box.y
+  const bMaxY = box.y + box.height
+
+  // Quick bounding box rejection
+  let lMinX = Infinity, lMinY = Infinity, lMaxX = -Infinity, lMaxY = -Infinity
+  for (const p of lassoPoints) {
+    if (p.x < lMinX) lMinX = p.x
+    if (p.y < lMinY) lMinY = p.y
+    if (p.x > lMaxX) lMaxX = p.x
+    if (p.y > lMaxY) lMaxY = p.y
+  }
+  if (bMaxX < lMinX || bMinX > lMaxX || bMaxY < lMinY || bMinY > lMaxY) {
+    return false
+  }
+
+  // 1. Box center inside lasso?
+  const cx = bMinX + box.width / 2
+  const cy = bMinY + box.height / 2
   if (isPointInPolygon({ x: cx, y: cy }, lassoPoints)) return true
 
+  // 2. Any box corner inside lasso?
   const corners = [
-    { x: box.x, y: box.y },
-    { x: box.x + box.width, y: box.y },
-    { x: box.x + box.width, y: box.y + box.height },
-    { x: box.x, y: box.y + box.height },
+    { x: bMinX, y: bMinY },
+    { x: bMaxX, y: bMinY },
+    { x: bMaxX, y: bMaxY },
+    { x: bMinX, y: bMaxY },
   ]
   for (const c of corners) {
     if (isPointInPolygon(c, lassoPoints)) return true
   }
 
+  // 3. Any lasso point inside box? (Handles lasso drawn inside a text box/image)
+  for (const lp of lassoPoints) {
+    if (lp.x >= bMinX && lp.x <= bMaxX && lp.y >= bMinY && lp.y <= bMaxY) {
+      return true
+    }
+  }
+
+  // 4. Any lasso edge intersects any box edge?
+  const boxEdges: [{ x: number; y: number }, { x: number; y: number }][] = [
+    [corners[0], corners[1]],
+    [corners[1], corners[2]],
+    [corners[2], corners[3]],
+    [corners[3], corners[0]],
+  ]
+  const n = lassoPoints.length
+  for (let i = 0; i < n; i++) {
+    const l1 = lassoPoints[i]
+    const l2 = lassoPoints[(i + 1) % n]
+    for (const [b1, b2] of boxEdges) {
+      if (doSegmentsIntersect(l1, l2, b1, b2)) {
+        return true
+      }
+    }
+  }
+
   return false
+}
+
+/**
+ * Tests if an ink stroke lies within or intersects a rectangular marquee selection.
+ */
+export function isStrokeInRect(
+  rect: { minX: number; minY: number; maxX: number; maxY: number },
+  stroke: InkStroke
+): boolean {
+  if (stroke.points.length === 0) return false
+
+  // 1. Check if any stroke point is inside the rect
+  for (const p of stroke.points) {
+    if (p.x >= rect.minX && p.x <= rect.maxX && p.y >= rect.minY && p.y <= rect.maxY) {
+      return true
+    }
+  }
+
+  // 2. Check stroke bounding box
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of stroke.points) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  if (minX >= rect.minX && maxX <= rect.maxX && minY >= rect.minY && maxY <= rect.maxY) {
+    return true
+  }
+
+  // 3. Geometric shape overlap
+  if (stroke.shapeType) {
+    if (!(maxX < rect.minX || minX > rect.maxX || maxY < rect.minY || minY > rect.maxY)) {
+      return true
+    }
+  }
+
+  // 4. Segment to rect edge intersection
+  const rCorners = [
+    { x: rect.minX, y: rect.minY },
+    { x: rect.maxX, y: rect.minY },
+    { x: rect.maxX, y: rect.maxY },
+    { x: rect.minX, y: rect.maxY },
+  ]
+  const rectEdges: [{ x: number; y: number }, { x: number; y: number }][] = [
+    [rCorners[0], rCorners[1]],
+    [rCorners[1], rCorners[2]],
+    [rCorners[2], rCorners[3]],
+    [rCorners[3], rCorners[0]],
+  ]
+
+  const strokeLen = stroke.points.length
+  const step = strokeLen > 100 ? Math.ceil(strokeLen / 50) : 1
+  for (let i = 0; i < strokeLen - 1; i += step) {
+    const s1 = stroke.points[i]
+    const s2 = stroke.points[Math.min(strokeLen - 1, i + step)]
+    for (const [e1, e2] of rectEdges) {
+      if (doSegmentsIntersect(s1, s2, e1, e2)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
+/**
+ * Tests if a box/image/sticky note lies within or intersects a rectangular marquee selection.
+ */
+export function isBoxInRect(
+  rect: { minX: number; minY: number; maxX: number; maxY: number },
+  box: { x: number; y: number; width: number; height: number }
+): boolean {
+  return !(
+    box.x > rect.maxX ||
+    box.x + box.width < rect.minX ||
+    box.y > rect.maxY ||
+    box.y + box.height < rect.minY
+  )
 }
 
 /**

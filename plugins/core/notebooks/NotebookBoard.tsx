@@ -71,6 +71,8 @@ import {
   isPointNearTape,
   isStrokeInLasso,
   isBoxInLasso,
+  isStrokeInRect,
+  isBoxInRect,
   translateStroke,
   scaleStroke,
   rotateStroke,
@@ -269,6 +271,7 @@ export default function NotebookBoard({
   const strokeStartTimeRef = useRef(0)
 
   // Lasso Selection & Granular Filters
+  const [lassoMode, setLassoMode] = useState<"freehand" | "rect">("freehand")
   const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([])
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(new Set())
   const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(new Set())
@@ -277,6 +280,10 @@ export default function NotebookBoard({
   const [isDraggingSelection, setIsDraggingSelection] = useState(false)
   const dragStartPointRef = useRef<{ x: number; y: number } | null>(null)
   const lassoPointsRef = useRef<{ x: number; y: number }[]>([])
+  const lassoRafIdRef = useRef<number | null>(null)
+  const dragRafIdRef = useRef<number | null>(null)
+  const deleteSelectedRef = useRef<() => void>(() => {})
+  const duplicateSelectedRef = useRef<() => void>(() => {})
   const [lassoFilter, setLassoFilter] = useState<LassoFilter>({
     handwriting: true,
     images: true,
@@ -396,6 +403,11 @@ export default function NotebookBoard({
         setSelectedStrokeIds(new Set())
         setSelectedBoxIds(new Set())
         setSelectedImageIds(new Set())
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        deleteSelectedRef.current?.()
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+        duplicateSelectedRef.current?.()
+        e.preventDefault()
       }
     }
 
@@ -846,33 +858,55 @@ export default function NotebookBoard({
         const totalDx = pt.x - startPt.x
         const totalDy = pt.y - startPt.y
 
-        const updatedStrokes = currentPage.strokes.map((s) => {
-          const orig = origStrokes.get(s.id)
-          return orig ? translateStroke(orig, totalDx, totalDy) : s
-        })
-        const updatedBoxes = (currentPage.textBoxes || []).map((b) => {
-          const orig = origBoxes.get(b.id)
-          return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : b
-        })
-        const updatedImages = (currentPage.images || []).map((img) => {
-          const orig = origImages.get(img.id)
-          return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : img
-        })
+        if (!dragRafIdRef.current) {
+          dragRafIdRef.current = requestAnimationFrame(() => {
+            dragRafIdRef.current = null
+            const curPage = docRef.current.pages[currentPageIndex] || currentPage
+            const updatedStrokes = curPage.strokes.map((s) => {
+              const orig = origStrokes.get(s.id)
+              return orig ? translateStroke(orig, totalDx, totalDy) : s
+            })
+            const updatedBoxes = (curPage.textBoxes || []).map((b) => {
+              const orig = origBoxes.get(b.id)
+              return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : b
+            })
+            const updatedImages = (curPage.images || []).map((img) => {
+              const orig = origImages.get(img.id)
+              return orig ? { ...orig, x: orig.x + totalDx, y: orig.y + totalDy } : img
+            })
 
-        const updatedPages = [...docRef.current.pages]
-        updatedPages[currentPageIndex] = {
-          ...currentPage,
-          strokes: updatedStrokes,
-          textBoxes: updatedBoxes,
-          images: updatedImages,
+            const updatedPages = [...docRef.current.pages]
+            updatedPages[currentPageIndex] = {
+              ...curPage,
+              strokes: updatedStrokes,
+              textBoxes: updatedBoxes,
+              images: updatedImages,
+            }
+            docRef.current = { ...docRef.current, pages: updatedPages }
+            setDoc(docRef.current)
+          })
         }
-        docRef.current = { ...docRef.current, pages: updatedPages }
-        setDoc(docRef.current)
         return
       }
 
-      lassoPointsRef.current.push({ x: pt.x, y: pt.y })
-      setLassoPoints((prev) => [...prev, { x: pt.x, y: pt.y }])
+      if (lassoMode === "rect") {
+        const startPt = lassoPointsRef.current[0] || pt
+        lassoPointsRef.current = [startPt, { x: pt.x, y: pt.y }]
+        if (!lassoRafIdRef.current) {
+          lassoRafIdRef.current = requestAnimationFrame(() => {
+            lassoRafIdRef.current = null
+            setLassoPoints([startPt, { x: pt.x, y: pt.y }])
+          })
+        }
+      } else {
+        lassoPointsRef.current.push({ x: pt.x, y: pt.y })
+        if (!lassoRafIdRef.current) {
+          lassoRafIdRef.current = requestAnimationFrame(() => {
+            lassoRafIdRef.current = null
+            setLassoPoints([...lassoPointsRef.current])
+          })
+        }
+      }
       return
     }
 
@@ -1029,6 +1063,15 @@ export default function NotebookBoard({
 
     // Lasso completion
     if (activeTool === "lasso") {
+      if (dragRafIdRef.current) {
+        cancelAnimationFrame(dragRafIdRef.current)
+        dragRafIdRef.current = null
+      }
+      if (lassoRafIdRef.current) {
+        cancelAnimationFrame(lassoRafIdRef.current)
+        lassoRafIdRef.current = null
+      }
+
       if (isDraggingSelection) {
         setIsDraggingSelection(false)
         if (initialSelectionSnapshotRef.current) {
@@ -1038,36 +1081,70 @@ export default function NotebookBoard({
         return
       }
 
-      const pts = lassoPointsRef.current.length > 2 ? lassoPointsRef.current : lassoPoints
-      if (pts.length > 2) {
-        const selectedStrokes = new Set<string>()
-        const selectedBoxes = new Set<string>()
-        const selectedImages = new Set<string>()
+      const curPage = docRef.current.pages[currentPageIndex] || currentPage
+      const selectedStrokes = new Set<string>()
+      const selectedBoxes = new Set<string>()
+      const selectedImages = new Set<string>()
 
-        if (lassoFilter.handwriting) {
-          currentPage.strokes.forEach((s) => {
-            if (isStrokeInLasso(pts, s)) selectedStrokes.add(s.id)
-          })
-        }
-        if (lassoFilter.textBoxes || lassoFilter.stickyNotes) {
-          (currentPage.textBoxes || []).forEach((b) => {
-            if (b.isStickyNote && !lassoFilter.stickyNotes) return
-            if (!b.isStickyNote && !lassoFilter.textBoxes) return
-            if (isBoxInLasso(pts, b)) selectedBoxes.add(b.id)
-          })
-        }
-        if (lassoFilter.images && currentPage.images) {
-          currentPage.images.forEach((img) => {
-            if (isBoxInLasso(pts, { x: img.x, y: img.y, width: img.width, height: img.height })) {
-              selectedImages.add(img.id)
+      if (lassoMode === "rect") {
+        const p0 = lassoPointsRef.current[0]
+        const p1 = lassoPointsRef.current[lassoPointsRef.current.length - 1]
+        if (p0 && p1) {
+          const minX = Math.min(p0.x, p1.x)
+          const maxX = Math.max(p0.x, p1.x)
+          const minY = Math.min(p0.y, p1.y)
+          const maxY = Math.max(p0.y, p1.y)
+          if (maxX - minX > 4 || maxY - minY > 4) {
+            const rect = { minX, minY, maxX, maxY }
+            if (lassoFilter.handwriting) {
+              curPage.strokes.forEach((s) => {
+                if (isStrokeInRect(rect, s)) selectedStrokes.add(s.id)
+              })
             }
-          })
+            if (lassoFilter.textBoxes || lassoFilter.stickyNotes) {
+              (curPage.textBoxes || []).forEach((b) => {
+                if (b.isStickyNote && !lassoFilter.stickyNotes) return
+                if (!b.isStickyNote && !lassoFilter.textBoxes) return
+                if (isBoxInRect(rect, b)) selectedBoxes.add(b.id)
+              })
+            }
+            if (lassoFilter.images && curPage.images) {
+              curPage.images.forEach((img) => {
+                if (isBoxInRect(rect, { x: img.x, y: img.y, width: img.width, height: img.height })) {
+                  selectedImages.add(img.id)
+                }
+              })
+            }
+          }
         }
-
-        setSelectedStrokeIds(selectedStrokes)
-        setSelectedBoxIds(selectedBoxes)
-        setSelectedImageIds(selectedImages)
+      } else {
+        const pts = lassoPointsRef.current.length > 2 ? lassoPointsRef.current : lassoPoints
+        if (pts.length > 2) {
+          if (lassoFilter.handwriting) {
+            curPage.strokes.forEach((s) => {
+              if (isStrokeInLasso(pts, s)) selectedStrokes.add(s.id)
+            })
+          }
+          if (lassoFilter.textBoxes || lassoFilter.stickyNotes) {
+            (curPage.textBoxes || []).forEach((b) => {
+              if (b.isStickyNote && !lassoFilter.stickyNotes) return
+              if (!b.isStickyNote && !lassoFilter.textBoxes) return
+              if (isBoxInLasso(pts, b)) selectedBoxes.add(b.id)
+            })
+          }
+          if (lassoFilter.images && curPage.images) {
+            curPage.images.forEach((img) => {
+              if (isBoxInLasso(pts, { x: img.x, y: img.y, width: img.width, height: img.height })) {
+                selectedImages.add(img.id)
+              }
+            })
+          }
+        }
       }
+
+      setSelectedStrokeIds(selectedStrokes)
+      setSelectedBoxIds(selectedBoxes)
+      setSelectedImageIds(selectedImages)
       lassoPointsRef.current = []
       setLassoPoints([])
       return
@@ -1106,16 +1183,18 @@ export default function NotebookBoard({
 
   // Duplicate Lasso Selection
   const duplicateSelected = () => {
+    if (selectedStrokeIds.size === 0 && selectedBoxIds.size === 0 && selectedImageIds.size === 0) return
     pushHistory()
-    const duplicatedStrokes = currentPage.strokes
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const duplicatedStrokes = curPage.strokes
       .filter((s) => selectedStrokeIds.has(s.id))
       .map((s) => translateStroke({ ...s, id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` }, 25, 25))
 
-    const duplicatedBoxes = (currentPage.textBoxes || [])
+    const duplicatedBoxes = (curPage.textBoxes || [])
       .filter((b) => selectedBoxIds.has(b.id))
       .map((b) => ({ ...b, id: `box_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, x: b.x + 25, y: b.y + 25 }))
 
-    const duplicatedImages = (currentPage.images || [])
+    const duplicatedImages = (curPage.images || [])
       .filter((img) => selectedImageIds.has(img.id))
       .map((img) => ({
         ...img,
@@ -1124,14 +1203,14 @@ export default function NotebookBoard({
         y: img.y + 25,
       }))
 
-    const updatedPages = [...doc.pages]
+    const updatedPages = [...docRef.current.pages]
     updatedPages[currentPageIndex] = {
-      ...currentPage,
-      strokes: [...currentPage.strokes, ...duplicatedStrokes],
-      textBoxes: [...(currentPage.textBoxes || []), ...duplicatedBoxes],
-      images: [...(currentPage.images || []), ...duplicatedImages],
+      ...curPage,
+      strokes: [...curPage.strokes, ...duplicatedStrokes],
+      textBoxes: [...(curPage.textBoxes || []), ...duplicatedBoxes],
+      images: [...(curPage.images || []), ...duplicatedImages],
     }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+    commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
 
     setSelectedStrokeIds(new Set(duplicatedStrokes.map((s) => s.id)))
     setSelectedBoxIds(new Set(duplicatedBoxes.map((b) => b.id)))
@@ -1140,40 +1219,47 @@ export default function NotebookBoard({
 
   // Recolor Lasso Selection
   const recolorSelected = (color: string) => {
+    if (selectedStrokeIds.size === 0 && selectedBoxIds.size === 0) return
     pushHistory()
-    const updatedStrokes = currentPage.strokes.map((s) =>
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const updatedStrokes = curPage.strokes.map((s) =>
       selectedStrokeIds.has(s.id) ? { ...s, color } : s
     )
-    const updatedBoxes = (currentPage.textBoxes || []).map((b) =>
+    const updatedBoxes = (curPage.textBoxes || []).map((b) =>
       selectedBoxIds.has(b.id) ? { ...b, color } : b
     )
-    const updatedPages = [...doc.pages]
+    const updatedPages = [...docRef.current.pages]
     updatedPages[currentPageIndex] = {
-      ...currentPage,
+      ...curPage,
       strokes: updatedStrokes,
       textBoxes: updatedBoxes,
     }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+    commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
   }
 
   // Delete Lasso Selection
   const deleteSelected = () => {
+    if (selectedStrokeIds.size === 0 && selectedBoxIds.size === 0 && selectedImageIds.size === 0) return
     pushHistory()
-    const updatedStrokes = currentPage.strokes.filter((s) => !selectedStrokeIds.has(s.id))
-    const updatedBoxes = (currentPage.textBoxes || []).filter((b) => !selectedBoxIds.has(b.id))
-    const updatedImages = (currentPage.images || []).filter((img) => !selectedImageIds.has(img.id))
-    const updatedPages = [...doc.pages]
+    const curPage = docRef.current.pages[currentPageIndex] || currentPage
+    const updatedStrokes = curPage.strokes.filter((s) => !selectedStrokeIds.has(s.id))
+    const updatedBoxes = (curPage.textBoxes || []).filter((b) => !selectedBoxIds.has(b.id))
+    const updatedImages = (curPage.images || []).filter((img) => !selectedImageIds.has(img.id))
+    const updatedPages = [...docRef.current.pages]
     updatedPages[currentPageIndex] = {
-      ...currentPage,
+      ...curPage,
       strokes: updatedStrokes,
       textBoxes: updatedBoxes,
       images: updatedImages,
     }
-    commitDoc({ ...doc, pages: updatedPages, updatedAt: Date.now() })
+    commitDoc({ ...docRef.current, pages: updatedPages, updatedAt: Date.now() })
     setSelectedStrokeIds(new Set())
     setSelectedBoxIds(new Set())
     setSelectedImageIds(new Set())
   }
+
+  deleteSelectedRef.current = deleteSelected
+  duplicateSelectedRef.current = duplicateSelected
 
   // Delete specific placed image
   const deleteImage = (imgId: string) => {
@@ -1416,7 +1502,12 @@ export default function NotebookBoard({
   // Convert Selected Handwriting to Text
   const convertSelectedToText = () => {
     const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
-    const text = convertStrokesToText(selectedStrokes)
+    const selectedBoxes = (currentPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
+    let text = convertStrokesToText(selectedStrokes)
+    if (selectedBoxes.length > 0) {
+      const boxText = selectedBoxes.map((b) => b.text).join("\n\n")
+      text = text ? `${text}\n\n${boxText}` : boxText
+    }
     navigator.clipboard?.writeText(text)
     alert(`Converted Text copied to clipboard:\n\n${text}`)
   }
@@ -1432,11 +1523,13 @@ export default function NotebookBoard({
   // Save Selected Handwriting as Reusable Element
   const saveSelectedAsElement = () => {
     const selectedStrokes = currentPage.strokes.filter((s) => selectedStrokeIds.has(s.id))
+    const selectedBoxes = (currentPage.textBoxes || []).filter((b) => selectedBoxIds.has(b.id))
     const newElem: NotebookElement = {
       id: `elem_${Date.now()}`,
       name: `Sticker ${customElements.length + 1}`,
       collectionId: "custom",
       strokes: selectedStrokes,
+      textBoxes: selectedBoxes,
     }
     setCustomElements((prev) => [...prev, newElem])
     setIsElementsDrawerOpen(true)
@@ -2422,7 +2515,38 @@ export default function NotebookBoard({
         )}
 
         {activeTool === "lasso" && (
-          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+          <div className="absolute top-[52px] left-1/2 -translate-x-1/2 z-40 bg-white/95 dark:bg-[#1a1d24]/95 backdrop-blur-md px-3 py-1 rounded-full shadow-xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs animate-in fade-in slide-in-from-top-1 select-none">
+            {/* Mode Selector */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-full p-0.5 mr-1">
+              <button
+                data-testid="lasso-mode-freehand"
+                onClick={() => setLassoMode("freehand")}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
+                  lassoMode === "freehand"
+                    ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                }`}
+                title="Freehand Lasso Selection"
+              >
+                <Lasso className="w-3.5 h-3.5" />
+                <span>Freehand</span>
+              </button>
+              <button
+                data-testid="lasso-mode-rect"
+                onClick={() => setLassoMode("rect")}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
+                  lassoMode === "rect"
+                    ? "bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                }`}
+                title="Rectangular Marquee Selection"
+              >
+                <Square className="w-3.5 h-3.5" />
+                <span>Rectangle</span>
+              </button>
+            </div>
+
+            <div className="w-px h-3.5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Filter</span>
             {(
               [
@@ -2660,10 +2784,14 @@ export default function NotebookBoard({
             {(selectedStrokeIds.size > 0 || selectedBoxIds.size > 0 || selectedImageIds.size > 0) &&
               computedSelectionBounds && (
                 <div
-                  className="absolute z-40 bg-white dark:bg-[#1a1d24] px-3 py-1.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 animate-in fade-in select-none"
+                  className="absolute z-50 bg-white dark:bg-[#1a1d24] px-3 py-1.5 rounded-full shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2 animate-in fade-in select-none"
                   style={{
-                    left: `${Math.max(10, Math.min(currentPage.width * zoomLevel - 420, computedSelectionBounds.minX * zoomLevel))}px`,
-                    top: `${Math.max(10, computedSelectionBounds.minY * zoomLevel - 48)}px`,
+                    left: `${Math.max(10, Math.min(currentPage.width * zoomLevel - 440, computedSelectionBounds.minX * zoomLevel))}px`,
+                    top: `${
+                      computedSelectionBounds.minY * zoomLevel - 52 < 70
+                        ? Math.min(currentPage.height * zoomLevel - 50, computedSelectionBounds.maxY * zoomLevel + 16)
+                        : computedSelectionBounds.minY * zoomLevel - 52
+                    }px`,
                   }}
                 >
                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -2975,13 +3103,26 @@ export default function NotebookBoard({
 
               {/* Lasso Selection Loop Path */}
               {activeTool === "lasso" && lassoPoints.length > 1 && (
-                <path
-                  d={`M${lassoPoints.map((p) => `${p.x},${p.y}`).join(" L")}`}
-                  fill="rgba(59, 130, 246, 0.1)"
-                  stroke="#3b82f6"
-                  strokeWidth={1.5}
-                  strokeDasharray="4,4"
-                />
+                lassoMode === "rect" ? (
+                  <rect
+                    x={Math.min(lassoPoints[0].x, lassoPoints[lassoPoints.length - 1].x)}
+                    y={Math.min(lassoPoints[0].y, lassoPoints[lassoPoints.length - 1].y)}
+                    width={Math.abs(lassoPoints[lassoPoints.length - 1].x - lassoPoints[0].x)}
+                    height={Math.abs(lassoPoints[lassoPoints.length - 1].y - lassoPoints[0].y)}
+                    fill="rgba(147, 51, 234, 0.1)"
+                    stroke="#9333ea"
+                    strokeWidth={1.5}
+                    strokeDasharray="4,4"
+                  />
+                ) : (
+                  <path
+                    d={`M${lassoPoints.map((p) => `${p.x},${p.y}`).join(" L")}${lassoPoints.length > 2 ? " Z" : ""}`}
+                    fill="rgba(147, 51, 234, 0.1)"
+                    stroke="#9333ea"
+                    strokeWidth={1.5}
+                    strokeDasharray="4,4"
+                  />
+                )
               )}
 
               {/* Selected Group Bounding Box Indicator with Corner Resize Handles */}
